@@ -1,5 +1,6 @@
 using FuaPay.Web.Modules.Access.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Audit.Infrastructure.Persistence;
+using FuaPay.Web.Modules.Credits.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Notifications.Infrastructure.Persistence;
 using FuaPay.Web.Modules.ServiceUnits.Infrastructure.Persistence;
 
@@ -26,6 +27,16 @@ public sealed class FuaPayDbContext : DbContext
 
     internal DbSet<RoleAssignmentEntity> AccessRoleAssignments =>
         Set<RoleAssignmentEntity>();
+
+    internal DbSet<CreditAccountEntity> CreditAccounts =>
+        Set<CreditAccountEntity>();
+
+    internal DbSet<CreditMovementEntity> CreditMovements =>
+        Set<CreditMovementEntity>();
+
+    internal DbSet<CreditAdjustmentCommandEntity>
+        CreditAdjustmentCommands =>
+            Set<CreditAdjustmentCommandEntity>();
 
     internal DbSet<NotificationOutboxEntity> NotificationOutbox =>
         Set<NotificationOutboxEntity>();
