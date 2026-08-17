@@ -1,4 +1,6 @@
 using FuaPay.Web.Modules.Access.Infrastructure.Persistence;
+using FuaPay.Web.Modules.Audit.Infrastructure.Persistence;
+using FuaPay.Web.Modules.Notifications.Infrastructure.Persistence;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -12,6 +14,9 @@ public sealed class FuaPayDbContext : DbContext
     {
     }
 
+    internal DbSet<AuditEventEntity> AuditEvents =>
+        Set<AuditEventEntity>();
+
     internal DbSet<AccessUserEntity> AccessUsers =>
         Set<AccessUserEntity>();
 
@@ -20,6 +25,9 @@ public sealed class FuaPayDbContext : DbContext
 
     internal DbSet<RoleAssignmentEntity> AccessRoleAssignments =>
         Set<RoleAssignmentEntity>();
+
+    internal DbSet<NotificationOutboxEntity> NotificationOutbox =>
+        Set<NotificationOutboxEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
