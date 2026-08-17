@@ -1,6 +1,7 @@
 using FuaPay.Web.Modules.Access.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Audit.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Credits.Infrastructure.Persistence;
+using FuaPay.Web.Modules.Jobs.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Notifications.Infrastructure.Persistence;
 using FuaPay.Web.Modules.ServiceUnits.Infrastructure.Persistence;
 
@@ -37,6 +38,12 @@ public sealed class FuaPayDbContext : DbContext
     internal DbSet<CreditAdjustmentCommandEntity>
         CreditAdjustmentCommands =>
             Set<CreditAdjustmentCommandEntity>();
+
+    internal DbSet<JobEntity> Jobs =>
+        Set<JobEntity>();
+
+    internal DbSet<JobNumberSequenceEntity> JobNumberSequences =>
+        Set<JobNumberSequenceEntity>();
 
     internal DbSet<NotificationOutboxEntity> NotificationOutbox =>
         Set<NotificationOutboxEntity>();
