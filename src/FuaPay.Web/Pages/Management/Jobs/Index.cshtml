@@ -1,0 +1,146 @@
+@page
+@model FuaPay.Web.Pages.Management.Jobs.IndexModel
+@using FuaPay.Web.Modules.Jobs.Domain
+@{
+    ViewData["Title"] = "Zakázky";
+    var previousOffset = Math.Max(0, Model.Jobs.Offset - Model.Jobs.Limit);
+    var nextOffset = Model.Jobs.Offset + Model.Jobs.Limit;
+}
+
+<section class="functional-page">
+    <header class="functional-header split-header">
+        <div>
+            <p class="panel-kicker">@(Model.Context.IsAdministrator ? "Administrace" : "Pracoviště")</p>
+            <h1>Zakázky</h1>
+            <p>@(Model.Context.IsAdministrator ? "Přehled všech fakultních zakázek." : "Společná fronta zakázek přidělených pracovišť.")</p>
+        </div>
+        @if (Model.Context.AvailableServiceUnits.Count > 0)
+        {
+            <a asp-page="./Create"
+               asp-route-view="@Model.Context.ViewKey"
+               class="primary-action-button">
+                Nová zakázka
+            </a>
+        }
+    </header>
+
+    @if (TempData["StatusMessage"] is string message)
+    {
+        <div class="message-box is-success">@message</div>
+    }
+
+    @if (!Model.Context.IsAdministrator && Model.Context.AvailableServiceUnits.Count == 0)
+    {
+        <div class="message-box is-warning">
+            Role zadavatele je aktivní, ale účet nemá přiřazené žádné pracoviště. Proto nejsou dostupné žádné zakázky ani vytvoření nové zakázky.
+        </div>
+    }
+
+    @if (Model.Context.AvailableServiceUnits.Count > 1)
+    {
+        <nav class="scope-switcher" aria-label="Pracoviště">
+            <a asp-page="./Index" asp-route-view="@Model.Context.ViewKey" class="@(Model.Context.SelectedServiceUnitId is null ? "is-active" : null)">Všechna pracoviště</a>
+            @foreach (var serviceUnit in Model.Context.AvailableServiceUnits)
+            {
+                <a asp-page="./Index" asp-route-view="@Model.Context.ViewKey" asp-route-unit="@serviceUnit.Id" class="@(Model.Context.SelectedServiceUnitId == serviceUnit.Id ? "is-active" : null)">
+                    <span>@serviceUnit.Code</span> @serviceUnit.DisplayName
+                </a>
+            }
+        </nav>
+    }
+    else if (Model.Context.AvailableServiceUnits.Count == 1)
+    {
+        var unit = Model.Context.AvailableServiceUnits[0];
+        <p class="scope-label"><span class="unit-badge">@unit.Code</span> Pracoviště: @unit.DisplayName</p>
+    }
+
+    <form method="get" class="filter-grid">
+        <input type="hidden" name="view" value="@Model.Context.ViewKey" />
+        @if (Model.Context.SelectedServiceUnitId.HasValue)
+        {
+            <input type="hidden" name="unit" value="@Model.Context.SelectedServiceUnitId" />
+        }
+        <label>
+            <span>Číslo nebo název</span>
+            <input type="search" name="search" value="@Model.Search" />
+        </label>
+        <label>
+            <span>Výrobní stav</span>
+            <select name="productionStatus">
+                <option value="">Všechny</option>
+                @foreach (var status in new[] { JobProductionStatus.Draft, JobProductionStatus.Published, JobProductionStatus.InProduction, JobProductionStatus.ReadyForPickup, JobProductionStatus.Completed, JobProductionStatus.Cancelled })
+                {
+                    <option value="@status" selected="@(Model.ProductionStatus == status ? "selected" : null)">@DashboardDisplay.FormatJobProductionStatus(status)</option>
+                }
+            </select>
+        </label>
+        <label>
+            <span>Úhrada</span>
+            <select name="paymentStatus">
+                <option value="">Všechny</option>
+                <option value="@JobPaymentStatus.Unpaid" selected="@(Model.PaymentStatus == JobPaymentStatus.Unpaid ? "selected" : null)">Neuhrazená</option>
+                <option value="@JobPaymentStatus.Paid" selected="@(Model.PaymentStatus == JobPaymentStatus.Paid ? "selected" : null)">Uhrazená</option>
+            </select>
+        </label>
+        <label>
+            <span>Zákazník</span>
+            <select name="customerUserId">
+                <option value="">Všichni</option>
+                @foreach (var customer in Model.Customers)
+                {
+                    <option value="@customer.Id" selected="@(Model.CustomerUserId == customer.Id ? "selected" : null)">@customer.DisplayName · @customer.Email</option>
+                }
+            </select>
+        </label>
+        <div class="filter-actions full-row">
+            <button type="submit" class="secondary-button">Použít filtry</button>
+            <a asp-page="./Index" asp-route-view="@Model.Context.ViewKey" asp-route-unit="@Model.Context.SelectedServiceUnitId" class="text-link">Vyčistit</a>
+        </div>
+    </form>
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Seznam zakázek</h2><span>@Model.Jobs.TotalCount celkem</span></div>
+        @if (Model.Rows.Count == 0)
+        {
+            <div class="empty-state"><p>Žádná zakázka neodpovídá zvolenému rozsahu.</p></div>
+        }
+        else
+        {
+            <div class="responsive-table-wrap">
+                <table class="data-table jobs-table">
+                    <thead><tr><th>Zakázka</th><th>Zákazník</th><th>Stav</th><th>Úhrada</th><th>Cena</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var row in Model.Rows)
+                    {
+                        <tr>
+                            <td>
+                                <div class="job-title-line"><span class="unit-badge">@row.ServiceUnitCode</span><strong>@row.Job.Title</strong></div>
+                                <small>@row.Job.Number · @DashboardDisplay.FormatDate(row.Job.CreatedAt)</small>
+                            </td>
+                            <td><strong>@(row.Customer?.DisplayName ?? "Neznámý uživatel")</strong><small>@row.Customer?.Email</small></td>
+                            <td><span class="status-badge @DashboardDisplay.JobStatusCssClass(row.Job.ProductionStatus, row.Job.PaymentStatus)">@DashboardDisplay.FormatJobStatus(row.Job.ProductionStatus, row.Job.PaymentStatus)</span></td>
+                            <td>@DashboardDisplay.FormatJobPaymentStatus(row.Job.ProductionStatus, row.Job.PaymentStatus)</td>
+                            <td><strong>@DashboardDisplay.FormatMoney(row.Job.PriceMinorUnits)</strong></td>
+                            <td class="table-action"><a asp-page="./Details" asp-route-id="@row.Job.Id" asp-route-view="@Model.Context.ViewKey" class="text-link">Detail</a></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (Model.Jobs.Offset > 0 || Model.Jobs.HasMore)
+        {
+            <nav class="pagination" aria-label="Stránkování zakázek">
+                @if (Model.Jobs.Offset > 0)
+                {
+                    <a asp-page="./Index" asp-route-view="@Model.Context.ViewKey" asp-route-unit="@Model.Context.SelectedServiceUnitId" asp-route-search="@Model.Search" asp-route-productionStatus="@Model.ProductionStatus" asp-route-paymentStatus="@Model.PaymentStatus" asp-route-customerUserId="@Model.CustomerUserId" asp-route-offset="@previousOffset">Předchozí</a>
+                }
+                @if (Model.Jobs.HasMore)
+                {
+                    <a asp-page="./Index" asp-route-view="@Model.Context.ViewKey" asp-route-unit="@Model.Context.SelectedServiceUnitId" asp-route-search="@Model.Search" asp-route-productionStatus="@Model.ProductionStatus" asp-route-paymentStatus="@Model.PaymentStatus" asp-route-customerUserId="@Model.CustomerUserId" asp-route-offset="@nextOffset">Další</a>
+                }
+            </nav>
+        }
+    </section>
+</section>

@@ -1,0 +1,64 @@
+@page
+@model FuaPay.Web.Pages.Customer.Credit.IndexModel
+@{
+    ViewData["Title"] = "Kredit";
+    var balance = Model.Account?.BalanceMinorUnits ?? 0;
+    var previousOffset = Math.Max(0, Model.Movements.Offset - Model.Movements.Limit);
+    var nextOffset = Model.Movements.Offset + Model.Movements.Limit;
+}
+
+<section class="functional-page">
+    <header class="functional-header split-header">
+        <div><p class="panel-kicker">Zákazník</p><h1>Kredit</h1><p>Fakultní kredit lze použít k okamžité úhradě zveřejněné zakázky.</p></div>
+        @if (Model.CanCreatePayment)
+        {
+            <a asp-page="/Customer/Payments/CreateTopUp" asp-route-view="customer" class="primary-action-button">Dobít kredit</a>
+        }
+    </header>
+
+    <div class="dashboard-cards single-emphasis">
+        <article class="summary-card"><span>Aktuální zůstatek</span><strong>@DashboardDisplay.FormatMoney(balance)</strong><small>Disponibilní kredit</small></article>
+        <article class="summary-card"><span>Počet pohybů</span><strong>@Model.Movements.TotalCount</strong><small>Neměnná historie účtu</small></article>
+    </div>
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Historie pohybů</h2><span>Nejnovější první</span></div>
+        @if (Model.Movements.Items.Count == 0)
+        {
+            <div class="empty-state"><p>Na kreditním účtu zatím nejsou žádné pohyby.</p></div>
+        }
+        else
+        {
+            <div class="responsive-table-wrap">
+                <table class="data-table">
+                    <thead><tr><th>Datum</th><th>Popis</th><th>Pohyb</th><th>Zůstatek po pohybu</th></tr></thead>
+                    <tbody>
+                    @foreach (var movement in Model.Movements.Items)
+                    {
+                        <tr>
+                            <td>@DashboardDisplay.FormatDate(movement.RecordedAt)</td>
+                            <td>@movement.Description</td>
+                            <td><strong class="@DashboardDisplay.MovementCssClass(movement.Type)">@DashboardDisplay.FormatMovementAmount(movement)</strong></td>
+                            <td>@DashboardDisplay.FormatMoney(movement.BalanceAfterMinorUnits)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (Model.Movements.Offset > 0 || Model.Movements.HasMore)
+        {
+            <nav class="pagination">
+                @if (Model.Movements.Offset > 0)
+                {
+                    <a asp-page="./Index" asp-route-view="customer" asp-route-offset="@previousOffset">Předchozí</a>
+                }
+                @if (Model.Movements.HasMore)
+                {
+                    <a asp-page="./Index" asp-route-view="customer" asp-route-offset="@nextOffset">Další</a>
+                }
+            </nav>
+        }
+    </section>
+</section>

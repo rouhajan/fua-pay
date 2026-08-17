@@ -1,0 +1,127 @@
+@page "{id:guid}"
+@model FuaPay.Web.Pages.Customer.Jobs.DetailsModel
+@using FuaPay.Web.Modules.Jobs.Domain
+@{
+    ViewData["Title"] = Model.Presentation.Job.Number;
+    var job = Model.Presentation.Job;
+}
+
+<section class="functional-page">
+    <header class="functional-header split-header">
+        <div>
+            <p class="panel-kicker">@job.Number</p>
+            <h1>@job.Title</h1>
+            <p>Služba: <strong>@Model.Presentation.ServiceUnitDisplayName</strong></p>
+        </div>
+        <a asp-page="./Index" asp-route-view="customer" class="secondary-button">Zpět na zakázky</a>
+    </header>
+
+    @if (TempData["StatusMessage"] is string message)
+    {
+        <div class="message-box is-success">@message</div>
+    }
+    <div asp-validation-summary="All" class="message-box is-error"></div>
+
+    <div class="detail-grid">
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Zakázka</h2></div>
+            <dl class="detail-list">
+                <div><dt>Služba</dt><dd>@Model.Presentation.ServiceUnitDisplayName</dd></div>
+                <div><dt>Cena</dt><dd><strong>@DashboardDisplay.FormatMoney(job.PriceMinorUnits)</strong></dd></div>
+                <div><dt>Vytvořeno</dt><dd>@DashboardDisplay.FormatDate(job.CreatedAt)</dd></div>
+                <div><dt>Zadavatel</dt><dd>@(Model.Presentation.CreatedBy?.DisplayName ?? "FUA")</dd></div>
+            </dl>
+        </section>
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Stav</h2></div>
+            <dl class="detail-list">
+                <div>
+                    <dt>Zakázka</dt>
+                    <dd>
+                        <span class="status-badge @DashboardDisplay.JobStatusCssClass(job.ProductionStatus, job.PaymentStatus)">
+                            @DashboardDisplay.FormatJobStatus(job.ProductionStatus, job.PaymentStatus)
+                        </span>
+                    </dd>
+                </div>
+                <div><dt>Úhrada</dt><dd>@DashboardDisplay.FormatJobPaymentStatus(job.ProductionStatus, job.PaymentStatus)</dd></div>
+                <div><dt>Uhrazeno</dt><dd>@(job.SettledAt.HasValue ? DashboardDisplay.FormatDate(job.SettledAt.Value) : "—")</dd></div>
+            </dl>
+        </section>
+    </div>
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Popis</h2></div>
+        <p class="preserve-lines">@job.Description</p>
+    </section>
+
+    @if (
+        job.ProductionStatus == JobProductionStatus.Published &&
+        job.PaymentStatus == JobPaymentStatus.Unpaid &&
+        Model.PaymentOptions is not null)
+    {
+        var paymentOptions = Model.PaymentOptions;
+
+        <section class="data-panel payment-callout">
+            <div class="payment-callout-copy">
+                <p class="panel-kicker">Úhrada</p>
+                <h2>Zakázka čeká na zaplacení</h2>
+                <p>Vyberte kredit nebo přímou platbu. Neúspěšný platební pokus zakázku nezruší.</p>
+
+                <dl class="payment-balance-summary">
+                    <div>
+                        <dt>Cena zakázky</dt>
+                        <dd>@DashboardDisplay.FormatMoney(paymentOptions.PriceMinorUnits)</dd>
+                    </div>
+                    <div>
+                        <dt>Váš kredit</dt>
+                        <dd>@DashboardDisplay.FormatMoney(paymentOptions.CreditBalanceMinorUnits)</dd>
+                    </div>
+                </dl>
+
+                @if (paymentOptions.HasSufficientCredit)
+                {
+                    <p class="payment-balance-note is-positive">
+                        Po úhradě zbude
+                        <strong>@DashboardDisplay.FormatMoney(paymentOptions.BalanceAfterPaymentMinorUnits)</strong>.
+                    </p>
+                }
+                else
+                {
+                    <p class="payment-balance-note is-warning">
+                        Pro úhradu kreditem chybí
+                        <strong>@DashboardDisplay.FormatMoney(paymentOptions.MissingCreditMinorUnits)</strong>.
+                    </p>
+                }
+            </div>
+
+            <div class="payment-actions">
+                @if (paymentOptions.HasSufficientCredit)
+                {
+                    <form method="post"
+                          asp-page-handler="PayCredit"
+                          asp-route-id="@job.Id">
+                        <button type="submit" class="primary-action-button">
+                            Zaplatit kreditem
+                        </button>
+                    </form>
+                }
+                else
+                {
+                    <a asp-page="/Customer/Payments/CreateTopUp"
+                       asp-route-view="customer"
+                       class="primary-action-button">
+                        Dobít kredit
+                    </a>
+                }
+
+                <form method="post"
+                      asp-page-handler="CreateDirectPayment"
+                      asp-route-id="@job.Id">
+                    <button type="submit" class="secondary-button">
+                        Zaplatit přímo
+                    </button>
+                </form>
+            </div>
+        </section>
+    }
+</section>

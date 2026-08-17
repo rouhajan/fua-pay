@@ -1,0 +1,105 @@
+@page
+@model FuaPay.Web.Pages.Admin.Users.IndexModel
+@{
+    ViewData["Title"] = "Uživatelé a role";
+    var previousOffset = Math.Max(0, Model.Users.Offset - Model.Users.Limit);
+    var nextOffset = Model.Users.Offset + Model.Users.Limit;
+}
+
+<section class="functional-page">
+    <header class="functional-header">
+        <div>
+            <p class="panel-kicker">Administrace</p>
+            <h1>Uživatelé a role</h1>
+            <p>Uživatel vznikne po prvním univerzitním přihlášení. Zde se přidělují interní role a pracoviště.</p>
+        </div>
+    </header>
+
+    @if (TempData["StatusMessage"] is string message)
+    {
+        <div class="message-box is-success">@message</div>
+    }
+
+    <form method="get" class="filter-bar">
+        <input type="hidden" name="view" value="admin" />
+        <label class="field-grow">
+            <span>Jméno nebo e-mail</span>
+            <input type="search" name="search" value="@Model.Search" placeholder="např. user@example.invalid" />
+        </label>
+        <button type="submit" class="secondary-button">Hledat</button>
+        @if (Model.Search is not null)
+        {
+            <a asp-page="./Index" asp-route-view="admin" class="text-link">Zrušit filtr</a>
+        }
+    </form>
+
+    <section class="data-panel">
+        <div class="data-panel-header">
+            <h2>Nalezení uživatelé</h2>
+            <span>@Model.Users.TotalCount celkem</span>
+        </div>
+
+        @if (Model.Users.Items.Count == 0)
+        {
+            <div class="empty-state"><p>Žádný uživatel neodpovídá zadanému filtru.</p></div>
+        }
+        else
+        {
+            <div class="responsive-table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Uživatel</th>
+                            <th>Role</th>
+                            <th>Stav</th>
+                            <th>Poslední přihlášení</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var user in Model.Users.Items)
+                    {
+                        <tr>
+                            <td>
+                                <strong>@user.DisplayName</strong>
+                                <small>@(user.Email ?? "E-mail není dostupný")</small>
+                            </td>
+                            <td>
+                                <div class="badge-list">
+                                    @foreach (var role in user.ActiveRoles)
+                                    {
+                                        <span class="role-badge">@AdministrationDisplay.AccessRoleLabel(role)</span>
+                                    }
+                                </div>
+                            </td>
+                            <td>
+                                <span class="status-badge @(user.Status == FuaPay.Web.Modules.Access.Domain.AccessUserStatus.Active ? "is-ready" : "is-failed")">
+                                    @AdministrationDisplay.AccessUserStatusLabel(user.Status)
+                                </span>
+                            </td>
+                            <td>@DashboardDisplay.FormatDate(user.LastSeenAt)</td>
+                            <td class="table-action">
+                                <a asp-page="./Edit" asp-route-id="@user.Id" asp-route-view="admin" class="text-link">Spravovat</a>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (Model.Users.HasPrevious || Model.Users.HasMore)
+        {
+            <nav class="pagination" aria-label="Stránkování uživatelů">
+                @if (Model.Users.HasPrevious)
+                {
+                    <a asp-page="./Index" asp-route-view="admin" asp-route-search="@Model.Search" asp-route-offset="@previousOffset">Předchozí</a>
+                }
+                @if (Model.Users.HasMore)
+                {
+                    <a asp-page="./Index" asp-route-view="admin" asp-route-search="@Model.Search" asp-route-offset="@nextOffset">Další</a>
+                }
+            </nav>
+        }
+    </section>
+</section>

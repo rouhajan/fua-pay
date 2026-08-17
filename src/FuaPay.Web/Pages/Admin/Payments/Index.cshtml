@@ -1,0 +1,187 @@
+@page
+@model FuaPay.Web.Pages.Admin.Payments.IndexModel
+@using FuaPay.Web.Modules.Payments.Domain
+@{
+    ViewData["Title"] = "Platby";
+    var previousOffset = Math.Max(0, Model.Payments.Offset - Model.Payments.Limit);
+    var nextOffset = Model.Payments.Offset + Model.Payments.Limit;
+    var statuses = new[]
+    {
+        PaymentStatus.Pending,
+        PaymentStatus.Succeeded,
+        PaymentStatus.Failed,
+        PaymentStatus.Cancelled,
+        PaymentStatus.Expired
+    };
+}
+
+<section class="functional-page">
+    <header class="functional-header">
+        <div>
+            <p class="panel-kicker">Administrace</p>
+            <h1>Platby</h1>
+            <p>Přehled interních platebních pokusů a jejich potvrzení. Ruční označení úhrady zde není možné.</p>
+        </div>
+    </header>
+
+    <form method="get" class="filter-grid customer-filter-grid">
+        <input type="hidden" name="view" value="admin" />
+        <label>
+            <span>Reference</span>
+            <input type="search" name="search" value="@Model.Search" />
+        </label>
+        <label>
+            <span>Stav</span>
+            <select name="status">
+                <option value="">Všechny</option>
+                @foreach (var status in statuses)
+                {
+                    <option value="@status"
+                            selected="@(Model.Status == status ? "selected" : null)">
+                        @PaymentDisplay.StatusLabel(status)
+                    </option>
+                }
+            </select>
+        </label>
+        <label>
+            <span>Účel</span>
+            <select name="purposeType">
+                <option value="">Všechny</option>
+                <option value="@PaymentPurposeType.CreditTopUp"
+                        selected="@(Model.PurposeType == PaymentPurposeType.CreditTopUp ? "selected" : null)">
+                    Dobití kreditu
+                </option>
+                <option value="@PaymentPurposeType.Job"
+                        selected="@(Model.PurposeType == PaymentPurposeType.Job ? "selected" : null)">
+                    Zakázka
+                </option>
+            </select>
+        </label>
+        <div class="filter-actions">
+            <button type="submit" class="secondary-button">Použít filtry</button>
+            <a asp-page="./Index" asp-route-view="admin" class="text-link">Vyčistit</a>
+        </div>
+    </form>
+
+    <section class="data-panel">
+        <div class="data-panel-header">
+            <h2>Platební záznamy</h2>
+            <span>@Model.Payments.TotalCount celkem</span>
+        </div>
+        @if (Model.Payments.Items.Count == 0)
+        {
+            <div class="empty-state">
+                <p>Žádná platba neodpovídá filtru.</p>
+            </div>
+        }
+        else
+        {
+            <div class="responsive-table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Datum</th>
+                            <th>Zákazník</th>
+                            <th>Účel</th>
+                            <th>Částka</th>
+                            <th>Stav</th>
+                            <th>Reference</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var payment in Model.Payments.Items)
+                    {
+                        var user = Model.Users.GetValueOrDefault(payment.CustomerUserId);
+                        <tr>
+                            <td>@DashboardDisplay.FormatDate(payment.CreatedAt)</td>
+                            <td>
+                                <strong>@(user?.DisplayName ?? "Neznámý")</strong>
+                                <small>@user?.Email</small>
+                            </td>
+                            <td>@PaymentDisplay.PurposeLabel(payment.PurposeType)</td>
+                            <td><strong>@DashboardDisplay.FormatMoney(payment.AmountMinorUnits)</strong></td>
+                            <td>
+                                <span class="status-badge @PaymentDisplay.StatusCssClass(payment.Status)">
+                                    @PaymentDisplay.StatusLabel(payment.Status)
+                                </span>
+                            </td>
+                            <td><code>@payment.ProviderReference</code></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (Model.Payments.Offset > 0 || Model.Payments.HasMore)
+        {
+            <nav class="pagination" aria-label="Stránkování plateb">
+                @if (Model.Payments.Offset > 0)
+                {
+                    <a asp-page="./Index"
+                       asp-route-view="admin"
+                       asp-route-status="@Model.Status"
+                       asp-route-purposeType="@Model.PurposeType"
+                       asp-route-search="@Model.Search"
+                       asp-route-offset="@previousOffset">
+                        Předchozí
+                    </a>
+                }
+                @if (Model.Payments.HasMore)
+                {
+                    <a asp-page="./Index"
+                       asp-route-view="admin"
+                       asp-route-status="@Model.Status"
+                       asp-route-purposeType="@Model.PurposeType"
+                       asp-route-search="@Model.Search"
+                       asp-route-offset="@nextOffset">
+                        Další
+                    </a>
+                }
+            </nav>
+        }
+    </section>
+
+
+@if (Model.ReconciliationItems.Count > 0)
+{
+    <section class="data-panel">
+        <div class="data-panel-header">
+            <div>
+                <h2>ČSOB reconciliation</h2>
+                <p>Read-only provozní dohled. Finanční stav nelze z tohoto přehledu ručně potvrdit.</p>
+            </div>
+            <span>@Model.ReconciliationItems.Count otevřených</span>
+        </div>
+        <div class="responsive-table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Platba</th>
+                        <th>payId</th>
+                        <th>Stav</th>
+                        <th>Pokusy</th>
+                        <th>Další pokus</th>
+                        <th>ČSOB stav</th>
+                        <th>Korelace</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var item in Model.ReconciliationItems)
+                {
+                    <tr>
+                        <td><code>@item.PaymentId</code></td>
+                        <td><code>@item.ProviderReference</code></td>
+                        <td>@item.State</td>
+                        <td>@item.AttemptCount</td>
+                        <td>@DashboardDisplay.FormatDate(item.NextAttemptAt)</td>
+                        <td>@(item.LastGatewayPaymentStatus?.ToString() ?? "—")</td>
+                        <td><code>@(item.CorrelationId?.ToString() ?? "—")</code></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+</section>

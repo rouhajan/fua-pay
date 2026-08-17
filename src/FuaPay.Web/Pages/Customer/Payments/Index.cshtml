@@ -1,0 +1,62 @@
+@page
+@model FuaPay.Web.Pages.Customer.Payments.IndexModel
+@{
+    ViewData["Title"] = "Moje platby";
+    var previousOffset = Math.Max(0, Model.Payments.Offset - Model.Payments.Limit);
+    var nextOffset = Model.Payments.Offset + Model.Payments.Limit;
+}
+
+<section class="functional-page">
+    <header class="functional-header split-header">
+        <div><p class="panel-kicker">Zákazník</p><h1>Moje platby</h1><p>Platební záznamy jsou oddělené od pohybů kreditu a lze je bezpečně zpracovat opakovaně.</p></div>
+        <a asp-page="./CreateTopUp" asp-route-view="customer" class="primary-action-button">Dobít kredit</a>
+    </header>
+
+    @if (TempData["StatusMessage"] is string message)
+    {
+        <div class="message-box is-success">@message</div>
+    }
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Historie plateb</h2><span>@Model.Payments.TotalCount celkem</span></div>
+        @if (Model.Payments.Items.Count == 0)
+        {
+            <div class="empty-state"><p>Zatím nebyla vytvořena žádná platba.</p></div>
+        }
+        else
+        {
+            <div class="responsive-table-wrap">
+                <table class="data-table">
+                    <thead><tr><th>Vytvořeno</th><th>Účel</th><th>Částka</th><th>Stav</th><th>Reference</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var payment in Model.Payments.Items)
+                    {
+                        <tr>
+                            <td>@DashboardDisplay.FormatDate(payment.CreatedAt)</td>
+                            <td>@PaymentDisplay.PurposeLabel(payment.PurposeType)</td>
+                            <td><strong>@DashboardDisplay.FormatMoney(payment.AmountMinorUnits)</strong></td>
+                            <td><span class="status-badge @PaymentDisplay.StatusCssClass(payment.Status)">@PaymentDisplay.StatusLabel(payment.Status)</span></td>
+                            <td><code>@payment.ProviderReference</code></td>
+                            <td class="table-action"><a asp-page="./Details" asp-route-id="@payment.Id" asp-route-view="customer" class="text-link">Detail</a></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (Model.Payments.Offset > 0 || Model.Payments.HasMore)
+        {
+            <nav class="pagination">
+                @if (Model.Payments.Offset > 0)
+                {
+                    <a asp-page="./Index" asp-route-view="customer" asp-route-offset="@previousOffset">Předchozí</a>
+                }
+                @if (Model.Payments.HasMore)
+                {
+                    <a asp-page="./Index" asp-route-view="customer" asp-route-offset="@nextOffset">Další</a>
+                }
+            </nav>
+        }
+    </section>
+</section>

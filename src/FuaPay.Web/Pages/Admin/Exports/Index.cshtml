@@ -1,0 +1,55 @@
+@page
+@model FuaPay.Web.Pages.Admin.Exports.IndexModel
+@using FuaPay.Web.Modules.ServiceUnits.Domain
+@{
+    ViewData["Title"] = "Exporty";
+}
+
+<section class="functional-page">
+    <header class="functional-header">
+        <div>
+            <p class="panel-kicker">Administrace</p>
+            <h1>Exporty</h1>
+            <p>CSV soubory používají středník, kódování UTF-8 a obsahují čas vytvoření v názvu.</p>
+        </div>
+    </header>
+
+    <form method="get" class="data-panel form-stack">
+        <div class="data-panel-header">
+            <h2>Rozsah exportu</h2>
+        </div>
+        <div class="filter-grid">
+            <label>
+                <span>Od data včetně</span>
+                <span class="native-date-wrapper">
+                    <input type="date" name="from" />
+                </span>
+            </label>
+            <label>
+                <span>Do data včetně</span>
+                <span class="native-date-wrapper">
+                    <input type="date" name="to" />
+                </span>
+            </label>
+            <label>
+                <span>Pracoviště pro export zakázek</span>
+                <select name="serviceUnitId">
+                    <option value="">Všechna pracoviště</option>
+                    @foreach (var unit in Model.ServiceUnits.Where(
+                        item => item.Status == ServiceUnitStatus.Active))
+                    {
+                        <option value="@unit.Id">@unit.Code – @unit.DisplayName</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <p class="context-note">
+            Datum se pro konzistentní export vyhodnocuje jako celý kalendářní den v UTC. Exporty jsou omezeny na 100 000 řádků.
+        </p>
+        <div class="form-actions export-actions">
+            <button type="submit" name="handler" value="Jobs" class="secondary-button">Export zakázek</button>
+            <button type="submit" name="handler" value="Credit" class="secondary-button">Export kreditu</button>
+            <button type="submit" name="handler" value="Payments" class="secondary-button">Export plateb</button>
+        </div>
+    </form>
+</section>

@@ -1,0 +1,202 @@
+@page "{id:guid}"
+@model FuaPay.Web.Pages.Admin.Users.EditModel
+@using FuaPay.Web.Modules.Access.Domain
+@using FuaPay.Web.Modules.ServiceUnits.Domain
+@{
+    ViewData["Title"] = "Správa uživatele";
+    var user = Model.ManagedUser!;
+    var activeAssignments = Model.ServiceUnitAssignments.Where(item => item.IsActive).ToArray();
+    var availableUnits = Model.AllServiceUnits
+        .Where(item => item.Status == ServiceUnitStatus.Active)
+        .Where(item => activeAssignments.All(assignment => assignment.ServiceUnitId != item.Id))
+        .ToArray();
+}
+
+<section class="functional-page">
+    <header class="functional-header split-header">
+        <div>
+            <p class="panel-kicker">Uživatel</p>
+            <h1>@user.DisplayName</h1>
+            <p>@(user.Email ?? "E-mail není dostupný")</p>
+        </div>
+        <a asp-page="./Index" asp-route-view="admin" class="secondary-button">Zpět na uživatele</a>
+    </header>
+
+    @if (TempData["StatusMessage"] is string message)
+    {
+        <div class="message-box is-success">@message</div>
+    }
+
+    <div asp-validation-summary="All" class="message-box is-error"></div>
+
+    <div class="detail-grid">
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Účet</h2></div>
+            <dl class="detail-list">
+                <div><dt>Stav</dt><dd>@AdministrationDisplay.AccessUserStatusLabel(user.Status)</dd></div>
+                <div><dt>První přihlášení</dt><dd>@DashboardDisplay.FormatDate(user.CreatedAt)</dd></div>
+                <div><dt>Poslední přihlášení</dt><dd>@DashboardDisplay.FormatDate(user.LastSeenAt)</dd></div>
+                <div><dt>Interní ID</dt><dd><code>@user.Id</code></dd></div>
+            </dl>
+            <div class="action-row">
+                @if (user.Status == AccessUserStatus.Active)
+                {
+                    <form method="post" asp-page-handler="Block" asp-route-id="@user.Id">
+                        <button type="submit" class="danger-button">Zablokovat účet</button>
+                    </form>
+                }
+                else
+                {
+                    <form method="post" asp-page-handler="Activate" asp-route-id="@user.Id">
+                        <button type="submit" class="secondary-button">Aktivovat účet</button>
+                    </form>
+                }
+            </div>
+        </section>
+
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Externí identita</h2></div>
+            @if (user.ExternalIdentities.Count == 0)
+            {
+                <div class="empty-state compact">
+                    <p>Účet zatím nemá připojenou externí identitu.</p>
+                </div>
+            }
+            @foreach (var identity in user.ExternalIdentities)
+            {
+                <dl class="detail-list compact">
+                    <div><dt>Poskytovatel</dt><dd>@identity.Provider</dd></div>
+                    <div><dt>Tenant</dt><dd><code>@identity.Tenant</code></dd></div>
+                    <div><dt>Subject</dt><dd><code>@identity.Subject</code></dd></div>
+                </dl>
+            }
+
+            @if (Model.CanLinkEntraIdentity)
+            {
+                <form method="post"
+                      asp-page-handler="LinkEntraIdentity"
+                      asp-route-id="@user.Id"
+                      class="form-stack">
+                    <label>
+                        <span>Entra object ID</span>
+                        <input asp-for="EntraObjectId"
+                               type="text"
+                               autocomplete="off" />
+                        <span asp-validation-for="EntraObjectId"></span>
+                    </label>
+                    <p class="context-note">
+                        Tenant <code>@Model.EntraTenantId</code>. Připojení
+                        proveďte jen podle objektového ID ověřeného správcem
+                        Entra; jméno ani e-mail nejsou bezpečný párovací klíč.
+                    </p>
+                    <button type="submit" class="secondary-button">
+                        Připojit Entra identitu
+                    </button>
+                </form>
+            }
+        </section>
+    </div>
+
+    <div class="detail-grid">
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Aktivní role</h2></div>
+            <div class="stack-list">
+                @foreach (var role in user.ActiveRoles)
+                {
+                    <div class="stack-row">
+                        <span class="role-badge">@AdministrationDisplay.AccessRoleLabel(role)</span>
+                        @if (role != AccessRole.Customer)
+                        {
+                            <form method="post" asp-page-handler="RevokeRole" asp-route-id="@user.Id" asp-route-role="@role">
+                                <button type="submit" class="text-button danger-text">Odebrat</button>
+                            </form>
+                        }
+                    </div>
+                }
+            </div>
+
+            @{ var grantableRoles = new[] { AccessRole.Requester, AccessRole.Admin }.Where(role => !user.ActiveRoles.Contains(role)).ToArray(); }
+            @if (grantableRoles.Length > 0)
+            {
+                <form method="post" asp-page-handler="GrantRole" asp-route-id="@user.Id" class="inline-form">
+                    <label>
+                        <span>Přidat roli</span>
+                        <select asp-for="Role">
+                            @foreach (var role in grantableRoles)
+                            {
+                                <option value="@role">@AdministrationDisplay.AccessRoleLabel(role)</option>
+                            }
+                        </select>
+                    </label>
+                    <button type="submit" class="secondary-button">Přidat</button>
+                </form>
+            }
+        </section>
+
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Pracoviště zadavatele</h2></div>
+            @if (activeAssignments.Length == 0)
+            {
+                <div class="empty-state compact"><p>Uživatel nemá žádné aktivní pracoviště.</p></div>
+            }
+            else
+            {
+                <div class="stack-list">
+                    @foreach (var assignment in activeAssignments)
+                    {
+                        <div class="stack-row">
+                            <span><strong>@assignment.ServiceUnitCode</strong> · @assignment.ServiceUnitDisplayName</span>
+                            <form method="post" asp-page-handler="RevokeServiceUnit" asp-route-id="@user.Id" asp-route-serviceUnitId="@assignment.ServiceUnitId">
+                                <button type="submit" class="text-button danger-text">Odebrat</button>
+                            </form>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (
+                user.Status == AccessUserStatus.Active &&
+                user.ActiveRoles.Contains(AccessRole.Requester) &&
+                availableUnits.Length > 0)
+            {
+                <form method="post" asp-page-handler="AssignServiceUnit" asp-route-id="@user.Id" class="inline-form">
+                    <label>
+                        <span>Přidat pracoviště</span>
+                        <select asp-for="ServiceUnitId">
+                            @foreach (var unit in availableUnits)
+                            {
+                                <option value="@unit.Id">@unit.Code – @unit.DisplayName</option>
+                            }
+                        </select>
+                    </label>
+                    <button type="submit" class="secondary-button">Přiřadit</button>
+                </form>
+            }
+            @if (user.ActiveRoles.Contains(AccessRole.Requester) && activeAssignments.Length == 0)
+            {
+                <p class="context-note">Role zadavatele bez pracoviště neposkytuje přístup k žádným zakázkám.</p>
+            }
+        </section>
+    </div>
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Historie rolí</h2></div>
+        <div class="responsive-table-wrap">
+            <table class="data-table">
+                <thead><tr><th>Role</th><th>Přidělena</th><th>Přidělil</th><th>Odebrána</th><th>Odebral</th></tr></thead>
+                <tbody>
+                @foreach (var assignment in user.RoleAssignments)
+                {
+                    <tr>
+                        <td>@AdministrationDisplay.AccessRoleLabel(assignment.Role)</td>
+                        <td>@DashboardDisplay.FormatDate(assignment.GrantedAt)</td>
+                        <td>@assignment.GrantedBy</td>
+                        <td>@(assignment.RevokedAt.HasValue ? DashboardDisplay.FormatDate(assignment.RevokedAt.Value) : "Aktivní")</td>
+                        <td>@(assignment.RevokedBy ?? "—")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+</section>

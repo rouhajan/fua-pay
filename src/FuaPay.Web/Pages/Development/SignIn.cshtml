@@ -1,0 +1,56 @@
+@page
+@model FuaPay.Web.Pages.Development.SignInModel
+@{
+    ViewData["Title"] = "Testovací přihlášení";
+}
+
+<section class="development-sign-in">
+    <header class="development-sign-in-header">
+        <p class="section-label">Testovací prostředí</p>
+        <h1>Vyberte testovací účet</h1>
+        <p>
+            Účty simulují budoucí přihlášení přes Microsoft Entra ID.
+            Každý má vlastní identitu, kredit, role a rozsah pracovišť.
+        </p>
+    </header>
+
+    <div asp-validation-summary="All" class="validation-summary"></div>
+
+    <div class="profile-sections">
+        @foreach (var profileSection in Model.Sections)
+        {
+            <section class="profile-section">
+                <header class="profile-section-header">
+                    <h2>@profileSection.Title</h2>
+                    <p>@profileSection.Description</p>
+                </header>
+
+                <div class="profile-list">
+                    @foreach (var profile in profileSection.Profiles)
+                    {
+                        <form method="post"
+                              asp-page-handler="SignIn"
+                              class="profile-row">
+                            <input type="hidden"
+                                   name="ProfileKey"
+                                   value="@profile.Key" />
+                            <input type="hidden"
+                                   name="ReturnUrl"
+                                   value="@Model.ReturnUrl" />
+
+                            <div class="profile-row-copy">
+                                <strong>@profile.DisplayName</strong>
+                                <span>@profile.Identity.Email</span>
+                                <small>@profile.Description</small>
+                            </div>
+
+                            <button type="submit" class="primary-button">
+                                Přihlásit
+                            </button>
+                        </form>
+                    }
+                </div>
+            </section>
+        }
+    </div>
+</section>

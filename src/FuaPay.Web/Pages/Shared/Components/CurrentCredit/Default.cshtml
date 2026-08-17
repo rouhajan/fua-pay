@@ -1,0 +1,9 @@
+@model FuaPay.Web.Pages.Shared.CurrentCreditViewModel
+
+<a asp-page="/Customer/Credit/Index"
+   asp-route-view="customer"
+   class="header-credit"
+   aria-label="Aktuální kredit">
+    <span>Kredit</span>
+    <strong>@DashboardDisplay.FormatMoney(Model.BalanceMinorUnits)</strong>
+</a>

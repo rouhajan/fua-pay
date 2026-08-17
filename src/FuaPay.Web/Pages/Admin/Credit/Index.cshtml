@@ -1,0 +1,45 @@
+@page
+@model FuaPay.Web.Pages.Admin.Credit.IndexModel
+@{
+    ViewData["Title"] = "Kredit";
+    var previousOffset = Math.Max(0, Model.Movements.Offset - Model.Movements.Limit);
+    var nextOffset = Model.Movements.Offset + Model.Movements.Limit;
+}
+
+<section class="functional-page">
+    <header class="functional-header"><div><p class="panel-kicker">Administrace</p><h1>Kredit</h1><p>Ruční korekce se nikdy nepřepisuje. Vznikne nový pohyb s povinným důvodem a identitou administrátora.</p></div></header>
+
+    @if (TempData["StatusMessage"] is string message)
+    {
+        <div class="message-box is-success">@message</div>
+    }
+    <div asp-validation-summary="All" class="message-box is-error"></div>
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Administrativní korekce</h2></div>
+        <form method="post" asp-page-handler="Adjust" class="form-grid three-columns">
+            <input asp-for="CommandId" type="hidden" />
+            <label><span>Uživatel</span><select asp-for="OwnerId"><option value="">Vyberte uživatele</option>@foreach (var customer in Model.Customers) { <option value="@customer.Id">@customer.DisplayName · @customer.Email</option> }</select></label>
+            <label><span>Částka v Kč</span><input asp-for="SignedAmountCrowns" type="number" min="-@FinancialAmountPolicy.CreditAdjustmentAbsolute.MaximumCrownsInvariant" max="@FinancialAmountPolicy.CreditAdjustmentAbsolute.MaximumCrownsInvariant" step="0.01" /><small>Kladná částka přidá kredit, záporná jej odebere.</small></label>
+            <label><span>Důvod</span><input asp-for="Reason" placeholder="např. oprava chybného hotovostního vkladu" /></label>
+            <div class="form-actions full-row"><button type="submit" class="primary-action-button">Zapsat korekci</button></div>
+        </form>
+    </section>
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Poslední pohyby</h2><span>@Model.Movements.TotalCount celkem</span></div>
+        <div class="responsive-table-wrap"><table class="data-table"><thead><tr><th>Datum</th><th>Uživatel</th><th>Popis</th><th>Pohyb</th><th>Zůstatek</th></tr></thead><tbody>
+        @foreach (var movement in Model.Movements.Items)
+        {
+            var owner = Model.MovementOwners.GetValueOrDefault(movement.OwnerId);
+            <tr><td>@DashboardDisplay.FormatDate(movement.RecordedAt)</td><td><strong>@(owner?.DisplayName ?? "Neznámý")</strong><small>@owner?.Email</small></td><td>@movement.Description</td><td><strong class="@DashboardDisplay.MovementCssClass(movement.Type)">@(movement.Type == FuaPay.Web.Modules.Credits.Domain.CreditMovementType.Credit ? "+" : "−")@DashboardDisplay.FormatMoney(movement.AmountMinorUnits)</strong></td><td>@DashboardDisplay.FormatMoney(movement.BalanceAfterMinorUnits)</td></tr>
+        }
+        </tbody></table></div>
+        @if (Model.Movements.Offset > 0 || Model.Movements.HasMore)
+        {
+            <nav class="pagination">@if (Model.Movements.Offset > 0) { <a asp-page="./Index" asp-route-view="admin" asp-route-offset="@previousOffset">Předchozí</a> } @if (Model.Movements.HasMore) { <a asp-page="./Index" asp-route-view="admin" asp-route-offset="@nextOffset">Další</a> }</nav>
+        }
+    </section>
+</section>
+
+@section Scripts { <partial name="_ValidationScriptsPartial" /> }

@@ -1,0 +1,22 @@
+@page
+@model FuaPay.Web.Pages.Customer.Payments.CreateTopUpModel
+@{
+    ViewData["Title"] = "Dobít kredit";
+}
+
+<section class="functional-page narrow-page">
+    <header class="functional-header split-header">
+        <div><p class="panel-kicker">Kredit</p><h1>Dobít kredit</h1><p>Částku ověří FUA Pay a platba pokračuje přes poskytovatele nakonfigurovaného pro toto prostředí.</p></div>
+        <a asp-page="./Index" asp-route-view="customer" class="secondary-button">Zpět na platby</a>
+    </header>
+
+    <form method="post" class="data-panel form-stack">
+        <input asp-for="CreationRequestId" type="hidden" />
+        <div asp-validation-summary="All" class="message-box is-error"></div>
+        <label class="price-field"><span>Částka v Kč</span><input asp-for="AmountCrowns" type="number" min="@FinancialAmountPolicy.CreditTopUp.MinimumCrownsInvariant" max="@FinancialAmountPolicy.CreditTopUp.MaximumCrownsInvariant" step="1" /><span asp-validation-for="AmountCrowns"></span></label>
+        <p class="context-note">FUA Pay nepřebírá ani neukládá údaje platební karty.</p>
+        <div class="form-actions"><button type="submit" class="primary-action-button">Pokračovat k platbě</button></div>
+    </form>
+</section>
+
+@section Scripts { <partial name="_ValidationScriptsPartial" /> }

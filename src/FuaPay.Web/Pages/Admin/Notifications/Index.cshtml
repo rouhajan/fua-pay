@@ -1,0 +1,70 @@
+@page
+@model FuaPay.Web.Pages.Admin.Notifications.IndexModel
+@{
+    ViewData["Title"] = "Oznámení";
+}
+
+<section class="functional-page">
+    <header class="functional-header">
+        <div>
+            <p class="panel-kicker">Administrace</p>
+            <h1>Oznámení</h1>
+            <p>Vývojový náhled trvalého outboxu. Skutečné odesílání e-mailů bude zapojeno až s provozní konfigurací.</p>
+        </div>
+    </header>
+
+    <section class="data-panel">
+        <div class="data-panel-header">
+            <h2>Poslední oznámení</h2>
+            <span>@Model.Notifications.Count záznamů</span>
+        </div>
+        @if (Model.Notifications.Count == 0)
+        {
+            <div class="empty-state"><p>Zatím nebylo vytvořeno žádné oznámení.</p></div>
+        }
+        else
+        {
+            <div class="responsive-table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Vytvořeno</th>
+                            <th>Příjemce</th>
+                            <th>Druh</th>
+                            <th>Předmět a text</th>
+                            <th>Stav</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in Model.Notifications)
+                    {
+                        var user = Model.Users.GetValueOrDefault(item.RecipientUserId);
+                        <tr>
+                            <td>@item.CreatedAt.ToLocalTime().ToString("dd. MM. yyyy HH:mm")</td>
+                            <td>
+                                <strong>@(user?.DisplayName ?? "Neznámý uživatel")</strong>
+                                <small>@user?.Email</small>
+                            </td>
+                            <td><code>@item.Type</code></td>
+                            <td>
+                                <strong>@item.Subject</strong>
+                                <small>@item.Body</small>
+                            </td>
+                            <td>
+                                @if (item.SentAt.HasValue)
+                                {
+                                    <span class="status-badge is-ready">Odesláno</span>
+                                }
+                                else
+                                {
+                                    <span class="status-badge is-awaiting">Čeká v outboxu</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</section>

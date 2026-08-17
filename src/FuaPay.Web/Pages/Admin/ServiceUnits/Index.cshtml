@@ -1,0 +1,111 @@
+@page
+@model FuaPay.Web.Pages.Admin.ServiceUnits.IndexModel
+@using FuaPay.Web.Modules.Jobs.Domain
+@using FuaPay.Web.Modules.ServiceUnits.Domain
+@{
+    ViewData["Title"] = "Pracoviště";
+}
+
+<section class="functional-page">
+    <header class="functional-header">
+        <div>
+            <p class="panel-kicker">Administrace</p>
+            <h1>Pracoviště</h1>
+            <p>Pracoviště určuje společný rozsah zakázek zadavatelů a neměnný prefix jejich čísel.</p>
+        </div>
+    </header>
+
+    @if (TempData["StatusMessage"] is string message)
+    {
+        <div class="message-box is-success">@message</div>
+    }
+    <div asp-validation-summary="All" class="message-box is-error"></div>
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Nové pracoviště</h2></div>
+        <form method="post" asp-page-handler="Create" class="form-grid three-columns">
+            <label>
+                <span>Kód</span>
+                <input asp-for="Code" placeholder="např. FOT" autocomplete="off" />
+                <small>2–8 velkých písmen nebo číslic; po použití se nemění.</small>
+            </label>
+            <label>
+                <span>Název</span>
+                <input asp-for="DisplayName" placeholder="např. Fotodílna" />
+            </label>
+            <label>
+                <span>Výchozí druh služby</span>
+                <select asp-for="DefaultServiceType">
+                    <option value="@ServiceType.ThreeDPrint">3D tisk</option>
+                    <option value="@ServiceType.LargeFormatPrint">Velkoformátový tisk</option>
+                    <option value="@ServiceType.Workshop">Dílna</option>
+                    <option value="@ServiceType.Other">Ostatní</option>
+                </select>
+            </label>
+            <div class="form-actions full-row">
+                <button type="submit" class="primary-action-button">Vytvořit pracoviště</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="data-panel">
+        <div class="data-panel-header">
+            <h2>Evidence pracovišť</h2>
+            <span>@Model.ServiceUnits.Count celkem</span>
+        </div>
+
+        <div class="stack-list spacious">
+            @foreach (var unit in Model.ServiceUnits)
+            {
+                <article class="management-card">
+                    <div class="management-card-heading">
+                        <div>
+                            <div class="job-title-line">
+                                <span class="unit-badge">@unit.Code</span>
+                                <h3>@unit.DisplayName</h3>
+                            </div>
+                            <p>
+                                @AdministrationDisplay.ServiceTypeLabel(unit.DefaultServiceType)
+                                · @unit.ActiveRequesterCount aktivních zadavatelů
+                                · @AdministrationDisplay.ServiceUnitStatusLabel(unit.Status)
+                            </p>
+                        </div>
+                    </div>
+
+                    @if (unit.Status == ServiceUnitStatus.Active)
+                    {
+                        <form method="post" asp-page-handler="Update" class="form-grid three-columns compact-form">
+                            <input type="hidden" name="id" value="@unit.Id" />
+                            <label>
+                                <span>Název</span>
+                                <input name="displayName" value="@unit.DisplayName" />
+                            </label>
+                            <label>
+                                <span>Výchozí druh služby</span>
+                                <select name="defaultServiceType">
+                                    @foreach (var serviceType in new[] { ServiceType.ThreeDPrint, ServiceType.LargeFormatPrint, ServiceType.Workshop, ServiceType.Other })
+                                    {
+                                        <option value="@serviceType" selected="@(serviceType == unit.DefaultServiceType ? "selected" : null)">
+                                            @AdministrationDisplay.ServiceTypeLabel(serviceType)
+                                        </option>
+                                    }
+                                </select>
+                            </label>
+                            <div class="form-actions align-end">
+                                <button type="submit" class="secondary-button">Uložit změny</button>
+                            </div>
+                        </form>
+                        <form method="post" asp-page-handler="Deactivate" asp-route-id="@unit.Id" class="danger-zone-row">
+                            <span>Deaktivace skryje pracoviště pro nové zakázky, historii nemaže.</span>
+                            <button type="submit" class="danger-button">Deaktivovat</button>
+                        </form>
+                    }
+                    else
+                    {
+                        <p class="context-note">Pracoviště je historické a nelze je znovu použít pro nové zakázky.</p>
+                    }
+                </article>
+            }
+        </div>
+    </section>
+</section>

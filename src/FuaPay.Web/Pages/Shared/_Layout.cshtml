@@ -1,0 +1,154 @@
+@using FuaPay.Web.Modules.Access.Web
+@using Microsoft.AspNetCore.Mvc.RazorPages
+@{
+    var isAuthenticated = User.Identity?.IsAuthenticated == true;
+    var requestedView = Context.Request.Query["view"].ToString();
+    var shellSelection = isAuthenticated
+        ? AccessViewSelector.Select(User, requestedView)
+        : null;
+    var navigationItems = shellSelection is null
+        ? Array.Empty<AccessNavigationItem>()
+        : AccessNavigation.For(shellSelection.Active.View);
+    var currentPage =
+        (ViewContext.ActionDescriptor as PageActionDescriptor)?.ViewEnginePath
+        ?? string.Empty;
+    var activeNavigationItem = navigationItems
+        .Where(item =>
+            item.Page is not null &&
+            (
+                item.IsOverview
+                    ? string.Equals(currentPage, "/Index", StringComparison.OrdinalIgnoreCase)
+                    : item.SectionPrefix is not null &&
+                      currentPage.StartsWith(
+                          item.SectionPrefix,
+                          StringComparison.OrdinalIgnoreCase)
+            ))
+        .OrderByDescending(item => item.SectionPrefix?.Length ?? 0)
+        .FirstOrDefault();
+    var accessEmail = User.FindAccessEmail();
+}
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - FUA Pay</title>
+    <link rel="icon" type="image/x-icon" href="~/favicon.ico" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/FuaPay.Web.styles.css" asp-append-version="true" />
+</head>
+<body class="@(isAuthenticated ? "app-page" : "public-page")">
+@if (!isAuthenticated)
+{
+    <header class="public-header">
+        <a class="brand" asp-page="/Index" aria-label="FUA Pay – domovská stránka">
+            <img class="brand-logo" src="~/images/fua-tul-logo.png" alt="FUA TUL" width="998" height="220" />
+            <span class="brand-pay">Pay</span>
+        </a>
+    </header>
+
+    <main class="public-main" role="main">
+        @RenderBody()
+    </main>
+
+    <footer class="public-footer">
+        <span>Technická univerzita v Liberci, Fakulta umění a architektury</span>
+        <div class="public-footer-links" aria-label="Doplňující informace">
+            <a asp-page="/Privacy">Ochrana soukromí</a>
+            <a asp-page="/Terms">Podmínky použití</a>
+        </div>
+    </footer>
+}
+else
+{
+    <div class="app-shell">
+        <header class="app-header">
+            <a class="brand" asp-page="/Index" aria-label="FUA Pay – přehled">
+                <img class="brand-logo" src="~/images/fua-tul-logo.png" alt="FUA TUL" width="998" height="220" />
+                <span class="brand-pay">Pay</span>
+            </a>
+
+            <div class="app-session">
+                @await Component.InvokeAsync(
+                    "CurrentCredit",
+                    new
+                    {
+                        visible =
+                            shellSelection?.Active.View ==
+                            AccessView.Customer
+                    })
+
+                @if (shellSelection is not null)
+                {
+                    if (shellSelection.Available.Count > 1)
+                    {
+                        <details class="view-menu">
+                            <summary>@shellSelection.Active.Label</summary>
+                            <div class="view-menu-panel">
+                                @foreach (var option in shellSelection.Available)
+                                {
+                                    var isActive = option.View == shellSelection.Active.View;
+                                    <a asp-page="/Index"
+                                       asp-route-view="@option.Key"
+                                       class="@(isActive ? "is-active" : null)"
+                                       aria-current="@(isActive ? "page" : null)">
+                                        @option.Label
+                                    </a>
+                                }
+                            </div>
+                        </details>
+                    }
+                    else
+                    {
+                        <span class="single-view-label">@shellSelection.Active.Label</span>
+                    }
+                }
+
+                <form class="mobile-sign-out-form"
+                      method="post"
+                      asp-page="/Account/SignOut">
+                    <button type="submit" class="text-button mobile-sign-out-button">
+                        Odhlásit
+                    </button>
+                </form>
+            </div>
+        </header>
+
+        <aside class="app-sidebar">
+            <nav class="app-navigation" aria-label="Hlavní navigace">
+                @foreach (var item in navigationItems)
+                {
+                    var isActive = item == activeNavigationItem;
+                    <a asp-page="@item.Page"
+                       asp-route-view="@(shellSelection!.Active.Key)"
+                       class="app-nav-item @(isActive ? "is-active" : null)"
+                       aria-current="@(isActive ? "page" : null)">
+                        @item.Label
+                    </a>
+                }
+            </nav>
+
+            <div class="app-user-panel">
+                <div class="app-user-copy">
+                    <strong>@User.Identity?.Name</strong>
+                    @if (!string.IsNullOrWhiteSpace(accessEmail))
+                    {
+                        <span>@accessEmail</span>
+                    }
+                </div>
+
+                <form method="post" asp-page="/Account/SignOut">
+                    <button type="submit" class="text-button">Odhlásit</button>
+                </form>
+            </div>
+        </aside>
+
+        <main class="app-main" role="main">
+            @RenderBody()
+        </main>
+    </div>
+}
+
+@await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

@@ -1,0 +1,97 @@
+@page "{id:guid}"
+@model FuaPay.Web.Pages.Management.Jobs.DetailsModel
+@using FuaPay.Web.Modules.Jobs.Domain
+@{
+    ViewData["Title"] = Model.Presentation.Job.Number;
+    var job = Model.Presentation.Job;
+}
+
+<section class="functional-page">
+    <header class="functional-header split-header">
+        <div>
+            <p class="panel-kicker">@job.Number</p>
+            <h1>@job.Title</h1>
+            <p>Služba: <strong>@Model.Presentation.ServiceUnitDisplayName</strong></p>
+        </div>
+        <a asp-page="./Index" asp-route-view="@Model.Context.ViewKey" class="secondary-button">Zpět na zakázky</a>
+    </header>
+
+    @if (TempData["StatusMessage"] is string message)
+    {
+        <div class="message-box is-success">@message</div>
+    }
+    <div asp-validation-summary="All" class="message-box is-error"></div>
+
+    <div class="detail-grid">
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Zakázka</h2></div>
+            <dl class="detail-list">
+                <div><dt>Zákazník</dt><dd><strong>@(Model.Presentation.Customer?.DisplayName ?? "Neznámý uživatel")</strong><br /><small>@Model.Presentation.Customer?.Email</small></dd></div>
+                <div><dt>Založil</dt><dd>@(Model.Presentation.CreatedBy?.DisplayName ?? "Neznámý uživatel")</dd></div>
+                <div><dt>Služba</dt><dd>@Model.Presentation.ServiceUnitDisplayName</dd></div>
+                <div><dt>Cena</dt><dd><strong>@DashboardDisplay.FormatMoney(job.PriceMinorUnits)</strong></dd></div>
+                <div><dt>Vytvořeno</dt><dd>@DashboardDisplay.FormatDate(job.CreatedAt)</dd></div>
+            </dl>
+        </section>
+
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Stav</h2></div>
+            <dl class="detail-list">
+                <div><dt>Zakázka</dt><dd><span class="status-badge @DashboardDisplay.JobStatusCssClass(job.ProductionStatus, job.PaymentStatus)">@DashboardDisplay.FormatJobStatus(job.ProductionStatus, job.PaymentStatus)</span></dd></div>
+                <div><dt>Úhrada</dt><dd>@DashboardDisplay.FormatJobPaymentStatus(job.ProductionStatus, job.PaymentStatus)</dd></div>
+                <div><dt>Způsob úhrady</dt><dd>@DashboardDisplay.FormatJobSettlementType(job.SettlementType)</dd></div>
+                <div><dt>Uhrazeno</dt><dd>@(job.SettledAt.HasValue ? DashboardDisplay.FormatDate(job.SettledAt.Value) : "—")</dd></div>
+            </dl>
+        </section>
+    </div>
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Popis</h2></div>
+        <p class="preserve-lines">@job.Description</p>
+    </section>
+
+    <section class="data-panel">
+        <div class="data-panel-header"><h2>Postup zakázky</h2></div>
+        <ol class="timeline-list">
+            <li class="is-complete"><strong>Vytvořeno</strong><span>@DashboardDisplay.FormatDate(job.CreatedAt)</span></li>
+            <li class="@(job.PublishedAt.HasValue ? "is-complete" : null)"><strong>Zveřejněno</strong><span>@(job.PublishedAt.HasValue ? DashboardDisplay.FormatDate(job.PublishedAt.Value) : "Čeká")</span></li>
+            <li class="@(job.SettledAt.HasValue ? "is-complete" : null)"><strong>Uhrazeno</strong><span>@(job.SettledAt.HasValue ? DashboardDisplay.FormatDate(job.SettledAt.Value) : "Čeká")</span></li>
+            <li class="@(job.ProductionStartedAt.HasValue ? "is-complete" : null)"><strong>Ve výrobě</strong><span>@(job.ProductionStartedAt.HasValue ? DashboardDisplay.FormatDate(job.ProductionStartedAt.Value) : "Čeká")</span></li>
+            <li class="@(job.ReadyForPickupAt.HasValue ? "is-complete" : null)"><strong>Připraveno</strong><span>@(job.ReadyForPickupAt.HasValue ? DashboardDisplay.FormatDate(job.ReadyForPickupAt.Value) : "Čeká")</span></li>
+            <li class="@(job.CompletedAt.HasValue ? "is-complete" : null)"><strong>Dokončeno</strong><span>@(job.CompletedAt.HasValue ? DashboardDisplay.FormatDate(job.CompletedAt.Value) : "Čeká")</span></li>
+        </ol>
+    </section>
+
+    <section class="data-panel action-panel">
+        <div class="data-panel-header"><h2>Dostupné akce</h2></div>
+        <div class="action-row wrap-actions">
+            @if (job.ProductionStatus == JobProductionStatus.Draft)
+            {
+                <a asp-page="./Edit" asp-route-id="@job.Id" asp-route-view="@Model.Context.ViewKey" class="secondary-button">Upravit koncept</a>
+                <form method="post" asp-page-handler="Publish" asp-route-id="@job.Id" asp-route-view="@Model.Context.ViewKey"><button type="submit" class="primary-action-button">Zveřejnit zákazníkovi</button></form>
+                <form method="post" asp-page-handler="Cancel" asp-route-id="@job.Id" asp-route-view="@Model.Context.ViewKey"><button type="submit" class="danger-button">Zrušit</button></form>
+            }
+            else if (job.ProductionStatus == JobProductionStatus.Published && job.PaymentStatus == JobPaymentStatus.Unpaid)
+            {
+                <span class="context-note">Zakázka čeká na úhradu zákazníkem.</span>
+                <form method="post" asp-page-handler="Cancel" asp-route-id="@job.Id" asp-route-view="@Model.Context.ViewKey"><button type="submit" class="danger-button">Zrušit nezaplacenou zakázku</button></form>
+            }
+            else if (job.ProductionStatus == JobProductionStatus.Published && job.PaymentStatus == JobPaymentStatus.Paid)
+            {
+                <form method="post" asp-page-handler="StartProduction" asp-route-id="@job.Id" asp-route-view="@Model.Context.ViewKey"><button type="submit" class="primary-action-button">Zahájit výrobu</button></form>
+            }
+            else if (job.ProductionStatus == JobProductionStatus.InProduction)
+            {
+                <form method="post" asp-page-handler="Ready" asp-route-id="@job.Id" asp-route-view="@Model.Context.ViewKey"><button type="submit" class="primary-action-button">Označit jako připravenou</button></form>
+            }
+            else if (job.ProductionStatus == JobProductionStatus.ReadyForPickup)
+            {
+                <form method="post" asp-page-handler="Complete" asp-route-id="@job.Id" asp-route-view="@Model.Context.ViewKey"><button type="submit" class="primary-action-button">Dokončit a předat</button></form>
+            }
+            else
+            {
+                <span class="context-note">Zakázka je v konečném stavu a nemá další běžné akce.</span>
+            }
+        </div>
+    </section>
+</section>

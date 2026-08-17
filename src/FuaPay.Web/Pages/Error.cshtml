@@ -1,0 +1,26 @@
+@page
+@model ErrorModel
+@{
+    ViewData["Title"] = "Chyba";
+}
+
+<section class="functional-page narrow-page">
+    <header class="functional-header">
+        <div>
+            <p class="panel-kicker">FUA Pay</p>
+            <h1>Něco se nepovedlo</h1>
+            <p>Požadavek se nepodařilo bezpečně dokončit. Zkuste se vrátit na přehled a akci zopakovat.</p>
+        </div>
+    </header>
+
+    <section class="data-panel form-stack">
+        <p>Pokud se chyba opakuje, předejte podpoře níže uvedený referenční kód.</p>
+        @if (Model.ShowRequestId)
+        {
+            <p class="context-note">Referenční kód: <code>@Model.RequestId</code></p>
+        }
+        <div class="form-actions">
+            <a asp-page="/Index" class="primary-action-button">Zpět na přehled</a>
+        </div>
+    </section>
+</section>

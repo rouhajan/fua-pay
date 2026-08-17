@@ -1,0 +1,94 @@
+@page
+@model FuaPay.Web.Pages.Admin.Audit.IndexModel
+@{
+    ViewData["Title"] = "Audit";
+    var previousOffset = Math.Max(0, Model.Events.Offset - Model.Events.Limit);
+    var nextOffset = Model.Events.Offset + Model.Events.Limit;
+}
+
+<section class="functional-page">
+    <header class="functional-header">
+        <div>
+            <p class="panel-kicker">Administrace</p>
+            <h1>Audit</h1>
+            <p>Neměnný přehled významných změn rolí, pracovišť, zakázek, kreditu, plateb a exportů.</p>
+        </div>
+    </header>
+
+    <form method="get" class="filter-bar">
+        <input type="hidden" name="view" value="admin" />
+        <label>
+            <span>Hledat</span>
+            <input type="search" name="search" value="@Model.Search" placeholder="Akce, objekt, popis nebo ID" />
+        </label>
+        <div class="filter-actions">
+            <button type="submit" class="secondary-button">Hledat</button>
+            <a asp-page="./Index" asp-route-view="admin" class="text-link">Vyčistit</a>
+        </div>
+    </form>
+
+    <section class="data-panel">
+        <div class="data-panel-header">
+            <h2>Auditní události</h2>
+            <span>@Model.Events.TotalCount celkem</span>
+        </div>
+        @if (Model.Events.Items.Count == 0)
+        {
+            <div class="empty-state"><p>Žádná auditní událost neodpovídá filtru.</p></div>
+        }
+        else
+        {
+            <div class="responsive-table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Čas</th>
+                            <th>Původce</th>
+                            <th>Akce</th>
+                            <th>Objekt</th>
+                            <th>Popis</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in Model.Events.Items)
+                    {
+                        var user = item.ActorUserId.HasValue
+                            ? Model.Users.GetValueOrDefault(item.ActorUserId.Value)
+                            : null;
+                        <tr>
+                            <td>@item.OccurredAt.ToLocalTime().ToString("dd. MM. yyyy HH:mm:ss")</td>
+                            <td>
+                                <strong>@(user?.DisplayName ?? item.ActorProcessName ?? "Neznámý")</strong>
+                                @if (user is not null)
+                                {
+                                    <small>@user.Email</small>
+                                }
+                            </td>
+                            <td><code>@item.Action</code></td>
+                            <td>
+                                <strong>@item.EntityType</strong>
+                                <small>@item.EntityId</small>
+                            </td>
+                            <td>@item.Description</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (Model.Events.Offset > 0 || Model.Events.HasMore)
+        {
+            <nav class="pagination" aria-label="Stránkování auditu">
+                @if (Model.Events.Offset > 0)
+                {
+                    <a asp-page="./Index" asp-route-view="admin" asp-route-search="@Model.Search" asp-route-offset="@previousOffset">Předchozí</a>
+                }
+                @if (Model.Events.HasMore)
+                {
+                    <a asp-page="./Index" asp-route-view="admin" asp-route-search="@Model.Search" asp-route-offset="@nextOffset">Další</a>
+                }
+            </nav>
+        }
+    </section>
+</section>

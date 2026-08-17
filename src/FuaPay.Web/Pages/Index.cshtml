@@ -1,0 +1,506 @@
+@page
+@using FuaPay.Web.Modules.Access.Web
+@model IndexModel
+@{
+    ViewData["Title"] = "FUA Pay";
+}
+
+@if (User.Identity?.IsAuthenticated == true)
+{
+    if (Model.ViewSelection is null)
+    {
+        <section class="access-unavailable">
+            <p class="section-label">FUA Pay</p>
+            <h1>Přístup není aktivní</h1>
+            <p>
+                Přihlášený účet nemá žádný dostupný pracovní pohled.
+                Obraťte se na správce FUA Pay.
+            </p>
+        </section>
+    }
+    else
+    {
+        var activeView = Model.ViewSelection.Active.View;
+
+        <section class="dashboard">
+            <header class="dashboard-header">
+                <h1>Přehled</h1>
+            </header>
+
+            @if (
+                activeView == AccessView.Customer &&
+                Model.CustomerDashboard is not null)
+            {
+                var dashboard = Model.CustomerDashboard!;
+
+                <div class="dashboard-cards" aria-label="Souhrn">
+                    <article class="summary-card">
+                        <div class="summary-card-heading">
+                            <span class="summary-card-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M4 7.5h16v11H4z" />
+                                    <path d="M4 9V6a2 2 0 0 1 2-2h11" />
+                                    <path d="M15 12h5v3h-5a1.5 1.5 0 0 1 0-3z" />
+                                </svg>
+                            </span>
+                            <span>Aktuální kredit</span>
+                        </div>
+                        <strong>
+                            @DashboardDisplay.FormatMoney(
+                                dashboard.BalanceMinorUnits)
+                        </strong>
+                        <small>K dispozici pro fakultní služby</small>
+                    </article>
+
+                    <article class="summary-card">
+                        <div class="summary-card-heading">
+                            <span class="summary-card-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="8" />
+                                    <path d="M12 8v4l2.5 1.5" />
+                                </svg>
+                            </span>
+                            <span>Čekající platby</span>
+                        </div>
+                        <strong>@dashboard.AwaitingPaymentCount</strong>
+                        <small>Zakázky připravené k úhradě</small>
+                    </article>
+
+                    <article class="summary-card">
+                        <div class="summary-card-heading">
+                            <span class="summary-card-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M7 3.5h7l4 4V20H7z" />
+                                    <path d="M14 3.5V8h4" />
+                                    <path d="M10 12h5M10 15h5" />
+                                </svg>
+                            </span>
+                            <span>Moje zakázky</span>
+                        </div>
+                        <strong>@dashboard.TotalJobCount</strong>
+                        <small>Včetně dokončených zakázek</small>
+                    </article>
+                </div>
+
+                <div class="dashboard-columns">
+                    <section class="dashboard-panel">
+                        <div class="dashboard-panel-header">
+                            <div>
+                                <p class="panel-kicker">Kredit</p>
+                                <h2>Poslední pohyby</h2>
+                            </div>
+                        </div>
+
+                        @if (dashboard.RecentCreditMovements.Count == 0)
+                        {
+                            <div class="empty-state">
+                                <p>Zatím zde nejsou žádné pohyby kreditu.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <ul class="activity-list">
+                                @foreach (
+                                    var movement in
+                                    dashboard.RecentCreditMovements)
+                                {
+                                    <li class="activity-row">
+                                        <span class="activity-symbol @DashboardDisplay.MovementCssClass(movement.Type)" aria-hidden="true"></span>
+                                        <span class="activity-copy">
+                                            <strong>
+                                                @DashboardDisplay.MovementTitle(movement)
+                                            </strong>
+                                            <small>
+                                                @DashboardDisplay.FormatDate(
+                                                    movement.RecordedAt)
+                                            </small>
+                                        </span>
+                                        <strong class="activity-amount @DashboardDisplay.MovementCssClass(movement.Type)">
+                                            @DashboardDisplay.FormatMovementAmount(
+                                                movement)
+                                        </strong>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </section>
+
+                    <section class="dashboard-panel">
+                        <div class="dashboard-panel-header">
+                            <div>
+                                <p class="panel-kicker">Zakázky</p>
+                                <h2>Poslední zakázky</h2>
+                            </div>
+                        </div>
+
+                        @if (dashboard.RecentJobs.Count == 0)
+                        {
+                            <div class="empty-state">
+                                <p>Zatím zde nejsou žádné zakázky.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <ul class="job-list">
+                                @foreach (var job in dashboard.RecentJobs)
+                                {
+                                    <li class="job-row">
+                                        <a class="job-row-link"
+                                           asp-page="/Customer/Jobs/Details"
+                                           asp-route-id="@job.Id"
+                                           asp-route-view="customer"
+                                           aria-label="Detail zakázky @job.Number">
+                                            <div class="job-row-main">
+                                                <div class="job-title-line">
+                                                    <span class="unit-badge">
+                                                        @DashboardDisplay.JobUnitCode(job)
+                                                    </span>
+                                                    <strong>@job.Title</strong>
+                                                </div>
+                                                <span>
+                                                    @job.Number
+                                                    ·
+                                                    @DashboardDisplay.FormatServiceType(
+                                                        job.ServiceType)
+                                                    ·
+                                                    @DashboardDisplay.FormatDate(
+                                                        job.CreatedAt)
+                                                </span>
+                                            </div>
+                                            <div class="job-row-meta">
+                                                <span class="status-badge @DashboardDisplay.JobStatusCssClass(job.ProductionStatus, job.PaymentStatus)">
+                                                    @DashboardDisplay.FormatJobStatus(
+                                                        job.ProductionStatus,
+                                                        job.PaymentStatus)
+                                                </span>
+                                                <strong>
+                                                    @DashboardDisplay.FormatMoney(
+                                                        job.PriceMinorUnits)
+                                                </strong>
+                                            </div>
+                                        </a>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </section>
+                </div>
+            }
+            else if (
+                activeView == AccessView.Requester &&
+                Model.RequesterDashboard is not null)
+            {
+                var dashboard = Model.RequesterDashboard!;
+
+                @if (dashboard.ServiceUnits.Count > 1)
+                {
+                    <nav class="scope-switcher" aria-label="Pracoviště">
+                        <a asp-page="/Index"
+                           asp-route-view="requester"
+                           class="@(dashboard.SelectedServiceUnitId is null ? "is-active" : null)">
+                            Všechna pracoviště
+                        </a>
+                        @foreach (var serviceUnit in dashboard.ServiceUnits)
+                        {
+                            <a asp-page="/Index"
+                               asp-route-view="requester"
+                               asp-route-unit="@serviceUnit.Id"
+                               class="@(dashboard.SelectedServiceUnitId == serviceUnit.Id ? "is-active" : null)">
+                                <span>@serviceUnit.Code</span>
+                                @serviceUnit.DisplayName
+                            </a>
+                        }
+                    </nav>
+                }
+                else if (dashboard.ServiceUnits.Count == 1)
+                {
+                    <p class="scope-label">
+                        <span>@dashboard.ServiceUnits[0].Code</span>
+                        @dashboard.ServiceUnits[0].DisplayName
+                    </p>
+                }
+                else
+                {
+                    <div class="access-scope-warning">
+                        Role zadavatele zatím nemá přiřazené žádné pracoviště.
+                    </div>
+                }
+
+                <div class="dashboard-cards" aria-label="Souhrn">
+                    <article class="summary-card">
+                        <div class="summary-card-heading">
+                            <span class="summary-card-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M7 3.5h7l4 4V20H7z" />
+                                    <path d="M14 3.5V8h4" />
+                                    <path d="M10 12h5M10 15h5" />
+                                </svg>
+                            </span>
+                            <span>Zakázky</span>
+                        </div>
+                        <strong>@dashboard.TotalJobCount</strong>
+                        <small>@dashboard.ScopeLabel</small>
+                    </article>
+
+                    <article class="summary-card">
+                        <div class="summary-card-heading">
+                            <span class="summary-card-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M5 18.5V15l4-4 3 3 6-7" />
+                                    <path d="M14 7h4v4" />
+                                    <path d="M4 20h16" />
+                                </svg>
+                            </span>
+                            <span>Rozpracované</span>
+                        </div>
+                        <strong>@dashboard.ActiveJobCount</strong>
+                        <small>Návrhy a probíhající zakázky</small>
+                    </article>
+
+                    <article class="summary-card">
+                        <div class="summary-card-heading">
+                            <span class="summary-card-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="8" />
+                                    <path d="M12 8v4l2.5 1.5" />
+                                </svg>
+                            </span>
+                            <span>Čekající platby</span>
+                        </div>
+                        <strong>@dashboard.AwaitingPaymentCount</strong>
+                        <small>Zveřejněné a dosud neuhrazené</small>
+                    </article>
+                </div>
+
+                <section class="dashboard-panel">
+                    <div class="dashboard-panel-header">
+                        <div>
+                            <p class="panel-kicker">@dashboard.ScopeLabel</p>
+                            <h2>Poslední zakázky</h2>
+                        </div>
+                    </div>
+
+                    @if (dashboard.RecentJobs.Count == 0)
+                    {
+                        <div class="empty-state">
+                            <p>Zatím zde nejsou žádné zakázky.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <ul class="job-list">
+                            @foreach (var job in dashboard.RecentJobs)
+                            {
+                                <li class="job-row">
+                                    <a class="job-row-link"
+                                       asp-page="/Management/Jobs/Details"
+                                       asp-route-id="@job.Id"
+                                       asp-route-view="requester"
+                                       aria-label="Detail zakázky @job.Number">
+                                        <div class="job-row-main">
+                                            <div class="job-title-line">
+                                                <span class="unit-badge">
+                                                    @DashboardDisplay.JobUnitCode(job)
+                                                </span>
+                                                <strong>@job.Title</strong>
+                                            </div>
+                                            <span>
+                                                @job.Number
+                                                ·
+                                                @DashboardDisplay.FormatServiceType(
+                                                    job.ServiceType)
+                                                ·
+                                                @DashboardDisplay.FormatDate(
+                                                    job.CreatedAt)
+                                            </span>
+                                        </div>
+                                        <div class="job-row-meta">
+                                            <span class="status-badge @DashboardDisplay.JobStatusCssClass(job.ProductionStatus, job.PaymentStatus)">
+                                                @DashboardDisplay.FormatJobStatus(
+                                                    job.ProductionStatus,
+                                                    job.PaymentStatus)
+                                            </span>
+                                            <strong>
+                                                @DashboardDisplay.FormatMoney(
+                                                    job.PriceMinorUnits)
+                                            </strong>
+                                        </div>
+                                    </a>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </section>
+            }
+            else if (
+                activeView == AccessView.Admin &&
+                Model.AdminDashboard is not null)
+            {
+                var dashboard = Model.AdminDashboard!;
+
+                @if (dashboard.ServiceUnits.Count > 1)
+                {
+                    <nav class="scope-switcher" aria-label="Filtr pracoviště">
+                        <a asp-page="/Index"
+                           asp-route-view="admin"
+                           class="@(dashboard.SelectedServiceUnitId is null ? "is-active" : null)">
+                            Všechna pracoviště
+                        </a>
+                        @foreach (var serviceUnit in dashboard.ServiceUnits)
+                        {
+                            <a asp-page="/Index"
+                               asp-route-view="admin"
+                               asp-route-unit="@serviceUnit.Id"
+                               class="@(dashboard.SelectedServiceUnitId == serviceUnit.Id ? "is-active" : null)">
+                                <span>@serviceUnit.Code</span>
+                                @serviceUnit.DisplayName
+                            </a>
+                        }
+                    </nav>
+                }
+
+                <div class="dashboard-cards" aria-label="Souhrn">
+                    <article class="summary-card">
+                        <span>Všechny zakázky</span>
+                        <strong>@dashboard.TotalJobCount</strong>
+                        <small>@dashboard.ScopeLabel</small>
+                    </article>
+                    <article class="summary-card">
+                        <span>Aktivní zakázky</span>
+                        <strong>@dashboard.ActiveJobCount</strong>
+                        <small>Návrhy a probíhající výroba</small>
+                    </article>
+                    <article class="summary-card">
+                        <span>Čekající platby</span>
+                        <strong>@dashboard.AwaitingPaymentCount</strong>
+                        <small>Zveřejněné a dosud neuhrazené</small>
+                    </article>
+                </div>
+
+                <section class="dashboard-panel">
+                    <div class="dashboard-panel-header">
+                        <div>
+                            <p class="panel-kicker">@dashboard.ScopeLabel</p>
+                            <h2>Poslední zakázky</h2>
+                        </div>
+                    </div>
+
+                    @if (dashboard.RecentJobs.Count == 0)
+                    {
+                        <div class="empty-state">
+                            <p>Zatím zde nejsou žádné zakázky.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <ul class="job-list">
+                            @foreach (var job in dashboard.RecentJobs)
+                            {
+                                <li class="job-row">
+                                    <a class="job-row-link"
+                                       asp-page="/Management/Jobs/Details"
+                                       asp-route-id="@job.Id"
+                                       asp-route-view="admin"
+                                       aria-label="Detail zakázky @job.Number">
+                                        <div class="job-row-main">
+                                            <div class="job-title-line">
+                                                <span class="unit-badge">
+                                                    @DashboardDisplay.JobUnitCode(job)
+                                                </span>
+                                                <strong>@job.Title</strong>
+                                            </div>
+                                            <span>
+                                                @job.Number
+                                                ·
+                                                @DashboardDisplay.FormatServiceType(
+                                                    job.ServiceType)
+                                                ·
+                                                @DashboardDisplay.FormatDate(
+                                                    job.CreatedAt)
+                                            </span>
+                                        </div>
+                                        <div class="job-row-meta">
+                                            <span class="status-badge @DashboardDisplay.JobStatusCssClass(job.ProductionStatus, job.PaymentStatus)">
+                                                @DashboardDisplay.FormatJobStatus(
+                                                    job.ProductionStatus,
+                                                    job.PaymentStatus)
+                                            </span>
+                                            <strong>
+                                                @DashboardDisplay.FormatMoney(
+                                                    job.PriceMinorUnits)
+                                            </strong>
+                                        </div>
+                                    </a>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </section>
+            }
+            else
+            {
+                <section class="dashboard-panel">
+                    <div class="empty-state">
+                        <p>Přehled se nepodařilo načíst.</p>
+                    </div>
+                </section>
+            }
+        </section>
+    }
+}
+else
+{
+    <section class="login-shell">
+        <div class="login-card">
+            <div class="secure-mark" aria-hidden="true">
+                <svg viewBox="0 0 64 64" role="img">
+                    <path d="M20 28v-8a12 12 0 0 1 24 0v8" />
+                    <rect x="14" y="28" width="36" height="28" rx="5" />
+                    <circle cx="32" cy="41" r="3" />
+                    <path d="M32 44v5" />
+                </svg>
+            </div>
+
+            <h1>Bezpečný vstup do systému</h1>
+            <p class="login-subtitle">Fakultní platební portál</p>
+            <p class="login-copy">
+                FUA Pay používá jednotné přihlášení Technické univerzity v Liberci
+                pomocí vašeho univerzitního účtu Microsoft.
+                Vaše přihlašovací údaje FUA Pay neukládá.
+            </p>
+
+            @if (Model.AuthenticationError)
+            {
+                <div class="message-box is-error">
+                    Přihlášení se nepodařilo bezpečně dokončit. Zkuste to
+                    znovu, nebo kontaktujte správce FUA Pay.
+                </div>
+            }
+
+            @if (Model.IsEntraSignInEnabled)
+            {
+                <a asp-page="/Account/SignIn" class="primary-button">
+                    Přihlásit se přes Microsoft
+                </a>
+            }
+            else if (Model.IsDevelopmentSignInEnabled)
+            {
+                <a asp-page="/Development/SignIn" class="primary-button">
+                    Přihlásit se přes Microsoft
+                </a>
+                <p class="development-note">
+                    V testovacím prostředí pokračujete na výběr role.
+                </p>
+            }
+            else
+            {
+                <button type="button" class="primary-button" disabled>
+                    Přihlásit se přes Microsoft
+                </button>
+                <p class="development-note">
+                    Přihlášení není v tomto prostředí nakonfigurováno.
+                </p>
+            }
+        </div>
+    </section>
+}

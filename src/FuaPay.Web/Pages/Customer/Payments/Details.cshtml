@@ -1,0 +1,188 @@
+@page "{id:guid}"
+@model FuaPay.Web.Pages.Customer.Payments.DetailsModel
+@using FuaPay.Web.Modules.Payments.Domain
+@{
+    ViewData["Title"] = "Detail platby";
+    var payment = Model.Payment;
+    var statusMessageKind =
+        TempData["StatusMessageKind"] as string;
+}
+
+<section class="functional-page narrow-page">
+    <header class="functional-header split-header">
+        <div>
+            <p class="panel-kicker">Platba</p>
+            <h1>@PaymentDisplay.PurposeLabel(payment.PurposeType)</h1>
+            <p><code>@payment.ProviderReference</code></p>
+        </div>
+        <a asp-page="./Index"
+           asp-route-view="customer"
+           class="secondary-button">
+            Zpět na platby
+        </a>
+    </header>
+
+    @if (TempData["StatusMessage"] is string message)
+    {
+        <div class="message-box @(statusMessageKind == "warning" ? "is-warning" : "is-success")">
+            @message
+        </div>
+    }
+    <div asp-validation-summary="All" class="message-box is-error"></div>
+
+    <section class="data-panel">
+        <div class="payment-hero">
+            <div>
+                <span>Částka</span>
+                <strong>@DashboardDisplay.FormatMoney(payment.AmountMinorUnits)</strong>
+            </div>
+            <span class="status-badge @PaymentDisplay.StatusCssClass(payment.Status)">
+                @PaymentDisplay.StatusLabel(payment.Status)
+            </span>
+        </div>
+        <dl class="detail-list">
+            <div>
+                <dt>Vytvořeno</dt>
+                <dd>@DashboardDisplay.FormatDate(payment.CreatedAt)</dd>
+            </div>
+            <div>
+                <dt>Poslední změna</dt>
+                <dd>@DashboardDisplay.FormatDate(payment.UpdatedAt)</dd>
+            </div>
+            <div>
+                <dt>Poskytovatel</dt>
+                <dd>@payment.Provider</dd>
+            </div>
+            @if (payment.JobId.HasValue)
+            {
+                <div>
+                    <dt>Zakázka</dt>
+                    <dd>
+                        <a asp-page="/Customer/Jobs/Details"
+                           asp-route-id="@payment.JobId"
+                           asp-route-view="customer"
+                           class="text-link">
+                            @(Model.JobNumber ?? payment.JobId.ToString())
+                        </a>
+                    </dd>
+                </div>
+            }
+            @if (payment.FailureReason is not null)
+            {
+                <div>
+                    <dt>Důvod</dt>
+                    <dd>@payment.FailureReason</dd>
+                </div>
+            }
+        </dl>
+
+        @if (
+            payment.Provider == PaymentProvider.Csob &&
+            payment.Status == PaymentStatus.Pending &&
+            payment.ProcessUri is not null)
+        {
+            <div class="form-actions">
+                <a href="@payment.ProcessUri"
+                   class="primary-action-button"
+                   rel="external nofollow">
+                    Pokračovat na zabezpečenou platební bránu ČSOB
+                </a>
+            </div>
+        }
+    </section>
+
+    @if (PaymentDisplay.IsUnsuccessfulTerminalStatus(payment.Status))
+    {
+        <section class="data-panel payment-recovery">
+            <div class="payment-recovery-copy">
+                <p class="panel-kicker">Další krok</p>
+                <h2>Platba neproběhla</h2>
+
+                @if (payment.PurposeType == PaymentPurposeType.Job)
+                {
+                    <p>
+                        Selhal pouze tento platební pokus. Zakázka nebyla
+                        zrušena a zůstává nezaplacená, dokud neproběhne
+                        jiná úhrada.
+                    </p>
+                }
+                else
+                {
+                    <p>
+                        Kredit nebyl dobit. Můžete vytvořit nové dobití
+                        s jinou částkou nebo platební pokus zopakovat.
+                    </p>
+                }
+            </div>
+
+            <div class="payment-actions">
+                @if (Model.CanRetryJobPayment)
+                {
+                    <form method="post"
+                          asp-page-handler="RetryJobPayment"
+                          asp-route-id="@payment.Id">
+                        <button type="submit" class="primary-action-button">
+                            Zkusit přímou platbu znovu
+                        </button>
+                    </form>
+                }
+
+                @if (payment.JobId.HasValue)
+                {
+                    <a asp-page="/Customer/Jobs/Details"
+                       asp-route-id="@payment.JobId"
+                       asp-route-view="customer"
+                       class="secondary-button">
+                        Zpět k možnostem úhrady
+                    </a>
+                }
+                else
+                {
+                    <a asp-page="/Customer/Payments/CreateTopUp"
+                       asp-route-view="customer"
+                       class="primary-action-button">
+                        Nové dobití kreditu
+                    </a>
+                }
+            </div>
+        </section>
+    }
+
+    @if (
+        Model.DevelopmentSimulationEnabled &&
+        payment.Status == PaymentStatus.Pending)
+    {
+        <section class="data-panel development-simulator">
+            <div class="data-panel-header">
+                <h2>Vývojový simulátor brány</h2>
+            </div>
+            <p>
+                Tato část nebude v produkci dostupná. Ověřuje stejný
+                idempotentní tok, který později spustí potvrzení ČSOB.
+            </p>
+            <div class="action-row wrap-actions">
+                <form method="post"
+                      asp-page-handler="Complete"
+                      asp-route-id="@payment.Id">
+                    <button type="submit" class="primary-action-button">
+                        Simulovat úspěšnou platbu
+                    </button>
+                </form>
+                <form method="post"
+                      asp-page-handler="Fail"
+                      asp-route-id="@payment.Id">
+                    <button type="submit" class="secondary-button">
+                        Simulovat zamítnutí
+                    </button>
+                </form>
+                <form method="post"
+                      asp-page-handler="Cancel"
+                      asp-route-id="@payment.Id">
+                    <button type="submit" class="danger-button">
+                        Zrušit platební pokus
+                    </button>
+                </form>
+            </div>
+        </section>
+    }
+</section>
