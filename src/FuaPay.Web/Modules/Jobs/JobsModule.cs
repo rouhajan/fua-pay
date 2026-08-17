@@ -17,11 +17,18 @@ public static class JobsModule
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<JobManagementService>();
         services.AddScoped<JobSettlementService>();
+        services.AddScoped<CreditJobPaymentService>();
         services.AddScoped<JobManagementPageContextResolver>();
         services.AddScoped<JobPresentationComposer>();
-        services.AddScoped<IJobQueries, EfJobQueries>();
-        services.AddScoped<IJobRepository, EfJobRepository>();
-        services.AddScoped<IJobNumberAllocator, EfJobNumberAllocator>();
+        services.AddScoped<
+            IJobQueries,
+            EfJobQueries>();
+        services.AddScoped<
+            IJobRepository,
+            EfJobRepository>();
+        services.AddScoped<
+            IJobNumberAllocator,
+            EfJobNumberAllocator>();
 
         return services;
     }
