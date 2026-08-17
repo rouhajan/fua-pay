@@ -1,4 +1,5 @@
 using FuaPay.Web.Modules.Access.Application;
+using FuaPay.Web.Modules.Access.Development;
 using FuaPay.Web.Modules.Access.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Access.Web;
 
@@ -10,7 +11,8 @@ namespace FuaPay.Web.Modules.Access;
 public static class AccessModule
 {
     public static IServiceCollection AddAccessModule(
-        this IServiceCollection services)
+        this IServiceCollection services,
+        bool developmentSignInEnabled = false)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -19,10 +21,18 @@ public static class AccessModule
         services.AddScoped<AccessUserAdministrationService>();
         services.AddScoped<ExternalIdentityAdministrationService>();
         services.AddScoped<AccessSessionSynchronizer>();
+
+        if (developmentSignInEnabled)
+        {
+            services.AddScoped<DevelopmentSignInService>();
+        }
+
         services.AddScoped<
             IAccessUserRepository,
             EfAccessUserRepository>();
-        services.AddScoped<IAccessUserQueries, EfAccessUserQueries>();
+        services.AddScoped<
+            IAccessUserQueries,
+            EfAccessUserQueries>();
         services.AddScoped<
             IAccessSessionQueries,
             EfAccessSessionQueries>();
