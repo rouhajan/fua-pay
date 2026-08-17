@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FuaPay.Web/FuaPay.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FuaPay.Web.Tests/FuaPay.Web.Tests.csproj" />
+    <Project Path="tests/FuaPay.DatabaseTests/FuaPay.DatabaseTests.csproj" />
+    <Project Path="tests/FuaPay.CsobSandboxTests/FuaPay.CsobSandboxTests.csproj" />
+  </Folder>
+</Solution>

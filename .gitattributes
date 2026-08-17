@@ -1,0 +1,39 @@
+* text=auto
+
+# Source code and configuration use LF on Windows and Linux.
+*.cs text eol=lf
+*.csproj text eol=lf
+*.sln text eol=lf
+*.slnx text eol=lf
+*.props text eol=lf
+*.targets text eol=lf
+*.json text eol=lf
+*.config text eol=lf
+*.csv text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ps1 text eol=lf
+*.sh text eol=lf
+
+# Binary files must never be modified by line-ending conversion.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+# Repository metadata files use LF.
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.editorconfig text eol=lf
+# Web source files use LF.
+*.cshtml text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.map text eol=lf
+
+# Third-party frontend libraries are preserved as supplied.
+src/FuaPay.Web/wwwroot/lib/** -text -whitespace
