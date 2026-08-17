@@ -59,6 +59,9 @@ public sealed class FuaPayDbContext : DbContext
         PaymentOrderNumberSequences =>
             Set<PaymentOrderNumberSequenceEntity>();
 
+    internal DbSet<CsobPaymentRecoveryEntity> CsobPaymentRecoveries =>
+        Set<CsobPaymentRecoveryEntity>();
+
     internal DbSet<ServiceUnitEntity> ServiceUnits =>
         Set<ServiceUnitEntity>();
 
