@@ -1,6 +1,7 @@
 using FuaPay.Web.Modules.Access.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Audit.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Notifications.Infrastructure.Persistence;
+using FuaPay.Web.Modules.ServiceUnits.Infrastructure.Persistence;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -28,6 +29,13 @@ public sealed class FuaPayDbContext : DbContext
 
     internal DbSet<NotificationOutboxEntity> NotificationOutbox =>
         Set<NotificationOutboxEntity>();
+
+    internal DbSet<ServiceUnitEntity> ServiceUnits =>
+        Set<ServiceUnitEntity>();
+
+    internal DbSet<RequesterServiceUnitAssignmentEntity>
+        ServiceUnitRequesterAssignments =>
+            Set<RequesterServiceUnitAssignmentEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
