@@ -46,9 +46,6 @@ public sealed class FuaPayDbContext : DbContext
     internal DbSet<JobNumberSequenceEntity> JobNumberSequences =>
         Set<JobNumberSequenceEntity>();
 
-    internal DbSet<NotificationOutboxEntity> NotificationOutbox =>
-        Set<NotificationOutboxEntity>();
-
     internal DbSet<PaymentEntity> Payments =>
         Set<PaymentEntity>();
 
@@ -61,6 +58,9 @@ public sealed class FuaPayDbContext : DbContext
 
     internal DbSet<CsobPaymentRecoveryEntity> CsobPaymentRecoveries =>
         Set<CsobPaymentRecoveryEntity>();
+
+    internal DbSet<NotificationOutboxEntity> NotificationOutbox =>
+        Set<NotificationOutboxEntity>();
 
     internal DbSet<ServiceUnitEntity> ServiceUnits =>
         Set<ServiceUnitEntity>();
