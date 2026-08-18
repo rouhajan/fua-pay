@@ -35,7 +35,12 @@ public sealed class SecurityPerimeterTests :
     [InlineData("/")]
     [InlineData("/Privacy")]
     [InlineData("/Terms")]
-    [InlineData("/css/site.css")]
+    [InlineData("/css/base.css")]
+    [InlineData("/css/shell.css")]
+    [InlineData("/css/dashboard.css")]
+    [InlineData("/css/components.css")]
+    [InlineData("/css/features.css")]
+    [InlineData("/css/responsive.css")]
     public async Task PublicEndpoint_WithoutAuthentication_ReturnsSuccess(
         string path)
     {

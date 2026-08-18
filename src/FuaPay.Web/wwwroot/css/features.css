@@ -1,0 +1,258 @@
+/* Feature-specific surfaces for customer jobs, credit history, development identities and payments. */
+
+.customer-jobs-filter {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fcfdfc;
+}
+
+.customer-jobs-filter > summary {
+  min-height: 58px;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--ink);
+  font-weight: 700;
+  list-style: none;
+  cursor: pointer;
+}
+
+.customer-jobs-filter > summary::-webkit-details-marker {
+  display: none;
+}
+
+.customer-jobs-filter > summary::after {
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  content: "";
+  transform: rotate(45deg) translate(-2px, 2px);
+  transition: transform 0.15s ease;
+}
+
+.customer-jobs-filter[open] > summary::after {
+  transform: rotate(225deg) translate(-2px, 2px);
+}
+
+.customer-jobs-filter > summary:hover {
+  background: #f7faf8;
+}
+
+.customer-jobs-filter > summary:focus-visible {
+  outline: 3px solid rgba(0, 107, 70, 0.18);
+  outline-offset: -3px;
+}
+
+.customer-jobs-filter-summary-content {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.customer-jobs-filter-active {
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: var(--fua-green-dark);
+  background: var(--fua-green-soft);
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.customer-jobs-filter-form {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.customer-job-title-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.customer-job-title-line strong {
+  min-width: 0;
+}
+
+.customer-job-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.customer-job-title-link:hover {
+  color: var(--fua-green-dark);
+  text-decoration: underline;
+}
+
+.customer-job-title-link:focus-visible {
+  outline: 3px solid rgba(0, 107, 70, 0.22);
+  outline-offset: 3px;
+}
+
+.customer-job-mobile-unit,
+.customer-job-mobile-service {
+  display: none;
+}
+
+.profile-sections {
+  display: grid;
+  gap: 28px;
+}
+
+.profile-section {
+  display: grid;
+  gap: 14px;
+}
+
+.profile-section-header {
+  display: grid;
+  gap: 5px;
+}
+
+.profile-section-header h2,
+.payment-recovery h2 {
+  margin: 0;
+}
+
+.profile-section-header p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.profile-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-row {
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: var(--surface);
+}
+
+.profile-row:hover {
+  border-color: rgba(0, 107, 70, 0.35);
+}
+
+.profile-row-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.profile-row-copy strong,
+.profile-row-copy span,
+.profile-row-copy small {
+  overflow-wrap: anywhere;
+}
+
+.profile-row-copy strong {
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+
+.profile-row-copy span {
+  color: var(--fua-green-dark);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.profile-row-copy small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.profile-row .primary-button {
+  min-width: 92px;
+  flex: 0 0 auto;
+}
+
+.payment-callout-copy,
+.payment-recovery-copy {
+  max-width: 610px;
+}
+
+.payment-callout-copy > p:not(.panel-kicker),
+.payment-recovery-copy > p:not(.panel-kicker) {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.payment-balance-summary {
+  margin: 20px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.payment-balance-summary > div {
+  min-width: 150px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  background: #fcfdfc;
+}
+
+.payment-balance-summary dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.payment-balance-summary dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.payment-balance-note {
+  margin: 12px 0 0;
+  font-size: 0.9rem;
+}
+
+.payment-balance-note.is-positive {
+  color: var(--fua-green-dark);
+}
+
+.payment-balance-note.is-warning {
+  color: #674d10;
+}
+
+.payment-actions {
+  min-width: 230px;
+  display: grid;
+  gap: 10px;
+}
+
+.payment-actions form,
+.payment-actions .primary-action-button,
+.payment-actions .secondary-button {
+  width: 100%;
+}
+
+.payment-recovery {
+  border-color: #e6d49c;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  background: #fffdf7;
+}

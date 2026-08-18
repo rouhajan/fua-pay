@@ -1,0 +1,234 @@
+/* Authenticated application shell, session controls and primary navigation. */
+
+.app-page {
+  background: var(--surface);
+}
+
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr);
+  grid-template-rows: 112px minmax(0, 1fr);
+  grid-template-areas:
+    "header header"
+    "sidebar main";
+}
+
+.app-header {
+  grid-area: header;
+  padding: 0 46px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  background: var(--surface);
+}
+
+.app-sticky-region {
+  display: contents;
+}
+
+.app-session {
+  grid-area: header;
+  align-self: center;
+  justify-self: end;
+  z-index: 1;
+  margin-right: 46px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  white-space: nowrap;
+}
+
+.app-session form {
+  margin: 0;
+}
+
+.mobile-sign-out-form {
+  display: none;
+}
+
+.header-credit {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface);
+  text-decoration: none;
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.header-credit strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.header-credit:hover,
+.header-credit:focus-visible {
+  border-color: var(--fua-green);
+  color: var(--fua-green-dark);
+}
+
+.single-view-label {
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.text-button {
+  padding: 0;
+  border: 0;
+  color: var(--fua-green-dark);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.view-menu {
+  position: relative;
+}
+
+.view-menu summary {
+  min-width: 145px;
+  padding: 10px 34px 10px 14px;
+  border-radius: 7px;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+  font-weight: 650;
+}
+
+.view-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.view-menu summary::after {
+  content: "";
+  position: absolute;
+  top: 15px;
+  right: 14px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.view-menu[open] summary,
+.view-menu summary:hover {
+  background: var(--fua-green-soft);
+}
+
+.view-menu-panel {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 190px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: grid;
+  gap: 3px;
+  background: var(--surface);
+  box-shadow: 0 16px 38px rgba(17, 23, 19, 0.12);
+}
+
+.view-menu-panel a {
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.view-menu-panel a:hover,
+.view-menu-panel a.is-active {
+  color: var(--fua-green-dark);
+  background: var(--fua-green-soft);
+}
+
+.view-menu-panel a.is-active {
+  font-weight: 750;
+}
+
+.app-sidebar {
+  grid-area: sidebar;
+  padding: 26px 20px;
+  border-right: 1px solid var(--line);
+  background: #fcfdfc;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.app-navigation {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  flex: 1 1 auto;
+}
+
+.app-nav-item {
+  min-height: 52px;
+  padding: 14px 18px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.98rem;
+}
+
+.app-nav-item.is-active {
+  color: var(--fua-green-dark);
+  background: var(--fua-green-soft);
+  font-weight: 750;
+}
+
+.app-nav-item.is-pending {
+  color: #46514b;
+  cursor: default;
+}
+
+.app-main {
+  grid-area: main;
+  min-width: 0;
+  padding: 42px clamp(30px, 4vw, 64px) 72px;
+  background: var(--surface);
+}
+
+.app-user-panel {
+  padding: 20px 18px 4px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+}
+
+.app-user-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.app-user-copy strong,
+.app-user-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-user-copy strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.app-user-copy span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
