@@ -50,19 +50,29 @@
         }
         else
         {
-            <div class="responsive-table-wrap">
-                <table class="data-table jobs-table">
+            <div class="responsive-table-wrap customer-jobs-table-wrap">
+                <table class="data-table jobs-table customer-jobs-table">
                     <thead><tr><th>Zakázka</th><th>Služba</th><th>Stav</th><th>Úhrada</th><th>Cena</th><th></th></tr></thead>
                     <tbody>
                     @foreach (var row in Model.Rows)
                     {
                         <tr>
-                            <td><strong>@row.Job.Title</strong><small>@row.Job.Number · @DashboardDisplay.FormatDate(row.Job.CreatedAt)</small></td>
-                            <td><span class="unit-badge">@row.ServiceUnitCode</span> @row.ServiceUnitDisplayName</td>
-                            <td><span class="status-badge @DashboardDisplay.JobStatusCssClass(row.Job.ProductionStatus, row.Job.PaymentStatus)">@DashboardDisplay.FormatJobStatus(row.Job.ProductionStatus, row.Job.PaymentStatus)</span></td>
-                            <td>@DashboardDisplay.FormatJobPaymentStatus(row.Job.ProductionStatus, row.Job.PaymentStatus)</td>
-                            <td><strong>@DashboardDisplay.FormatMoney(row.Job.PriceMinorUnits)</strong></td>
-                            <td class="table-action"><a asp-page="./Details" asp-route-id="@row.Job.Id" asp-route-view="customer" class="text-link">Detail</a></td>
+                            <td class="customer-job-main">
+                                <div class="customer-job-title-line">
+                                    <span class="unit-badge customer-job-mobile-unit">@row.ServiceUnitCode</span>
+                                    <strong>
+                                        <a asp-page="./Details" asp-route-id="@row.Job.Id" asp-route-view="customer" class="customer-job-title-link">@row.Job.Title</a>
+                                    </strong>
+                                </div>
+                                <small>
+                                    @row.Job.Number<span class="customer-job-mobile-service"> · @row.ServiceUnitDisplayName</span> · @DashboardDisplay.FormatDate(row.Job.CreatedAt)
+                                </small>
+                            </td>
+                            <td class="customer-job-service"><span class="unit-badge">@row.ServiceUnitCode</span> @row.ServiceUnitDisplayName</td>
+                            <td class="customer-job-status"><span class="status-badge @DashboardDisplay.JobStatusCssClass(row.Job.ProductionStatus, row.Job.PaymentStatus)">@DashboardDisplay.FormatJobStatus(row.Job.ProductionStatus, row.Job.PaymentStatus)</span></td>
+                            <td class="customer-job-payment">@DashboardDisplay.FormatJobPaymentStatus(row.Job.ProductionStatus, row.Job.PaymentStatus)</td>
+                            <td class="customer-job-price"><strong>@DashboardDisplay.FormatMoney(row.Job.PriceMinorUnits)</strong></td>
+                            <td class="table-action customer-job-action"><a asp-page="./Details" asp-route-id="@row.Job.Id" asp-route-view="customer" class="text-link">Detail</a></td>
                         </tr>
                     }
                     </tbody>

@@ -1721,7 +1721,145 @@ code {
   }
 }
 
+.customer-job-title-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.customer-job-title-line strong {
+  min-width: 0;
+}
+
+.customer-job-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.customer-job-title-link:hover {
+  color: var(--fua-green-dark);
+  text-decoration: underline;
+}
+
+.customer-job-title-link:focus-visible {
+  outline: 3px solid rgba(0, 107, 70, 0.22);
+  outline-offset: 3px;
+}
+
+.customer-job-mobile-unit,
+.customer-job-mobile-service {
+  display: none;
+}
+
 @media (max-width: 560px) {
+  .customer-jobs-table-wrap {
+    width: calc(100% + 40px);
+    margin-right: -20px;
+    margin-bottom: -20px;
+    margin-left: -20px;
+    overflow-x: visible;
+  }
+
+  .customer-jobs-table {
+    min-width: 0;
+  }
+
+  .customer-jobs-table,
+  .customer-jobs-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .customer-jobs-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .customer-jobs-table tbody > tr {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "job job"
+      "payment payment"
+      "status price";
+    gap: 8px 12px;
+  }
+
+  .customer-jobs-table tbody > tr:last-child {
+    border-bottom: 0;
+  }
+
+  .customer-jobs-table td {
+    min-width: 0;
+    padding: 0;
+    border-bottom: 0;
+    display: block;
+  }
+
+  .customer-job-main {
+    grid-area: job;
+  }
+
+  .customer-job-main > small {
+    margin-top: 3px;
+    color: var(--muted);
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-job-title-line {
+    align-items: flex-start;
+  }
+
+  .customer-job-title-line strong {
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-job-mobile-unit {
+    display: inline-flex;
+  }
+
+  .customer-job-mobile-service {
+    display: inline;
+  }
+
+  .customer-job-service {
+    display: none;
+  }
+
+  .customer-job-status {
+    grid-area: status;
+    align-self: center;
+  }
+
+  .customer-job-payment {
+    grid-area: payment;
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+
+  .customer-job-price {
+    grid-area: price;
+    align-self: center;
+    justify-self: end;
+    white-space: nowrap;
+  }
+
+  .customer-job-action {
+    display: none;
+  }
+
   .credit-history-table-wrap {
     overflow-x: visible;
   }
