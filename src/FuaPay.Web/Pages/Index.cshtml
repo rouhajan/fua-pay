@@ -22,7 +22,7 @@
     {
         var activeView = Model.ViewSelection.Active.View;
 
-        <section class="dashboard">
+        <section class="dashboard @(activeView == AccessView.Customer ? "customer-dashboard" : null)">
             <header class="dashboard-header">
                 <h1>Přehled</h1>
             </header>
@@ -43,7 +43,10 @@
                                     <path d="M15 12h5v3h-5a1.5 1.5 0 0 1 0-3z" />
                                 </svg>
                             </span>
-                            <span>Aktuální kredit</span>
+                            <span class="summary-card-label">
+                                <span class="summary-card-label-full">Aktuální kredit</span>
+                                <span class="summary-card-label-compact">Kredit</span>
+                            </span>
                         </div>
                         <strong>
                             @DashboardDisplay.FormatMoney(
@@ -60,7 +63,10 @@
                                     <path d="M12 8v4l2.5 1.5" />
                                 </svg>
                             </span>
-                            <span>Čekající platby</span>
+                            <span class="summary-card-label">
+                                <span class="summary-card-label-full">Čekající platby</span>
+                                <span class="summary-card-label-compact">K úhradě</span>
+                            </span>
                         </div>
                         <strong>@dashboard.AwaitingPaymentCount</strong>
                         <small>Zakázky připravené k úhradě</small>
@@ -75,7 +81,10 @@
                                     <path d="M10 12h5M10 15h5" />
                                 </svg>
                             </span>
-                            <span>Moje zakázky</span>
+                            <span class="summary-card-label">
+                                <span class="summary-card-label-full">Moje zakázky</span>
+                                <span class="summary-card-label-compact">Zakázky</span>
+                            </span>
                         </div>
                         <strong>@dashboard.TotalJobCount</strong>
                         <small>Včetně dokončených zakázek</small>
@@ -125,7 +134,7 @@
                         }
                     </section>
 
-                    <section class="dashboard-panel">
+                    <section class="dashboard-panel dashboard-panel-jobs">
                         <div class="dashboard-panel-header">
                             <div>
                                 <p class="panel-kicker">Zakázky</p>
