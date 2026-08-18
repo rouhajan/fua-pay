@@ -265,7 +265,16 @@ summary {
   background: var(--surface);
 }
 
+.app-sticky-region {
+  display: contents;
+}
+
 .app-session {
+  grid-area: header;
+  align-self: center;
+  justify-self: end;
+  z-index: 1;
+  margin-right: 46px;
   display: flex;
   align-items: center;
   gap: 24px;
@@ -772,22 +781,33 @@ summary {
   }
 
   .app-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(0, 1fr);
-    grid-template-areas:
-      "header"
-      "sidebar"
-      "main";
+    display: block;
+    width: 100%;
+    min-width: 0;
   }
 
   .app-header {
-    min-height: 96px;
-    padding: 18px 24px;
-    align-items: flex-start;
-    flex-wrap: wrap;
+    min-height: 72px;
+    padding: 14px 24px;
+  }
+
+  .app-sticky-region {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    width: 100%;
+    min-width: 0;
+    background: var(--surface);
   }
 
   .app-session {
+    grid-area: auto;
+    width: 100%;
+    min-height: 56px;
+    margin-right: 0;
+    padding: 8px 24px;
+    justify-self: stretch;
     gap: 14px;
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -805,10 +825,15 @@ summary {
   }
 
   .app-sidebar {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     padding: 10px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
     overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .app-navigation {
