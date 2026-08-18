@@ -5,6 +5,9 @@
     ViewData["Title"] = "Moje zakázky";
     var previousOffset = Math.Max(0, Model.Jobs.Offset - Model.Jobs.Limit);
     var nextOffset = Model.Jobs.Offset + Model.Jobs.Limit;
+    var hasActiveFilters = !string.IsNullOrWhiteSpace(Model.Search) ||
+        Model.ProductionStatus.HasValue ||
+        Model.PaymentStatus.HasValue;
 }
 
 <section class="functional-page">
@@ -12,35 +15,46 @@
         <div><p class="panel-kicker">Zákazník</p><h1>Moje zakázky</h1><p>Zobrazené jsou zveřejněné zakázky vedené na váš univerzitní účet.</p></div>
     </header>
 
-    <form method="get" class="filter-grid customer-filter-grid">
-        <input type="hidden" name="view" value="customer" />
-        <label><span>Číslo nebo název</span><input type="search" name="search" value="@Model.Search" /></label>
-        <label>
-            <span>Výrobní stav</span>
-            <select name="productionStatus">
-                <option value="">Všechny</option>
-                @foreach (var status in new[] { JobProductionStatus.Published, JobProductionStatus.InProduction, JobProductionStatus.ReadyForPickup, JobProductionStatus.Completed, JobProductionStatus.Cancelled })
+    <details class="customer-jobs-filter">
+        <summary>
+            <span class="customer-jobs-filter-summary-content">
+                <span>Filtry</span>
+                @if (hasActiveFilters)
                 {
-                    <option value="@status" selected="@(Model.ProductionStatus == status ? "selected" : null)">@DashboardDisplay.FormatJobProductionStatus(status)</option>
+                    <span class="customer-jobs-filter-active">Aktivní</span>
                 }
-            </select>
-        </label>
-        <label>
-            <span>Úhrada</span>
-            <select name="paymentStatus">
-                <option value="">Všechny</option>
-                <option value="@JobPaymentStatus.Unpaid"
-                        selected="@(Model.PaymentStatus == JobPaymentStatus.Unpaid ? "selected" : null)">
-                    Neuhrazené
-                </option>
-                <option value="@JobPaymentStatus.Paid"
-                        selected="@(Model.PaymentStatus == JobPaymentStatus.Paid ? "selected" : null)">
-                    Uhrazené
-                </option>
-            </select>
-        </label>
-        <div class="filter-actions"><button type="submit" class="secondary-button">Použít filtry</button><a asp-page="./Index" asp-route-view="customer" class="text-link">Vyčistit</a></div>
-    </form>
+            </span>
+        </summary>
+        <form method="get" class="filter-grid customer-filter-grid customer-jobs-filter-form">
+            <input type="hidden" name="view" value="customer" />
+            <label><span>Číslo nebo název</span><input type="search" name="search" value="@Model.Search" /></label>
+            <label>
+                <span>Výrobní stav</span>
+                <select name="productionStatus">
+                    <option value="">Všechny</option>
+                    @foreach (var status in new[] { JobProductionStatus.Published, JobProductionStatus.InProduction, JobProductionStatus.ReadyForPickup, JobProductionStatus.Completed, JobProductionStatus.Cancelled })
+                    {
+                        <option value="@status" selected="@(Model.ProductionStatus == status ? "selected" : null)">@DashboardDisplay.FormatJobProductionStatus(status)</option>
+                    }
+                </select>
+            </label>
+            <label>
+                <span>Úhrada</span>
+                <select name="paymentStatus">
+                    <option value="">Všechny</option>
+                    <option value="@JobPaymentStatus.Unpaid"
+                            selected="@(Model.PaymentStatus == JobPaymentStatus.Unpaid ? "selected" : null)">
+                        Neuhrazené
+                    </option>
+                    <option value="@JobPaymentStatus.Paid"
+                            selected="@(Model.PaymentStatus == JobPaymentStatus.Paid ? "selected" : null)">
+                        Uhrazené
+                    </option>
+                </select>
+            </label>
+            <div class="filter-actions"><button type="submit" class="secondary-button">Použít filtry</button><a asp-page="./Index" asp-route-view="customer" class="text-link">Vyčistit</a></div>
+        </form>
+    </details>
 
     <section class="data-panel">
         <div class="data-panel-header"><h2>Zakázky</h2><span>@Model.Jobs.TotalCount celkem</span></div>
