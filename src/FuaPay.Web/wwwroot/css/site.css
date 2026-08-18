@@ -1722,6 +1722,89 @@ code {
 }
 
 @media (max-width: 560px) {
+  .credit-history-table-wrap {
+    overflow-x: visible;
+  }
+
+  .credit-history-table,
+  .credit-history-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .credit-history-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .credit-history-table tbody > tr {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "date amount"
+      "description description"
+      "balance balance";
+    gap: 7px 12px;
+  }
+
+  .credit-history-table tbody > tr:first-child {
+    padding-top: 0;
+  }
+
+  .credit-history-table tbody > tr:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+
+  .credit-history-table td {
+    min-width: 0;
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .credit-history-date {
+    grid-area: date;
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+
+  .credit-history-amount {
+    grid-area: amount;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .credit-history-description {
+    grid-area: description;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+
+  .credit-history-table .credit-history-balance {
+    grid-area: balance;
+    padding-top: 7px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .credit-history-balance::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
   .pagination {
     justify-content: stretch;
   }

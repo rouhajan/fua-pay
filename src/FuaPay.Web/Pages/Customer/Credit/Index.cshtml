@@ -29,17 +29,17 @@
         }
         else
         {
-            <div class="responsive-table-wrap">
-                <table class="data-table">
+            <div class="responsive-table-wrap credit-history-table-wrap">
+                <table class="data-table credit-history-table">
                     <thead><tr><th>Datum</th><th>Popis</th><th>Pohyb</th><th>Zůstatek po pohybu</th></tr></thead>
                     <tbody>
                     @foreach (var movement in Model.Movements.Items)
                     {
                         <tr>
-                            <td>@DashboardDisplay.FormatDate(movement.RecordedAt)</td>
-                            <td>@movement.Description</td>
-                            <td><strong class="@DashboardDisplay.MovementCssClass(movement.Type)">@DashboardDisplay.FormatMovementAmount(movement)</strong></td>
-                            <td>@DashboardDisplay.FormatMoney(movement.BalanceAfterMinorUnits)</td>
+                            <td class="credit-history-date">@DashboardDisplay.FormatDate(movement.RecordedAt)</td>
+                            <td class="credit-history-description">@movement.Description</td>
+                            <td class="credit-history-amount"><strong class="@DashboardDisplay.MovementCssClass(movement.Type)">@DashboardDisplay.FormatMovementAmount(movement)</strong></td>
+                            <td class="credit-history-balance" data-label="Zůstatek">@DashboardDisplay.FormatMoney(movement.BalanceAfterMinorUnits)</td>
                         </tr>
                     }
                     </tbody>
