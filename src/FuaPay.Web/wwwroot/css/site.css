@@ -502,6 +502,10 @@ summary {
   stroke-linejoin: round;
 }
 
+.summary-card-icon-mobile-only {
+  display: none;
+}
+
 .summary-card > span,
 .summary-card-heading > span:last-child {
   color: #2d3731;
@@ -921,16 +925,16 @@ summary {
     min-height: 136px;
   }
 
-  .customer-dashboard .dashboard-header {
+  .dashboard .dashboard-header {
     margin-bottom: 18px;
   }
 
-  .customer-dashboard .dashboard-cards {
+  .dashboard .dashboard-cards {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
 
-  .customer-dashboard .summary-card {
+  .dashboard .summary-card {
     min-height: 104px;
     padding: 12px 10px;
     display: grid;
@@ -944,23 +948,27 @@ summary {
     gap: 6px;
   }
 
-  .customer-dashboard .summary-card-heading {
+  .dashboard .summary-card-heading {
     display: contents;
   }
 
-  .customer-dashboard .summary-card-icon {
+  .dashboard .summary-card-icon {
     grid-area: icon;
     width: 30px;
     height: 30px;
     border-radius: 8px;
   }
 
-  .customer-dashboard .summary-card-icon svg {
+  .dashboard .summary-card-icon svg {
     width: 17px;
     height: 17px;
   }
 
-  .customer-dashboard .summary-card-label {
+  .dashboard .summary-card-icon-mobile-only {
+    display: grid;
+  }
+
+  .dashboard .summary-card-label {
     grid-area: label;
     min-width: 0;
     font-size: 0.72rem;
@@ -968,26 +976,26 @@ summary {
     line-height: 1.15;
   }
 
-  .customer-dashboard .summary-card-label-full {
+  .dashboard .summary-card-label-full {
     display: none;
   }
 
-  .customer-dashboard .summary-card-label-compact {
+  .dashboard .summary-card-label-compact {
     display: inline;
   }
 
-  .customer-dashboard .summary-card > strong {
+  .dashboard .summary-card > strong {
     grid-area: value;
     font-size: clamp(1.1rem, 4.8vw, 1.35rem);
     letter-spacing: -0.035em;
     white-space: nowrap;
   }
 
-  .customer-dashboard .summary-card > small {
+  .dashboard .summary-card > small {
     display: none;
   }
 
-  .customer-dashboard .dashboard-panel {
+  .dashboard .dashboard-panel {
     margin-top: 20px;
   }
 
@@ -995,7 +1003,7 @@ summary {
     order: -1;
   }
 
-  .customer-dashboard .dashboard-panel-header {
+  .dashboard .dashboard-panel-header {
     min-height: 68px;
     padding-right: 18px;
     padding-left: 18px;

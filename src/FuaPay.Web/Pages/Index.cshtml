@@ -245,7 +245,10 @@
                                     <path d="M10 12h5M10 15h5" />
                                 </svg>
                             </span>
-                            <span>Zakázky</span>
+                            <span class="summary-card-label">
+                                <span class="summary-card-label-full">Zakázky</span>
+                                <span class="summary-card-label-compact">Zakázky</span>
+                            </span>
                         </div>
                         <strong>@dashboard.TotalJobCount</strong>
                         <small>@dashboard.ScopeLabel</small>
@@ -260,7 +263,10 @@
                                     <path d="M4 20h16" />
                                 </svg>
                             </span>
-                            <span>Rozpracované</span>
+                            <span class="summary-card-label">
+                                <span class="summary-card-label-full">Rozpracované</span>
+                                <span class="summary-card-label-compact">Aktivní</span>
+                            </span>
                         </div>
                         <strong>@dashboard.ActiveJobCount</strong>
                         <small>Návrhy a probíhající zakázky</small>
@@ -274,7 +280,10 @@
                                     <path d="M12 8v4l2.5 1.5" />
                                 </svg>
                             </span>
-                            <span>Čekající platby</span>
+                            <span class="summary-card-label">
+                                <span class="summary-card-label-full">Čekající platby</span>
+                                <span class="summary-card-label-compact">K úhradě</span>
+                            </span>
                         </div>
                         <strong>@dashboard.AwaitingPaymentCount</strong>
                         <small>Zveřejněné a dosud neuhrazené</small>
@@ -370,17 +379,52 @@
 
                 <div class="dashboard-cards" aria-label="Souhrn">
                     <article class="summary-card">
-                        <span>Všechny zakázky</span>
+                        <div class="summary-card-heading">
+                            <span class="summary-card-icon summary-card-icon-mobile-only" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M7 3.5h7l4 4V20H7z" />
+                                    <path d="M14 3.5V8h4" />
+                                    <path d="M10 12h5M10 15h5" />
+                                </svg>
+                            </span>
+                            <span class="summary-card-label">
+                                <span class="summary-card-label-full">Všechny zakázky</span>
+                                <span class="summary-card-label-compact">Zakázky</span>
+                            </span>
+                        </div>
                         <strong>@dashboard.TotalJobCount</strong>
                         <small>@dashboard.ScopeLabel</small>
                     </article>
                     <article class="summary-card">
-                        <span>Aktivní zakázky</span>
+                        <div class="summary-card-heading">
+                            <span class="summary-card-icon summary-card-icon-mobile-only" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M5 18.5V15l4-4 3 3 6-7" />
+                                    <path d="M14 7h4v4" />
+                                    <path d="M4 20h16" />
+                                </svg>
+                            </span>
+                            <span class="summary-card-label">
+                                <span class="summary-card-label-full">Aktivní zakázky</span>
+                                <span class="summary-card-label-compact">Aktivní</span>
+                            </span>
+                        </div>
                         <strong>@dashboard.ActiveJobCount</strong>
                         <small>Návrhy a probíhající výroba</small>
                     </article>
                     <article class="summary-card">
-                        <span>Čekající platby</span>
+                        <div class="summary-card-heading">
+                            <span class="summary-card-icon summary-card-icon-mobile-only" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="8" />
+                                    <path d="M12 8v4l2.5 1.5" />
+                                </svg>
+                            </span>
+                            <span class="summary-card-label">
+                                <span class="summary-card-label-full">Čekající platby</span>
+                                <span class="summary-card-label-compact">K úhradě</span>
+                            </span>
+                        </div>
                         <strong>@dashboard.AwaitingPaymentCount</strong>
                         <small>Zveřejněné a dosud neuhrazené</small>
                     </article>
