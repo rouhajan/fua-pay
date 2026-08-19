@@ -60,6 +60,13 @@ záměrně opt-in přes `-RunDatabaseTests`; živý ČSOB `echo` přes
 - [Produkční konfigurace a provoz](docs/deployment/production-configuration.md)
 - [Bezpečnostní hranice](SECURITY.md)
 
+## Licence a branding
+
+Zdrojový kód a projektová dokumentace jsou dostupné pod [MIT licencí](LICENSE).
+Institucionální názvy, loga a další prvky vizuální identity TUL/FUA nejsou touto
+licencí poskytovány; podrobnosti jsou v [BRANDING.md](BRANDING.md). Licence
+třetích stran zůstávají zachované u příslušných komponent.
+
 Kód je připravený pro doplnění skutečných Entra a ČSOB hodnot. Integrace
 nejsou bez těchto údajů živě externě ověřené a repozitář sám není produkčním
 nasazením na `fuapay.tul.cz`.
