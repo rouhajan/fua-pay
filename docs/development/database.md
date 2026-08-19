@@ -78,3 +78,8 @@ dotnet ef migrations script --idempotent \
 
 Skutečnou produkční databázi ani její kopii se skutečnými osobními údaji
 nepoužívejte pro automatizované testy.
+
+## Windows PowerShell
+
+Pravidla pro Windows PowerShell 5.1 a kódování ověřovacích
+skriptů jsou popsána v [samostatné vývojové poznámce](powershell.md).
