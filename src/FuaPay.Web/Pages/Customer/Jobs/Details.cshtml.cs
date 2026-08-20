@@ -4,6 +4,7 @@ using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Jobs.Web;
 using FuaPay.Web.Modules.Payments.Application;
+using FuaPay.Web.Modules.Receipts.Application;
 using FuaPay.Web.Pages.Shared;
 
 using Microsoft.AspNetCore.Authorization;
@@ -20,30 +21,38 @@ public sealed class DetailsModel : PageModel
     private readonly CreditJobPaymentService _creditJobPaymentService;
     private readonly JobPresentationComposer _composer;
     private readonly PaymentCreationService _paymentCreationService;
+    private readonly ReceiptConfiguration _receiptConfiguration;
 
     public DetailsModel(
         IJobQueries jobQueries,
         ICreditQueries creditQueries,
         CreditJobPaymentService creditJobPaymentService,
         JobPresentationComposer composer,
-        PaymentCreationService paymentCreationService)
+        PaymentCreationService paymentCreationService,
+        ReceiptConfiguration receiptConfiguration)
     {
         ArgumentNullException.ThrowIfNull(jobQueries);
         ArgumentNullException.ThrowIfNull(creditQueries);
         ArgumentNullException.ThrowIfNull(creditJobPaymentService);
         ArgumentNullException.ThrowIfNull(composer);
         ArgumentNullException.ThrowIfNull(paymentCreationService);
+        ArgumentNullException.ThrowIfNull(receiptConfiguration);
 
         _jobQueries = jobQueries;
         _creditQueries = creditQueries;
         _creditJobPaymentService = creditJobPaymentService;
         _composer = composer;
         _paymentCreationService = paymentCreationService;
+        _receiptConfiguration = receiptConfiguration;
     }
 
     public JobDetailPresentation Presentation { get; private set; } = null!;
 
     public CustomerJobPaymentOptions? PaymentOptions { get; private set; }
+
+    public bool CanDownloadReceipt =>
+        _receiptConfiguration.Enabled &&
+        Presentation.Job.PaymentStatus == JobPaymentStatus.Paid;
 
     public async Task<IActionResult> OnGetAsync(
         Guid id,

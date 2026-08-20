@@ -3,6 +3,7 @@ using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
+using FuaPay.Web.Modules.Receipts.Application;
 using FuaPay.Web.Pages.Shared;
 
 using Microsoft.AspNetCore.Authorization;
@@ -19,25 +20,29 @@ public sealed class DetailsModel : PageModel
     private readonly IJobQueries _jobQueries;
     private readonly PaymentCreationService _paymentCreationService;
     private readonly DevelopmentPaymentAvailability _developmentAvailability;
+    private readonly ReceiptConfiguration _receiptConfiguration;
 
     public DetailsModel(
         IPaymentQueries paymentQueries,
         DevelopmentPaymentService developmentPaymentService,
         IJobQueries jobQueries,
         PaymentCreationService paymentCreationService,
-        DevelopmentPaymentAvailability developmentAvailability)
+        DevelopmentPaymentAvailability developmentAvailability,
+        ReceiptConfiguration receiptConfiguration)
     {
         ArgumentNullException.ThrowIfNull(paymentQueries);
         ArgumentNullException.ThrowIfNull(developmentPaymentService);
         ArgumentNullException.ThrowIfNull(jobQueries);
         ArgumentNullException.ThrowIfNull(paymentCreationService);
         ArgumentNullException.ThrowIfNull(developmentAvailability);
+        ArgumentNullException.ThrowIfNull(receiptConfiguration);
 
         _paymentQueries = paymentQueries;
         _developmentPaymentService = developmentPaymentService;
         _jobQueries = jobQueries;
         _paymentCreationService = paymentCreationService;
         _developmentAvailability = developmentAvailability;
+        _receiptConfiguration = receiptConfiguration;
     }
 
     public PaymentDetail Payment { get; private set; } = null!;
@@ -45,6 +50,8 @@ public sealed class DetailsModel : PageModel
     public string? JobNumber { get; private set; }
 
     public bool JobCanBePaid { get; private set; }
+
+    public bool JobHasReceipt { get; private set; }
 
     public bool CanRetryJobPayment =>
         Payment.PurposeType == PaymentPurposeType.Job &&
@@ -218,6 +225,13 @@ public sealed class DetailsModel : PageModel
                 job is not null &&
                 job.ProductionStatus == JobProductionStatus.Published &&
                 job.PaymentStatus == JobPaymentStatus.Unpaid;
+            JobHasReceipt =
+                _receiptConfiguration.Enabled &&
+                Payment.Status == PaymentStatus.Succeeded &&
+                job is not null &&
+                job.PaymentStatus == JobPaymentStatus.Paid &&
+                job.SettlementType == JobSettlementType.DirectPayment &&
+                job.SettlementReferenceId == Payment.Id;
         }
 
         return true;

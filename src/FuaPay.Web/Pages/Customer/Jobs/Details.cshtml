@@ -54,6 +54,21 @@
         <p class="preserve-lines">@job.Description</p>
     </section>
 
+    @if (Model.CanDownloadReceipt)
+    {
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Potvrzení o úhradě</h2></div>
+            <p>Potvrzení o úhradě této zakázky je k dispozici jako PDF.</p>
+            <div class="form-actions">
+                <a asp-page="./Receipt"
+                   asp-route-id="@job.Id"
+                   class="secondary-button">
+                    Stáhnout PDF
+                </a>
+            </div>
+        </section>
+    }
+
     @if (
         job.ProductionStatus == JobProductionStatus.Published &&
         job.PaymentStatus == JobPaymentStatus.Unpaid &&

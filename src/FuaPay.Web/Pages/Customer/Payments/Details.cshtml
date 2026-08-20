@@ -91,6 +91,21 @@
         }
     </section>
 
+    @if (Model.JobHasReceipt && payment.JobId.HasValue)
+    {
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Potvrzení o úhradě</h2></div>
+            <p>Potvrzení patří k uhrazené zakázce a používá stejný ověřený záznam úhrady.</p>
+            <div class="form-actions">
+                <a asp-page="/Customer/Jobs/Receipt"
+                   asp-route-id="@payment.JobId.Value"
+                   class="secondary-button">
+                    Stáhnout PDF
+                </a>
+            </div>
+        </section>
+    }
+
     @if (PaymentDisplay.IsUnsuccessfulTerminalStatus(payment.Status))
     {
         <section class="data-panel payment-recovery">
