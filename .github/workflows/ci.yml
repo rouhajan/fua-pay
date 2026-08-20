@@ -26,7 +26,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -34,10 +34,6 @@ jobs:
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
-      DOTNET_ENVIRONMENT: Development
-      ASPNETCORE_ENVIRONMENT: Development
-      FUA_PAY_DATABASE_TESTS_ALLOWED: "1"
-      ConnectionStrings__FuaPay: "Host=127.0.0.1;Port=5432;Database=fuapay_test_ci;Username=fuapay_app;Password=ci-app-not-secret;Pooling=false"
 
     steps:
       - name: Checkout
@@ -77,6 +73,8 @@ jobs:
 
       - name: Apply EF Core migrations to isolated database
         shell: bash
+        env:
+          ConnectionStrings__FuaPay: "Host=127.0.0.1;Port=5432;Database=fuapay_test_ci;Username=fuapay_app;Password=ci-app-not-secret;Pooling=false"
         run: |
           set -euo pipefail
 
@@ -89,6 +87,9 @@ jobs:
 
       - name: Run PostgreSQL integration tests
         shell: bash
+        env:
+          FUA_PAY_DATABASE_TESTS_ALLOWED: "1"
+          ConnectionStrings__FuaPay: "Host=127.0.0.1;Port=5432;Database=fuapay_test_ci;Username=fuapay_app;Password=ci-app-not-secret;Pooling=false"
         run: |
           set -euo pipefail
 
@@ -132,11 +133,9 @@ jobs:
                       }
 
                       foreach ($vulnerability in @($package.vulnerabilities)) {
-                          if ($null -eq $vulnerability) {
-                              continue
+                          if ($null -ne $vulnerability) {
+                              $findings += $vulnerability
                           }
-
-                          $findings += $vulnerability
                       }
                   }
               }
