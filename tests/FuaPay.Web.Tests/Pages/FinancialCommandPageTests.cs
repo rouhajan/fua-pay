@@ -146,6 +146,12 @@ public sealed class FinancialCommandPageTests
         public Task<CreditAccountSummary?> FindAccountForOwnerAsync(Guid ownerId, CancellationToken cancellationToken = default) =>
             Task.FromResult<CreditAccountSummary?>(null);
 
+        public Task<CreditMovementListItem?> FindMovementForOwnerAsync(
+            Guid ownerId,
+            Guid operationId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<CreditMovementListItem?>(null);
+
         public Task<CreditMovementPage> ListMovementsForOwnerAsync(Guid ownerId, CreditMovementPageRequest page, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }

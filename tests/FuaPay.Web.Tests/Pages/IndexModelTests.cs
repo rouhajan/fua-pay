@@ -222,6 +222,12 @@ public sealed class IndexModelTests
                     4));
         }
 
+        public Task<CreditMovementListItem?> FindMovementForOwnerAsync(
+            Guid ownerId,
+            Guid operationId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<CreditMovementListItem?>(null);
+
         public Task<CreditMovementPage> ListMovementsForOwnerAsync(
             Guid ownerId,
             CreditMovementPageRequest page,

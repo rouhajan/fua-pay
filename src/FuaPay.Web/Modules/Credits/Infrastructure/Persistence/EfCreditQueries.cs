@@ -101,6 +101,38 @@ internal sealed class EfCreditQueries : ICreditQueries
             .SingleOrDefaultAsync(cancellationToken);
     }
 
+    public Task<CreditMovementListItem?> FindMovementForOwnerAsync(
+        Guid ownerId,
+        Guid operationId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOwnerId(ownerId);
+
+        if (operationId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "ID kreditní operace nesmí být prázdné.",
+                nameof(operationId));
+        }
+
+        return (
+            from movement in _dbContext.CreditMovements.AsNoTracking()
+            join account in _dbContext.CreditAccounts.AsNoTracking()
+                on movement.AccountId equals account.Id
+            where
+                account.OwnerId == ownerId &&
+                movement.OperationId == operationId
+            select new CreditMovementListItem(
+                movement.OperationId,
+                (CreditMovementType)movement.MovementType,
+                movement.AmountMinorUnits,
+                movement.BalanceAfterMinorUnits,
+                movement.Description,
+                movement.RecordedAt,
+                movement.Sequence))
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<CreditMovementPage> ListMovementsForOwnerAsync(
         Guid ownerId,
         CreditMovementPageRequest page,

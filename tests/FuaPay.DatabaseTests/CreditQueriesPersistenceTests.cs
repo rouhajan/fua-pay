@@ -101,6 +101,18 @@ public sealed class CreditQueriesPersistenceTests :
             Assert.Equal(ownerId, summary.OwnerId);
             Assert.Equal(75_000, summary.BalanceMinorUnits);
 
+            var debit = Assert.IsType<CreditMovementListItem>(
+                await queries.FindMovementForOwnerAsync(
+                    ownerId,
+                    debitOperationId));
+
+            Assert.Equal(CreditMovementType.Debit, debit.Type);
+            Assert.Equal(25_000, debit.AmountMinorUnits);
+            Assert.Null(
+                await queries.FindMovementForOwnerAsync(
+                    otherOwnerId,
+                    debitOperationId));
+
             var firstPage =
                 await queries.ListMovementsForOwnerAsync(
                     ownerId,

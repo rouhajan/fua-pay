@@ -11,6 +11,11 @@ public interface ICreditQueries
         Guid ownerId,
         CancellationToken cancellationToken = default);
 
+    Task<CreditMovementListItem?> FindMovementForOwnerAsync(
+        Guid ownerId,
+        Guid operationId,
+        CancellationToken cancellationToken = default);
+
     Task<CreditMovementPage> ListMovementsForOwnerAsync(
         Guid ownerId,
         CreditMovementPageRequest page,
