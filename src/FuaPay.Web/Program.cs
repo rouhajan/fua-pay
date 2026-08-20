@@ -42,6 +42,10 @@ var hostingConfiguration =
 hostingConfiguration.ValidateForEnvironment(
     builder.Environment.EnvironmentName,
     builder.Configuration);
+var applicationRoot =
+    hostingConfiguration.PathBase.HasValue
+        ? $"{hostingConfiguration.PathBase}/"
+        : "/";
 var applyMigrationsOnStart =
     builder.Configuration.GetValue<bool>(
         "Database:ApplyMigrationsOnStart");
@@ -132,7 +136,8 @@ builder.Services
             options.SlidingExpiration = false;
         })
     .AddEntraAuthentication(
-        entraAuthenticationConfiguration);
+        entraAuthenticationConfiguration,
+        applicationRoot);
 
 builder.Services.AddAuthorization(
     options =>
@@ -329,11 +334,6 @@ app.Use(
             {
                 await context.SignOutAsync(
                     CookieAuthenticationDefaults.AuthenticationScheme);
-                var applicationRoot =
-                    context.Request.PathBase.HasValue
-                        ? $"{context.Request.PathBase}/"
-                        : "/";
-
                 context.Response.Redirect(applicationRoot);
                 return;
             }
