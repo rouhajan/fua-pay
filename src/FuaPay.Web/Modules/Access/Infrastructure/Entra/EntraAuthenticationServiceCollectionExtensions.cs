@@ -12,10 +12,12 @@ public static class EntraAuthenticationServiceCollectionExtensions
 {
     public static AuthenticationBuilder AddEntraAuthentication(
         this AuthenticationBuilder authentication,
-        EntraAuthenticationConfiguration configuration)
+        EntraAuthenticationConfiguration configuration,
+        string applicationRoot)
     {
         ArgumentNullException.ThrowIfNull(authentication);
         ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationRoot);
 
         authentication.Services.AddSingleton(
             new EntraAuthenticationAvailability(
@@ -107,11 +109,8 @@ public static class EntraAuthenticationServiceCollectionExtensions
                 options.Events.OnRemoteFailure = context =>
                 {
                     context.HandleResponse();
-                    var root = context.Request.PathBase.HasValue
-                        ? $"{context.Request.PathBase}/"
-                        : "/";
                     context.Response.Redirect(
-                        $"{root}?authenticationError=true");
+                        $"{applicationRoot}?authenticationError=true");
                     return Task.CompletedTask;
                 };
             });
