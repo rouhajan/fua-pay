@@ -101,16 +101,56 @@ testy byly nastaveny pouze v databázových krocích workflow.
 C# analýza používá manual build mode a skutečný Release build řešení.
 GitHub Actions jsou analyzovány jako samostatný podporovaný CodeQL jazyk.
 
-## Výsledek
+## Výsledek a governance closeout
 
 Automatické repository checks zavedené touto větví jsou pro commit
 `59f476a564161728fac4ff6072c8a43297d4e265` ověřeny jako PASS.
 
-Tento záznam neuzavírá celý GitHub governance scope. Zejména nepředstavuje
-důkaz konfigurace branch protection/ruleset, Private Vulnerability Reporting
-ani samostatného nastavení Dependabot security updates. Dependabot
-konfigurace je součástí této větve, ale její provoz po začlenění do default
-branch zatím tímto záznamem není prohlášen za ověřený.
+Hardening byl následně začleněn přes pull request #1
+`Harden GitHub repository checks`. Pull request zachoval všechny tři
+hardening commity a byl začleněn merge commitem
+`2b10ba0c00dd390ad450f1860de4a6debd9e4fe0`.
 
-Tento záznam rovněž nepředstavuje kompletní bezpečnostní audit aplikace podle
-OWASP ASVS.
+Finální push tohoto merge commitu na `main` spustil:
+
+- CI run `32384413450`;
+- CodeQL run `32384413442`.
+
+Výsledek na finálním `main`:
+
+| Kontrola | Výsledek |
+|---|---|
+| `verify` | PASS |
+| `analyze-csharp` | PASS |
+| `analyze-actions` | PASS |
+
+CI na `main` znovu úspěšně provedlo aplikační ověření, migrace izolované
+PostgreSQL databáze, databázové integrační testy, kontrolu známých NuGet
+zranitelností, locked Linux restore, self-contained publish a kontrolu
+čistoty repozitáře.
+
+Repository governance byl následně doplněn takto:
+
+- aktivní ruleset `Protect main` chrání výchozí větev a vyžaduje pull request;
+- povinné kontroly jsou `verify`, `analyze-csharp` a `analyze-actions`;
+- force push a smazání chráněné větve jsou blokované;
+- CodeQL používá ověřený Advanced setup;
+- bezpečnostní CodeQL check selhává pro nálezy `High or higher` a standardní
+  nálezy pro `Only errors`;
+- GitHub Private Vulnerability Reporting je zapnuté;
+- Dependency graph je zapnutý;
+- Dependabot alerts, malware alerts, security updates a grouped security
+  updates jsou zapnuté;
+- Dependabot version updates používají `.github/dependabot.yml` a jejich
+  skutečný provoz byl potvrzen automaticky vytvořenými PR #2 až #7;
+- Secret Protection a Push protection jsou zapnuté;
+- Copilot Autofix je zapnutý;
+- preview funkce AI findings zůstává vypnutá;
+- Automatic dependency submission zůstává záměrně vypnuté a není součástí
+  tohoto baseline.
+
+Tím je GitHub repository hardening a související governance scope pro tento
+milník uzavřen.
+
+Tento záznam nepředstavuje kompletní bezpečnostní audit aplikace podle OWASP
+ASVS. Ten je samostatným následujícím krokem.
