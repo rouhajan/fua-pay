@@ -11,5 +11,6 @@ Aktuální dokumentace je záměrně malá:
 - [demo / staging deployment](deployment/demo-staging.md);
 - [ověření 2026-08-18](testing/verification-2026-08-18.md);
 - [security servicing 2026-08-20](testing/verification-2026-08-20.md);
+- [GitHub repository hardening 2026-08-20](testing/github-repository-hardening-2026-08-20.md);
 - [bezpečnost](../SECURITY.md);
 - [vendored frontendové závislosti](development/third-party-frontend-inventory.md).
