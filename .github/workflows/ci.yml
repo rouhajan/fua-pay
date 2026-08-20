@@ -1,0 +1,191 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:18.4
+        env:
+          POSTGRES_PASSWORD: ci-admin-not-secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.303"
+
+      - name: Prepare limited PostgreSQL role and database
+        shell: bash
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+
+          docker exec "$POSTGRES_CONTAINER" \
+            psql \
+            --username=postgres \
+            --dbname=postgres \
+            --set=ON_ERROR_STOP=1 \
+            --command="CREATE ROLE fuapay_app LOGIN PASSWORD 'ci-app-not-secret' NOSUPERUSER NOCREATEDB NOCREATEROLE;"
+
+          docker exec "$POSTGRES_CONTAINER" \
+            psql \
+            --username=postgres \
+            --dbname=postgres \
+            --set=ON_ERROR_STOP=1 \
+            --command="CREATE DATABASE fuapay_test_ci OWNER fuapay_app;"
+
+      - name: Verify application
+        shell: pwsh
+        run: ./scripts/verify.ps1
+
+      - name: Apply EF Core migrations to isolated database
+        shell: bash
+        env:
+          ConnectionStrings__FuaPay: "Host=127.0.0.1;Port=5432;Database=fuapay_test_ci;Username=fuapay_app;Password=ci-app-not-secret;Pooling=false"
+        run: |
+          set -euo pipefail
+
+          dotnet ef database update \
+            --project src/FuaPay.Web/FuaPay.Web.csproj \
+            --startup-project src/FuaPay.Web/FuaPay.Web.csproj \
+            --context FuaPayDbContext \
+            --configuration Release \
+            --no-build
+
+      - name: Run PostgreSQL integration tests
+        shell: bash
+        env:
+          FUA_PAY_DATABASE_TESTS_ALLOWED: "1"
+          ConnectionStrings__FuaPay: "Host=127.0.0.1;Port=5432;Database=fuapay_test_ci;Username=fuapay_app;Password=ci-app-not-secret;Pooling=false"
+        run: |
+          set -euo pipefail
+
+          dotnet test \
+            tests/FuaPay.DatabaseTests/FuaPay.DatabaseTests.csproj \
+            --configuration Release \
+            --no-build \
+            --no-restore
+
+      - name: Audit NuGet vulnerabilities
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $json = (
+              & dotnet package list `
+                  --project FuaPay.slnx `
+                  --vulnerable `
+                  --include-transitive `
+                  --no-restore `
+                  --format json `
+                  --output-version 1
+          ) -join "`n"
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "NuGet vulnerability audit command failed."
+          }
+
+          $report = $json | ConvertFrom-Json
+          $findings = @()
+
+          foreach ($project in @($report.projects)) {
+              foreach ($framework in @($project.frameworks)) {
+                  $packages =
+                      @($framework.topLevelPackages) +
+                      @($framework.transitivePackages)
+
+                  foreach ($package in $packages) {
+                      if ($null -eq $package) {
+                          continue
+                      }
+
+                      foreach ($vulnerability in @($package.vulnerabilities)) {
+                          if ($null -ne $vulnerability) {
+                              $findings += $vulnerability
+                          }
+                      }
+                  }
+              }
+          }
+
+          if ($findings.Count -ne 0) {
+              $findings | Format-Table -AutoSize
+              throw "Known NuGet vulnerabilities were found."
+          }
+
+          Write-Host "Known NuGet vulnerabilities: 0"
+
+      - name: Locked restore for linux-x64
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dotnet restore \
+            src/FuaPay.Web/FuaPay.Web.csproj \
+            --runtime linux-x64 \
+            --locked-mode
+
+      - name: Publish linux-x64 self-contained
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dotnet publish \
+            src/FuaPay.Web/FuaPay.Web.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained \
+            --no-restore \
+            --output "$RUNNER_TEMP/fuapay-linux-x64" \
+            -p:TreatWarningsAsErrors=true
+
+          test -f "$RUNNER_TEMP/fuapay-linux-x64/FuaPay.Web"
+          test -f "$RUNNER_TEMP/fuapay-linux-x64/FuaPay.Web.dll"
+          test -f "$RUNNER_TEMP/fuapay-linux-x64/FuaPay.Web.deps.json"
+          test -f "$RUNNER_TEMP/fuapay-linux-x64/FuaPay.Web.runtimeconfig.json"
+
+      - name: Verify repository stayed clean
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git diff --check
+          git diff --exit-code
+
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            exit 1
+          fi
