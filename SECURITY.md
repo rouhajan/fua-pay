@@ -127,6 +127,9 @@ Deployment a rotace tajemství jsou popsány v
 
 ## Hlášení problému
 
-Repozitář neobsahuje veřejný bezpečnostní kontakt. Provozovatel TUL musí před
-nasazením určit interní incidentní kontakt, oprávnění k auditním záznamům a
-postup rotace Entra/ČSOB credentials.
+Potenciální bezpečnostní zranitelnost hlaste soukromě prostřednictvím GitHub
+Private Vulnerability Reporting tohoto repozitáře. Dosud nezveřejněnou
+zranitelnost nehlaste veřejným issue.
+
+Provozovatel TUL musí před nasazením určit interní incidentní kontakt,
+oprávnění k auditním záznamům a postup rotace Entra/ČSOB credentials.
