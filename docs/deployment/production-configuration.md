@@ -34,12 +34,31 @@ Csob__MerchantId=<production merchant ID>
 Csob__PrivateKeyPath=/var/lib/fuapay/secrets/csob-private.pem
 Csob__GatewayPublicKeyPath=/var/lib/fuapay/secrets/csob-gateway-public.pem
 Csob__ReturnUrl=https://fuapay.tul.cz/payments/csob/return
+
+Receipts__Enabled=false
+Receipts__PreviewMode=false
+Receipts__Issuer__LegalName=<schválený právní název vystavitele>
+Receipts__Issuer__UnitName=<schválená součást / fakulta>
+Receipts__Issuer__AddressLine1=<ulice a číslo>
+Receipts__Issuer__AddressLine2=<PSČ a obec>
+Receipts__Issuer__Country=<země>
+Receipts__Issuer__RegistrationNumber=<ověřené IČO>
+Receipts__Issuer__VatNumber=<ověřené DIČ>
+Receipts__Issuer__ContactEmail=<kontakt pro doklad>
+Receipts__VatRatePercent=<schválená sazba>
+Receipts__RegularFontPath=/var/lib/fuapay/fonts/<regular-font>.ttf
+Receipts__BoldFontPath=/var/lib/fuapay/fonts/<bold-font>.ttf
 ```
 
 Adresář Data Protection musí existovat před startem, být trvalý mimo release a
 čitelný/zapisovatelný pouze účtem služby. ČSOB privátní klíč má být trvalý mimo
 release a pouze čitelný tímto účtem. Změna/odstranění Data Protection klíčů
 zneplatní sessions a antiforgery cookies.
+
+Doklady zůstávají v Production vypnuté, dokud nejsou účetní údaje a pravidlo
+DPH schválené. Při zapnutí musí být `PreviewMode=false`, nesmí zůstat preview
+IČO/DIČ a oba font soubory musí existovat mimo release. Podrobnosti jsou v
+[PDF potvrzení o úhradě](../features/payment-receipts.md).
 
 ## TLS a reverzní proxy
 

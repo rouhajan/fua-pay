@@ -35,6 +35,7 @@ The 2026-08-18 deployment was verified after the atomic `/opt/fuapay/current` sw
 - Microsoft Entra ID production authentication
 - CSOB Payment Gateway
 - Production database `fuapay`
+- PDF potvrzení o úhradě (není součástí aktuálně nasazené revize `986be97d44adb417872babf65d212c16080eed65`)
 
 The production database and `/etc/fuapay/production.env` are not used by this demo deployment.
 

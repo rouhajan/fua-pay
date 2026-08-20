@@ -53,12 +53,15 @@ ověření.
 - `Jobs`: zakázky, čísla, výrobní a finanční stav;
 - `Credits`: účty, pohyby a administrativní korekce;
 - `Payments`: provider-neutral platby, inicializace, ČSOB a reconciliation;
+- `Receipts`: read-only sestavení a PDF potvrzení již ověřené úhrady zakázky;
 - `Audit`, `Notifications`, `Reporting`: auditní události, transakční outbox
   a CSV exporty.
 
-Účetní doklady nejsou součástí současného produktu; jejich prázdný modul a
-nefunkční položka navigace byly odstraněny. Daňové a účetní významy se mají
-doplnit až podle schváleného zadání.
+`Receipts` nevlastní finanční stav ani databázové schéma. Před vykreslením znovu
+ověří vazbu zakázky na konkrétní kreditní debit nebo úspěšnou přímou platbu a
+při rozporu selže. Současný dokument je on-demand potvrzení o evidované úhradě,
+ne perzistentní účetní/daňový doklad. Preview účetní údaje a DPH jsou popsány v
+[PDF potvrzení o úhradě](features/payment-receipts.md).
 
 ## Webová bezpečnostní hranice
 

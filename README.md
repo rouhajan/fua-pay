@@ -15,7 +15,8 @@ výrobní stav zakázky a finanční stav úhrady.
   propojení existujícího účtu podle `tenant ID + object ID`;
 - ČSOB eAPI 1.9 s podpisy, serverovým ověřením stavu, reconciliation a
   přesně jedním lokálním finančním účinkem;
-- audit a autorizované CSV exporty.
+- audit a autorizované CSV exporty;
+- PDF potvrzení již ověřené úhrady zakázky bez změny finančního stavu.
 
 Řešení je modulární monolit v ASP.NET Core na .NET 10 s PostgreSQL a EF Core.
 Doménová logika není svázaná s transportem Microsoft Entra ani ČSOB.
@@ -56,6 +57,7 @@ záměrně opt-in přes `-RunDatabaseTests`; živý ČSOB `echo` přes
 - [Přehled a architektura](docs/architecture.md)
 - [Microsoft Entra ID](docs/integrations/entra-id.md)
 - [ČSOB eAPI](docs/integrations/csob.md)
+- [PDF potvrzení o úhradě](docs/features/payment-receipts.md)
 - [Databáze a testy](docs/development/database.md)
 - [Produkční konfigurace a provoz](docs/deployment/production-configuration.md)
 - [Bezpečnostní hranice](SECURITY.md)

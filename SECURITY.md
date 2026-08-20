@@ -66,6 +66,8 @@ vyžadují roli Admin, management zakázek Requester nebo Admin. Requester dotaz
 a příkazy kontrolují přiřazené pracoviště. Customer dotazy filtrují podle
 interního `UserId`; objekt z URL se bez této kontroly nepoužije.
 
+PDF potvrzení úhrady je dostupné pouze přihlášenému Customer pro jeho vlastní zakázku. Endpoint znovu ověří konkrétní settlement proti kreditnímu debetu nebo úspěšné přímé platbě; při rozporu se dokument nevygeneruje. PDF se neukládá do veřejných souborů a odpověď používá `Cache-Control: private, no-store`.
+
 Změnové Razor formuláře používají antiforgery ochranu. Odhlášení je POST.
 Odpovědi nastavují HSTS mimo Development, CSP, zákaz frame, MIME sniffingu a
 omezenou referrer/permissions policy. Při reverzní proxy se důvěřují pouze
