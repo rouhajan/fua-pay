@@ -14,6 +14,36 @@ public sealed class ModuleBoundaryTests
         Assert.Equal(4, (int)ServiceType.Other);
     }
 
+    [Theory]
+    [InlineData("Access")]
+    [InlineData("Credits")]
+    [InlineData("Jobs")]
+    [InlineData("Payments")]
+    [InlineData("ServiceUnits")]
+    public void ReceiptSourceModules_DoNotDependOnReceiptsModule(
+        string moduleName)
+    {
+        var moduleDirectory = Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "FuaPay.Web",
+            "Modules",
+            moduleName);
+        var violations = Directory
+            .EnumerateFiles(
+                moduleDirectory,
+                "*.cs",
+                SearchOption.AllDirectories)
+            .Where(path => !IsGeneratedPath(path))
+            .Where(path => File.ReadAllText(path, Encoding.UTF8).Contains(
+                "FuaPay.Web.Modules.Receipts",
+                StringComparison.Ordinal))
+            .Select(path => Path.GetRelativePath(moduleDirectory, path))
+            .ToArray();
+
+        Assert.Empty(violations);
+    }
+
     [Fact]
     public void ServiceUnits_DoesNotDependOnJobsModule()
     {

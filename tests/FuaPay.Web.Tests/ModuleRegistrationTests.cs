@@ -17,6 +17,8 @@ using FuaPay.Web.Modules.Payments;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
+using FuaPay.Web.Modules.Receipts;
+using FuaPay.Web.Modules.Receipts.Application;
 using FuaPay.Web.Modules.Reporting;
 using FuaPay.Web.Modules.Reporting.Application;
 using FuaPay.Web.Modules.ServiceUnits;
@@ -40,11 +42,36 @@ public sealed class ModuleRegistrationTests
             .AddJobsModule()
             .AddServiceUnitsModule()
             .AddPaymentsModule(PaymentProvider.Development)
+            .AddReceiptsModule(CreateReceiptConfiguration())
             .AddNotificationsModule()
             .AddReportingModule()
             .AddDevelopmentData(enabled: false);
 
         Assert.Same(services, result);
+    }
+
+    [Fact]
+    public void AddReceiptsModule_RegistersCompositionAndRenderer()
+    {
+        var services = new ServiceCollection();
+
+        services.AddReceiptsModule(CreateReceiptConfiguration());
+
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                typeof(JobPaymentReceiptService));
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                typeof(IReceiptPdfRenderer));
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                typeof(ReceiptConfiguration));
     }
 
     [Fact]
@@ -575,5 +602,23 @@ public sealed class ModuleRegistrationTests
             services,
             descriptor => descriptor.ServiceType == typeof(INotificationQueries));
     }
+
+    private static ReceiptConfiguration CreateReceiptConfiguration() =>
+        new(
+            Enabled: false,
+            PreviewMode: true,
+            Issuer: new ReceiptIssuerConfiguration(
+                "Technická univerzita v Liberci",
+                "Fakulta umění a architektury",
+                "Studentská 1402/2",
+                "461 17 Liberec 1",
+                "Česká republika",
+                "00000000",
+                "CZ00000000",
+                "fua@tul.cz"),
+            VatRatePercent: 21,
+            LogoPath: "unused.png",
+            RegularFontPath: null,
+            BoldFontPath: null);
 
 }

@@ -12,6 +12,8 @@ using FuaPay.Web.Modules.Jobs;
 using FuaPay.Web.Modules.Notifications;
 using FuaPay.Web.Modules.Payments;
 using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
+using FuaPay.Web.Modules.Receipts;
+using FuaPay.Web.Modules.Receipts.Application;
 using FuaPay.Web.Modules.Reporting;
 using FuaPay.Web.Modules.ServiceUnits;
 
@@ -57,6 +59,13 @@ var csobReconciliationConfiguration =
     CsobReconciliationConfiguration.Resolve(
         builder.Configuration,
         csobGatewayConfiguration);
+
+var receiptConfiguration =
+    ReceiptConfiguration.Resolve(
+        builder.Configuration,
+        builder.Environment.EnvironmentName,
+        builder.Environment.WebRootPath ??
+            Path.Combine(builder.Environment.ContentRootPath, "wwwroot"));
 
 builder.Services.AddSingleton(
     new DevelopmentSignInAvailability(
@@ -161,6 +170,7 @@ builder.Services
     .AddPaymentsModule(
         paymentProviderSelection.Provider,
         paymentProviderSelection.DevelopmentPaymentUiEnabled)
+    .AddReceiptsModule(receiptConfiguration)
     .AddCsobPaymentGateway(
         csobGatewayConfiguration,
         csobReconciliationConfiguration,
