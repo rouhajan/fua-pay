@@ -142,7 +142,7 @@ Repository governance byl následně doplněn takto:
 - Dependabot alerts, malware alerts, security updates a grouped security
   updates jsou zapnuté;
 - Dependabot version updates používají `.github/dependabot.yml` a jejich
-  skutečný provoz byl potvrzen automaticky vytvořenými PR #2 až #7;
+  skutečný provoz byl potvrzen automaticky vytvořenými PR #2 až #8;
 - Secret Protection a Push protection jsou zapnuté;
 - Copilot Autofix je zapnutý;
 - preview funkce AI findings zůstává vypnutá;
