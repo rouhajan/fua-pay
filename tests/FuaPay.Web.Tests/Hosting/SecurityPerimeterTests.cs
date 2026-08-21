@@ -142,6 +142,61 @@ public sealed class SecurityPerimeterTests :
     }
 
     [Fact]
+    public async Task AdministrationExportPost_WithoutAntiforgeryToken_ReturnsBadRequest()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací administrátor",
+            "admin@example.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Admin]);
+        var sessionQueries =
+            new RecordingAccessSessionQueries(session);
+        using var configuredFactory =
+            _factory.WithWebHostBuilder(
+                builder => builder.ConfigureTestServices(
+                    services =>
+                    {
+                        services.RemoveAll<IAccessSessionQueries>();
+                        services.AddSingleton<IAccessSessionQueries>(
+                            sessionQueries);
+                    }));
+
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<
+                IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var protectedTicket =
+            cookieOptions.TicketDataFormat.Protect(ticket);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}={protectedTicket}");
+        using var content = new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["from"] = "2026-01-01",
+                ["to"] = "2026-01-31"
+            });
+        using var response = await client.PostAsync(
+            "/Admin/Exports?handler=Jobs",
+            content);
+
+        Assert.Equal(
+            HttpStatusCode.BadRequest,
+            response.StatusCode);
+        Assert.Equal(1, sessionQueries.CallCount);
+        Assert.Equal(session.UserId, sessionQueries.LastUserId);
+    }
+
+    [Fact]
     public void StagingSecurityCookies_UseSecurePolicies()
     {
         using var stagingFactory =
@@ -338,7 +393,14 @@ public sealed class SecurityPerimeterTests :
     private sealed class RecordingAccessSessionQueries :
         IAccessSessionQueries
     {
+        private readonly AccessSessionSnapshot? _snapshot;
         private int _callCount;
+
+        public RecordingAccessSessionQueries(
+            AccessSessionSnapshot? snapshot = null)
+        {
+            _snapshot = snapshot;
+        }
 
         public int CallCount => Volatile.Read(ref _callCount);
 
@@ -351,7 +413,7 @@ public sealed class SecurityPerimeterTests :
             cancellationToken.ThrowIfCancellationRequested();
             LastUserId = userId;
             Interlocked.Increment(ref _callCount);
-            return Task.FromResult<AccessSessionSnapshot?>(null);
+            return Task.FromResult(_snapshot);
         }
     }
 }
