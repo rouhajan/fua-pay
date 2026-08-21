@@ -14,7 +14,7 @@
         </div>
     </header>
 
-    <form method="get" class="data-panel form-stack">
+    <form method="post" class="data-panel form-stack">
         <div class="data-panel-header">
             <h2>Rozsah exportu</h2>
         </div>
@@ -47,9 +47,9 @@
             Datum se pro konzistentní export vyhodnocuje jako celý kalendářní den v UTC. Exporty jsou omezeny na 100 000 řádků.
         </p>
         <div class="form-actions export-actions">
-            <button type="submit" name="handler" value="Jobs" class="secondary-button">Export zakázek</button>
-            <button type="submit" name="handler" value="Credit" class="secondary-button">Export kreditu</button>
-            <button type="submit" name="handler" value="Payments" class="secondary-button">Export plateb</button>
+            <button type="submit" asp-page-handler="Jobs" class="secondary-button">Export zakázek</button>
+            <button type="submit" asp-page-handler="Credit" class="secondary-button">Export kreditu</button>
+            <button type="submit" asp-page-handler="Payments" class="secondary-button">Export plateb</button>
         </div>
     </form>
 </section>

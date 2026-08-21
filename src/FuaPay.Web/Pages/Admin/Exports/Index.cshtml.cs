@@ -35,7 +35,7 @@ public sealed class IndexModel : PageModel
             cancellationToken);
     }
 
-    public async Task<FileContentResult> OnGetJobsAsync(
+    public async Task<FileContentResult> OnPostJobsAsync(
         DateOnly? from,
         DateOnly? to,
         Guid? serviceUnitId,
@@ -50,7 +50,7 @@ public sealed class IndexModel : PageModel
         return Csv(file);
     }
 
-    public async Task<FileContentResult> OnGetCreditAsync(
+    public async Task<FileContentResult> OnPostCreditAsync(
         DateOnly? from,
         DateOnly? to,
         CancellationToken cancellationToken = default)
@@ -63,7 +63,7 @@ public sealed class IndexModel : PageModel
         return Csv(file);
     }
 
-    public async Task<FileContentResult> OnGetPaymentsAsync(
+    public async Task<FileContentResult> OnPostPaymentsAsync(
         DateOnly? from,
         DateOnly? to,
         CancellationToken cancellationToken = default)

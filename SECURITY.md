@@ -69,6 +69,9 @@ interního `UserId`; objekt z URL se bez této kontroly nepoužije.
 PDF potvrzení úhrady je dostupné pouze přihlášenému Customer pro jeho vlastní zakázku. Endpoint znovu ověří konkrétní settlement proti kreditnímu debetu nebo úspěšné přímé platbě; při rozporu se dokument nevygeneruje. PDF se neukládá do veřejných souborů a odpověď používá `Cache-Control: private, no-store`.
 
 Změnové Razor formuláře používají antiforgery ochranu. Odhlášení je POST.
+Administrativní CSV exporty jsou rovněž POST-only, vyžadují antiforgery
+token, jsou omezené na 100 000 datových řádků a jejich vytvoření se
+zapisuje do auditu.
 Odpovědi nastavují HSTS mimo Development, CSP, zákaz frame, MIME sniffingu a
 omezenou referrer/permissions policy. Při reverzní proxy se důvěřují pouze
 výslovně uvedené IP adresy.
