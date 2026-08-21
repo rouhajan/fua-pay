@@ -117,6 +117,8 @@ public sealed class SecurityPerimeterTests :
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Equal("/", response.Headers.Location?.OriginalString);
+        Assert.True(
+            response.Headers.CacheControl?.NoStore == true);
         Assert.Equal(1, sessionQueries.CallCount);
         Assert.Equal(userId, sessionQueries.LastUserId);
     }
@@ -258,15 +260,27 @@ public sealed class SecurityPerimeterTests :
             GetSingleHeader(
                 acceptedResponse,
                 "Permissions-Policy"));
-        Assert.Contains(
-            "default-src 'self'",
+        var contentSecurityPolicy =
             GetSingleHeader(
                 acceptedResponse,
-                "Content-Security-Policy"),
+                "Content-Security-Policy");
+        Assert.Contains(
+            "default-src 'self'",
+            contentSecurityPolicy,
             StringComparison.Ordinal);
-        Assert.True(
-            acceptedResponse.Headers.Contains(
-                "Strict-Transport-Security"));
+        Assert.Contains(
+            "base-uri 'none'",
+            contentSecurityPolicy,
+            StringComparison.Ordinal);
+
+        var hsts =
+            GetSingleHeader(
+                acceptedResponse,
+                "Strict-Transport-Security");
+        Assert.Contains(
+            "max-age=31536000",
+            hsts,
+            StringComparison.Ordinal);
 
         using var rejectedRequest =
             new HttpRequestMessage(HttpMethod.Get, "/");
