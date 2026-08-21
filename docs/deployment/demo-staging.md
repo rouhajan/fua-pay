@@ -1,42 +1,68 @@
-﻿# Demo / staging deployment
+# Demo / staging deployment
 
-Status: 2026-08-18
-
-FUA Pay is currently deployed as a public demo/staging instance.
+Status: 2026-08-21
 
 ## Deployment
 
-- Canonical URL: `https://fuapay.tul.cz`
+- URL: `https://fuapay.tul.cz`
 - Alternate URL: `https://fuapay.fa.tul.cz` redirects to the canonical URL.
-- Deployed application revision: `986be97d44adb417872babf65d212c16080eed65`
-- Active release: `/opt/fuapay/releases/986be97d44ad`
-- Previous rollback release: `/opt/fuapay/releases/8295a7c076ee`
-- `/opt/fuapay/current` points to the active release.
-- The application runs as `fuapay.service` under `fuapay:fuapay`.
-- Kestrel listens only on `127.0.0.1:5080`.
-- Nginx terminates HTTPS and proxies the canonical site to Kestrel.
-- Nginx Basic Authentication protects the public demo with realm `FUA Pay demo`. Unauthenticated public requests therefore return HTTP 401 before reaching the application. Credentials are server-local and are not stored in this repository.
-- Existing ACME/TLS configuration remains in use.
-- Application configuration is loaded from the server-local `/etc/fuapay/staging.env`.
-
-The 2026-08-18 deployment was verified after the atomic `/opt/fuapay/current` switch: local `/health/live` and `/health/ready` returned HTTP 200, the new split CSS assets were served by Kestrel, and the running process and working directory resolved to `/opt/fuapay/releases/986be97d44ad`. Uploaded deployment archives and temporary deployment paths were removed after the successful switch.
-
-## Demo data and features
-
-- Environment: `Staging`
+- Revision: `b90d2f5b5665e2a1547383fb32de0e519208ec89`
+- Active release: `/opt/fuapay/releases/b90d2f5b5665`
+- Rollback release: `/opt/fuapay/releases/986be97d44ad`
+- Service account: `fuapay:fuapay`
+- Kestrel: `127.0.0.1:5080`
+- Reverse proxy: Nginx
+- Configuration: `/etc/fuapay/staging.env`
 - Database: `fuapay_demo`
-- Database schema: 12 applied EF Core migrations
-- Interactive test identities are enabled.
-- Development/simulated payments are enabled.
-- Demo data is isolated from the future production database.
+- EF Core migrations: 12
+- Payment provider: Development
+- Interactive test identities: enabled
+- Simulated payments: enabled
+- Nginx Basic Authentication: enabled
 
-## Not active in this deployment
+Production Entra authentication, production ČSOB integration and production
+database workload are not active. PDF receipt code is deployed; receipts
+remain disabled without explicit receipt configuration.
 
-- Microsoft Entra ID production authentication
-- CSOB Payment Gateway
-- Production database `fuapay`
-- PDF potvrzení o úhradě (není součástí aktuálně nasazené revize `986be97d44adb417872babf65d212c16080eed65`)
+## Verification
 
-The production database and `/etc/fuapay/production.env` are not used by this demo deployment.
+Release archive SHA-256:
 
-This environment is intended for functional and UX testing only and must not be treated as the final production configuration.
+`3d653a206a200c819d9f561faee01d57da9631cd1e6e5951be77513810f969a8`
+
+Verified after the atomic `/opt/fuapay/current` switch:
+
+- executable and working directory use release `b90d2f5b5665`;
+- `/health/live`: HTTP 200;
+- `/health/ready`: HTTP 200;
+- `/Development/SignIn`: HTTP 200, 9 test profiles;
+- HTTPS front door: HTTP 401 before Basic Authentication;
+- HSTS: `max-age=31536000`;
+- CSP: `base-uri 'none'`;
+- `X-Content-Type-Options: nosniff`;
+- no warning-or-higher service log entries during deployment verification.
+
+No EF migration changed from the previous staging revision.
+`Database__ApplyMigrationsOnStart=false`.
+
+## Runtime baseline
+
+Verified:
+
+- `ProtectSystem=strict`;
+- `NoNewPrivileges=yes`;
+- `PrivateTmp=yes`;
+- `PrivateDevices=yes`;
+- `ProtectKernelTunables=yes`;
+- `ProtectKernelModules=yes`;
+- `ProtectControlGroups=yes`;
+- `RestrictSUIDSGID=yes`;
+- Kestrel and PostgreSQL listen only on loopback;
+- UFW default incoming policy is deny; ports 22, 80 and 443 are allowed;
+- SSH root, password and keyboard-interactive login are disabled;
+- Data Protection keyring directory: mode `0700`;
+- Data Protection key: mode `0600`;
+- `fuapay_app` and `fuapay_migrator` are separate non-superuser roles;
+- application schemas and tables are owned by `fuapay_migrator`.
+
+This deployment is staging, not production.
