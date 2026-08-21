@@ -27,6 +27,8 @@ jobs:
         include:
           - language: csharp
             build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
           - language: actions
             build-mode: none
 
@@ -47,6 +49,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          config-file: .github/codeql-config.yml
 
       - name: Build C# for CodeQL
         if: matrix.build-mode == 'manual'
