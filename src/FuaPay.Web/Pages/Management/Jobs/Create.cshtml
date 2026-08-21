@@ -38,7 +38,7 @@
 
             <label>
                 <span>Zákazník</span>
-                <select asp-for="Input.CustomerUserId">
+                <select asp-for="Input.CustomerUserId" data-searchable-select-source>
                     <option value="">Vyberte zákazníka</option>
                     @foreach (var customer in Model.Customers)
                     {
@@ -74,5 +74,6 @@
 </section>
 
 @section Scripts {
+    <script src="~/js/customer-select-filter.js" asp-append-version="true"></script>
     <partial name="_ValidationScriptsPartial" />
 }
