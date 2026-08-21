@@ -110,6 +110,10 @@ if (hostingConfiguration.ForwardedHeadersEnabled)
         });
 }
 
+builder.Services.AddHsts(
+    options =>
+        options.MaxAge = TimeSpan.FromDays(365));
+
 builder.Services
     .AddAuthentication(
         CookieAuthenticationDefaults.AuthenticationScheme)
@@ -292,7 +296,7 @@ app.Use(
             "camera=(), geolocation=(), microphone=()";
         context.Response.Headers["Content-Security-Policy"] =
             "default-src 'self'; " +
-            "base-uri 'self'; " +
+            "base-uri 'none'; " +
             "form-action 'self'; " +
             "frame-ancestors 'none'; " +
             "img-src 'self' data:; " +
@@ -320,6 +324,8 @@ app.Use(
             !isStaticAsset &&
             context.User.Identity?.IsAuthenticated == true)
         {
+            context.Response.Headers.CacheControl = "no-store";
+
             var synchronizer =
                 context.RequestServices
                     .GetRequiredService<AccessSessionSynchronizer>();
