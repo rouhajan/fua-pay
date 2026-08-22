@@ -1,14 +1,14 @@
 # Demo / staging deployment
 
-Status: 2026-08-21
+Status: 2026-08-22
 
 ## Deployment
 
 - URL: `https://fuapay.tul.cz`
 - Alternate URL: `https://fuapay.fa.tul.cz` redirects to the canonical URL.
-- Revision: `b90d2f5b5665e2a1547383fb32de0e519208ec89`
-- Active release: `/opt/fuapay/releases/b90d2f5b5665`
-- Rollback release: `/opt/fuapay/releases/986be97d44ad`
+- Revision: `8f6cc4ae2a78280931127ed0e709949a02ca7b90`
+- Active release: `/opt/fuapay/releases/8f6cc4ae2a78`
+- Rollback release: `/opt/fuapay/releases/b90d2f5b5665`
 - Service account: `fuapay:fuapay`
 - Kestrel: `127.0.0.1:5080`
 - Reverse proxy: Nginx
@@ -28,19 +28,25 @@ remain disabled without explicit receipt configuration.
 
 Release archive SHA-256:
 
-`3d653a206a200c819d9f561faee01d57da9631cd1e6e5951be77513810f969a8`
+`6f88dde951d7e2987ec469ba9b94b5d11f16f858f04b7d6769130bcfd8e81489`
 
 Verified after the atomic `/opt/fuapay/current` switch:
 
-- executable and working directory use release `b90d2f5b5665`;
+- executable and working directory use release `8f6cc4ae2a78`;
 - `/health/live`: HTTP 200;
 - `/health/ready`: HTTP 200;
 - `/Development/SignIn`: HTTP 200, 9 test profiles;
+- `/js/customer-select-filter.js`: HTTP 200;
 - HTTPS front door: HTTP 401 before Basic Authentication;
 - HSTS: `max-age=31536000`;
 - CSP: `base-uri 'none'`;
 - `X-Content-Type-Options: nosniff`;
-- no warning-or-higher service log entries during deployment verification.
+- no warning-or-higher service log entries during corrected deployment acceptance.
+
+Direct Kestrel smoke requests that represent HTTPS must include both
+`Host: fuapay.tul.cz` and `X-Forwarded-Proto: https`. Without the forwarded
+scheme the request is treated as HTTP, so secure antiforgery cookie generation
+on form pages such as `/Development/SignIn` is intentionally rejected.
 
 No EF migration changed from the previous staging revision.
 `Database__ApplyMigrationsOnStart=false`.
