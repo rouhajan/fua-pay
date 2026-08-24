@@ -514,12 +514,12 @@ else
                 </svg>
             </div>
 
-            <h1>Bezpečný vstup do systému</h1>
-            <p class="login-subtitle">Fakultní platební portál</p>
+            <h1>FUA Pay</h1>
+            <p class="login-subtitle">
+                Platby za služby Fakulty umění a architektury TUL
+            </p>
             <p class="login-copy">
-                FUA Pay používá jednotné přihlášení Technické univerzity v Liberci
-                pomocí vašeho univerzitního účtu Microsoft.
-                Vaše přihlašovací údaje FUA Pay neukládá.
+                Přihlášení probíhá univerzitním účtem TUL.
             </p>
 
             @if (Model.AuthenticationError)
@@ -533,22 +533,19 @@ else
             @if (Model.IsEntraSignInEnabled)
             {
                 <a asp-page="/Account/SignIn" class="primary-button">
-                    Přihlásit se přes Microsoft
+                    Přihlásit se přes TUL
                 </a>
             }
             else if (Model.IsDevelopmentSignInEnabled)
             {
                 <a asp-page="/Development/SignIn" class="primary-button">
-                    Přihlásit se přes Microsoft
+                    Přihlásit se přes TUL
                 </a>
-                <p class="development-note">
-                    V testovacím prostředí pokračujete na výběr role.
-                </p>
             }
             else
             {
                 <button type="button" class="primary-button" disabled>
-                    Přihlásit se přes Microsoft
+                    Přihlásit se přes TUL
                 </button>
                 <p class="development-note">
                     Přihlášení není v tomto prostředí nakonfigurováno.

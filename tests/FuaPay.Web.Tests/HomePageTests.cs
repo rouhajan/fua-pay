@@ -17,7 +17,7 @@ public sealed class HomePageTests :
     }
 
     [Fact]
-    public async Task GetRoot_ReturnsSuccess()
+    public async Task GetRoot_InDevelopment_ReturnsPublicEntryPage()
     {
         using var client = _factory.CreateClient(
             new WebApplicationFactoryClientOptions
@@ -30,9 +30,9 @@ public sealed class HomePageTests :
         var content = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("Bezpečný vstup do systému", content);
-        Assert.Contains("Fakultní platební portál", content);
-        Assert.Contains("Přihlásit se přes Microsoft", content);
+        Assert.Contains("href=\"/Development/SignIn\"", content);
+        Assert.Contains("href=\"/Privacy\"", content);
+        Assert.Contains("href=\"/Terms\"", content);
         Assert.DoesNotContain("type=\"email\"", content);
         Assert.DoesNotContain("type=\"password\"", content);
     }
