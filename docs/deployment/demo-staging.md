@@ -1,14 +1,14 @@
 # Demo / staging deployment
 
-Status: 2026-08-22
+Status: 2026-08-24
 
 ## Deployment
 
 - URL: `https://fuapay.tul.cz`
 - Alternate URL: `https://fuapay.fa.tul.cz` redirects to the canonical URL.
-- Revision: `8f6cc4ae2a78280931127ed0e709949a02ca7b90`
-- Active release: `/opt/fuapay/releases/8f6cc4ae2a78`
-- Rollback release: `/opt/fuapay/releases/b90d2f5b5665`
+- Revision: `8f3f8109ccb32ab67ee9d91e5d9fe8f25cc51ade`
+- Active release: `/opt/fuapay/releases/8f3f8109ccb3`
+- Rollback release: `/opt/fuapay/releases/8f6cc4ae2a78`
 - Service account: `fuapay:fuapay`
 - Kestrel: `127.0.0.1:5080`
 - Reverse proxy: Nginx
@@ -28,20 +28,21 @@ remain disabled without explicit receipt configuration.
 
 Release archive SHA-256:
 
-`6f88dde951d7e2987ec469ba9b94b5d11f16f858f04b7d6769130bcfd8e81489`
+`e6cc4f3f709ef30cc1df565d993ccfae8c3d02a6a62667710e671fce60e917bb`
 
 Verified after the atomic `/opt/fuapay/current` switch:
 
-- executable and working directory use release `8f6cc4ae2a78`;
+- executable and working directory use release `8f3f8109ccb3`;
 - `/health/live`: HTTP 200;
 - `/health/ready`: HTTP 200;
-- `/Development/SignIn`: HTTP 200, 9 test profiles;
-- `/js/customer-select-filter.js`: HTTP 200;
-- HTTPS front door: HTTP 401 before Basic Authentication;
-- HSTS: `max-age=31536000`;
-- CSP: `base-uri 'none'`;
-- `X-Content-Type-Options: nosniff`;
-- no warning-or-higher service log entries during corrected deployment acceptance.
+- direct Kestrel smoke requests for `/`, `/Privacy`, `/Terms` and `/Development/SignIn` succeeded;
+- the public homepage contains the expected TUL sign-in copy;
+- the Privacy and Terms pages contain the expected public content;
+- the expected staging test-mode warning was emitted exactly once and no other warning/error condition was present in the new process log;
+- HTTPS front door: HTTP 401 before Basic Authentication with realm `FUA Pay demo`;
+- `https://fuapay.fa.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
+- `http://fuapay.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
+- rollback release `/opt/fuapay/releases/8f6cc4ae2a78` remains present and executable.
 
 Direct Kestrel smoke requests that represent HTTPS must include both
 `Host: fuapay.tul.cz` and `X-Forwarded-Proto: https`. Without the forwarded
