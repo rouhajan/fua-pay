@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
 
@@ -13,12 +14,13 @@ public sealed class AccessIdentityServiceTests
     {
         var repository =
             new FakeAccessUserRepository();
+        var auditTrail = new RecordingAuditTrail();
 
         var identity =
             CreateIdentity();
 
         var service =
-            CreateService(repository);
+            CreateService(repository, auditTrail);
 
         var result =
             await service.ResolveAsync(identity);
@@ -82,6 +84,13 @@ public sealed class AccessIdentityServiceTests
         Assert.Equal(identity.Key, repository.IdentityKey);
         Assert.Equal(1, repository.AddCalls);
         Assert.Equal(0, repository.SaveCalls);
+
+        var audit = Assert.Single(auditTrail.Entries);
+        Assert.Equal("first-login", audit.ActorProcessName);
+        Assert.Equal("access.user-provisioned", audit.Action);
+        Assert.Equal("access-user", audit.EntityType);
+        Assert.Equal(result.User.Id.ToString(), audit.EntityId);
+        Assert.Equal(CurrentTime, audit.OccurredAt);
     }
 
     [Fact]
@@ -103,9 +112,10 @@ public sealed class AccessIdentityServiceTests
                 User = user,
                 IdentityKey = CreateKey()
             };
+        var auditTrail = new RecordingAuditTrail();
 
         var service =
-            CreateService(repository);
+            CreateService(repository, auditTrail);
 
         var identity =
             new VerifiedExternalIdentity(
@@ -134,6 +144,7 @@ public sealed class AccessIdentityServiceTests
         Assert.Single(user.RoleAssignments);
         Assert.Equal(0, repository.AddCalls);
         Assert.Equal(1, repository.SaveCalls);
+        Assert.Empty(auditTrail.Entries);
     }
 
     [Fact]
@@ -347,10 +358,12 @@ public sealed class AccessIdentityServiceTests
     }
 
     private static AccessIdentityService CreateService(
-        IAccessUserRepository repository)
+        IAccessUserRepository repository,
+        IAuditTrail? auditTrail = null)
     {
         return new AccessIdentityService(
             repository,
+            auditTrail ?? NullAuditTrail.Instance,
             new FixedTimeProvider(CurrentTime));
     }
 
@@ -392,6 +405,21 @@ public sealed class AccessIdentityServiceTests
         public override DateTimeOffset GetUtcNow()
         {
             return _currentTime;
+        }
+    }
+
+    private sealed class RecordingAuditTrail : IAuditTrail
+    {
+        public List<AuditEntry> Entries { get; } = [];
+
+        public void Stage(AuditEntry entry) => Entries.Add(entry);
+
+        public Task WriteAsync(
+            AuditEntry entry,
+            CancellationToken cancellationToken = default)
+        {
+            Entries.Add(entry);
+            return Task.CompletedTask;
         }
     }
 

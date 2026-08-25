@@ -753,6 +753,16 @@ public sealed class DevelopmentDataPersistenceTests :
         var dbContext = scope.ServiceProvider
             .GetRequiredService<FuaPayDbContext>();
 
+        foreach (var userId in ids)
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                DELETE FROM audit.events
+                WHERE entity_type = 'access-user'
+                  AND entity_id = {userId.ToString()}
+                """);
+        }
+
         await dbContext.Database.ExecuteSqlInterpolatedAsync(
             $"""
             DELETE FROM access.role_assignments

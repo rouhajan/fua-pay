@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.Development;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Development;
@@ -103,6 +104,7 @@ public sealed class DevelopmentDataSeederTests
             var identityService =
                 new AccessIdentityService(
                     AccessRepository,
+                    NullAuditTrail.Instance,
                     timeProvider);
 
             var signInService =

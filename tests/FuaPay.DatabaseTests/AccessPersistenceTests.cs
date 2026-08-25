@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Persistence;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
@@ -49,6 +50,8 @@ public sealed class AccessPersistenceTests :
                 var service =
                     new AccessIdentityService(
                         repository,
+                        firstScope.ServiceProvider
+                            .GetRequiredService<IAuditTrail>(),
                         new FixedTimeProvider(
                             TestTime));
 
@@ -114,6 +117,8 @@ public sealed class AccessPersistenceTests :
                 var service =
                     new AccessIdentityService(
                         repository,
+                        secondScope.ServiceProvider
+                            .GetRequiredService<IAuditTrail>(),
                         new FixedTimeProvider(
                             TestTime.AddMinutes(5)));
 
@@ -183,6 +188,10 @@ public sealed class AccessPersistenceTests :
                     AccessRole.Customer));
             Assert.Single(
                 persistedUser.RoleAssignments);
+
+            await AssertProvisioningAuditCountAsync(
+                userId,
+                expectedCount: 1);
         }
         finally
         {
@@ -403,6 +412,8 @@ public sealed class AccessPersistenceTests :
                 var service =
                     new AccessIdentityService(
                         repository,
+                        resolveScope.ServiceProvider
+                            .GetRequiredService<IAuditTrail>(),
                         new FixedTimeProvider(
                             TestTime.AddMinutes(30)));
 
@@ -673,12 +684,16 @@ public sealed class AccessPersistenceTests :
             var firstService =
                 new AccessIdentityService(
                     firstRepository,
+                    firstScope.ServiceProvider
+                        .GetRequiredService<IAuditTrail>(),
                     new FixedTimeProvider(
                         TestTime.AddHours(1)));
 
             var secondService =
                 new AccessIdentityService(
                     secondRepository,
+                    secondScope.ServiceProvider
+                        .GetRequiredService<IAuditTrail>(),
                     new FixedTimeProvider(
                         TestTime.AddHours(1)));
 
@@ -755,11 +770,81 @@ public sealed class AccessPersistenceTests :
             Assert.Equal(
                 "first-login",
                 assignment.GrantedBy.ProcessName);
+
+            await AssertProvisioningAuditCountAsync(
+                persistedUser.Id,
+                expectedCount: 1);
         }
         finally
         {
             await DeleteIdentityAsync(
                 identityKey);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ProvisioningAuditFailure_RollsBackNewIdentity()
+    {
+        var identityKey = CreateIdentityKey();
+        var duplicateAudit = AuditEntry.ForProcess(
+            "database-test",
+            "test.audit-duplicate",
+            "test",
+            Guid.NewGuid().ToString(),
+            "Audit row used to force provisioning rollback.",
+            TestTime);
+
+        try
+        {
+            using (var auditScope = _factory.Services.CreateScope())
+            {
+                await auditScope.ServiceProvider
+                    .GetRequiredService<IAuditTrail>()
+                    .WriteAsync(duplicateAudit);
+            }
+
+            using (var provisioningScope =
+                _factory.Services.CreateScope())
+            {
+                var service = new AccessIdentityService(
+                    provisioningScope.ServiceProvider
+                        .GetRequiredService<IAccessUserRepository>(),
+                    new DuplicateAuditTrail(
+                        provisioningScope.ServiceProvider
+                            .GetRequiredService<IAuditTrail>(),
+                        duplicateAudit),
+                    new FixedTimeProvider(TestTime));
+
+                await Assert.ThrowsAsync<DbUpdateException>(
+                    () => service.ResolveAsync(
+                        new VerifiedExternalIdentity(
+                            identityKey,
+                            "Rollback uživatel",
+                            "rollback@example.cz")));
+            }
+
+            using var verificationScope =
+                _factory.Services.CreateScope();
+            var persisted = await verificationScope.ServiceProvider
+                .GetRequiredService<IAccessUserRepository>()
+                .FindByExternalIdentityAsync(
+                    identityKey,
+                    CancellationToken.None);
+
+            Assert.Null(persisted);
+        }
+        finally
+        {
+            using (var auditCleanupScope =
+                _factory.Services.CreateScope())
+            {
+                await auditCleanupScope.ServiceProvider
+                    .GetRequiredService<FuaPayDbContext>()
+                    .Database.ExecuteSqlInterpolatedAsync(
+                        $"DELETE FROM audit.events WHERE id = {duplicateAudit.Id}");
+            }
+
+            await DeleteIdentityAsync(identityKey);
         }
     }
 
@@ -895,6 +980,14 @@ public sealed class AccessPersistenceTests :
             await dbContext.Database
                 .ExecuteSqlInterpolatedAsync(
                     $"""
+                    DELETE FROM audit.events
+                    WHERE entity_type = 'access-user'
+                      AND entity_id = {userId.ToString()}
+                    """);
+
+            await dbContext.Database
+                .ExecuteSqlInterpolatedAsync(
+                    $"""
                     DELETE FROM access.role_assignments
                     WHERE user_id = {userId}
                        OR granted_by_user_id = {userId}
@@ -929,6 +1022,27 @@ public sealed class AccessPersistenceTests :
         }
 
         await transaction.CommitAsync();
+    }
+
+    private async Task AssertProvisioningAuditCountAsync(
+        Guid userId,
+        int expectedCount)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var count = await scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>()
+            .Database.SqlQuery<int>(
+                $"""
+                SELECT COUNT(*)::int AS "Value"
+                FROM audit.events
+                WHERE action = 'access.user-provisioned'
+                  AND actor_process_name = 'first-login'
+                  AND entity_type = 'access-user'
+                  AND entity_id = {userId.ToString()}
+                """)
+            .SingleAsync();
+
+        Assert.Equal(expectedCount, count);
     }
 
     private static ExternalIdentityKey CreateIdentityKey()
@@ -1072,5 +1186,27 @@ public sealed class AccessPersistenceTests :
                 user,
                 cancellationToken);
         }
+    }
+
+    private sealed class DuplicateAuditTrail : IAuditTrail
+    {
+        private readonly IAuditTrail _inner;
+        private readonly AuditEntry _duplicate;
+
+        public DuplicateAuditTrail(
+            IAuditTrail inner,
+            AuditEntry duplicate)
+        {
+            _inner = inner;
+            _duplicate = duplicate;
+        }
+
+        public void Stage(AuditEntry entry) =>
+            _inner.Stage(_duplicate);
+
+        public Task WriteAsync(
+            AuditEntry entry,
+            CancellationToken cancellationToken = default) =>
+            _inner.WriteAsync(_duplicate, cancellationToken);
     }
 }
