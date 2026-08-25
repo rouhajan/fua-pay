@@ -1,3 +1,4 @@
+using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Modules.Payments.Infrastructure.Persistence;
@@ -59,6 +60,9 @@ public static class PaymentsModule
                     DevelopmentPaymentProviderInitiator>());
         }
         services.AddScoped<IPaymentRepository, EfPaymentRepository>();
+        services.AddScoped<
+            IJobPaymentCoordination,
+            EfJobPaymentCoordination>();
         services.AddScoped<
             IPaymentInitiationRepository,
             EfPaymentInitiationRepository>();

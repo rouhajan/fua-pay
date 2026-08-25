@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.BuildingBlocks.Notifications;
@@ -10,6 +11,8 @@ namespace FuaPay.Web.Modules.Jobs.Application;
 public sealed class JobManagementService
 {
     private readonly IJobRepository _repository;
+    private readonly IJobPaymentCoordination _jobPaymentCoordination;
+    private readonly IApplicationTransaction _transaction;
     private readonly IJobNumberAllocator _numberAllocator;
     private readonly IServiceUnitQueries _serviceUnitQueries;
     private readonly IAccessUserQueries _accessUserQueries;
@@ -19,6 +22,8 @@ public sealed class JobManagementService
 
     public JobManagementService(
         IJobRepository repository,
+        IJobPaymentCoordination jobPaymentCoordination,
+        IApplicationTransaction transaction,
         IJobNumberAllocator numberAllocator,
         IServiceUnitQueries serviceUnitQueries,
         IAccessUserQueries accessUserQueries,
@@ -27,6 +32,8 @@ public sealed class JobManagementService
         INotificationOutbox notificationOutbox)
     {
         ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(jobPaymentCoordination);
+        ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(numberAllocator);
         ArgumentNullException.ThrowIfNull(serviceUnitQueries);
         ArgumentNullException.ThrowIfNull(accessUserQueries);
@@ -35,6 +42,8 @@ public sealed class JobManagementService
         ArgumentNullException.ThrowIfNull(notificationOutbox);
 
         _repository = repository;
+        _jobPaymentCoordination = jobPaymentCoordination;
+        _transaction = transaction;
         _numberAllocator = numberAllocator;
         _serviceUnitQueries = serviceUnitQueries;
         _accessUserQueries = accessUserQueries;
@@ -190,15 +199,48 @@ public sealed class JobManagementService
         return job;
     }
 
-    public async Task<Job> CancelAsync(
+    public Task<Job> CancelAsync(
         JobManagementActor actor,
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(actor);
+        ValidateJobId(jobId);
+
+        return _transaction.ExecuteAsync(
+            transactionCancellationToken =>
+                CancelInsideTransactionAsync(
+                    actor,
+                    jobId,
+                    transactionCancellationToken),
+            cancellationToken);
+    }
+
+    private async Task<Job> CancelInsideTransactionAsync(
+        JobManagementActor actor,
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        var wasLocked = await _jobPaymentCoordination.LockJobAsync(
+            jobId,
+            cancellationToken);
+
+        if (!wasLocked)
+        {
+            throw new JobNotFoundException(jobId);
+        }
+
         var job = await LoadManagedJobAsync(
             actor,
             jobId,
             cancellationToken);
+
+        if (await _jobPaymentCoordination.HasBlockingDirectPaymentAsync(
+            job.Id,
+            cancellationToken))
+        {
+            throw new JobPaymentInProgressException(job.Id);
+        }
 
         var now = _timeProvider.GetUtcNow();
         job.Cancel(now);

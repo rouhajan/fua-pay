@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
@@ -10,6 +11,8 @@ public sealed class PaymentCreationService
 {
     private readonly IPaymentRepository _repository;
     private readonly IJobQueries _jobQueries;
+    private readonly IJobPaymentCoordination _jobPaymentCoordination;
+    private readonly IApplicationTransaction _transaction;
     private readonly TimeProvider _timeProvider;
     private readonly IAuditTrail _auditTrail;
     private readonly IPaymentOrderNumberAllocator _orderNumberAllocator;
@@ -19,6 +22,8 @@ public sealed class PaymentCreationService
     public PaymentCreationService(
         IPaymentRepository repository,
         IJobQueries jobQueries,
+        IJobPaymentCoordination jobPaymentCoordination,
+        IApplicationTransaction transaction,
         TimeProvider timeProvider,
         IAuditTrail auditTrail,
         IPaymentOrderNumberAllocator orderNumberAllocator,
@@ -27,6 +32,8 @@ public sealed class PaymentCreationService
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(jobQueries);
+        ArgumentNullException.ThrowIfNull(jobPaymentCoordination);
+        ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(auditTrail);
         ArgumentNullException.ThrowIfNull(orderNumberAllocator);
@@ -34,6 +41,8 @@ public sealed class PaymentCreationService
         ArgumentNullException.ThrowIfNull(initiationService);
         _repository = repository;
         _jobQueries = jobQueries;
+        _jobPaymentCoordination = jobPaymentCoordination;
+        _transaction = transaction;
         _timeProvider = timeProvider;
         _auditTrail = auditTrail;
         _orderNumberAllocator = orderNumberAllocator;
@@ -74,7 +83,7 @@ public sealed class PaymentCreationService
 
         try
         {
-            return await CreatePreparedPaymentAsync(
+            return await CreateAndInitializePreparedPaymentAsync(
                 customerUserId,
                 PaymentPurposeType.CreditTopUp,
                 jobId: null,
@@ -117,46 +126,15 @@ public sealed class PaymentCreationService
                 nameof(jobId));
         }
 
-        var existing = await _repository.FindBlockingForJobAsync(
-            jobId,
-            cancellationToken);
-
-        if (existing is not null)
-        {
-            if (existing.CustomerUserId != customerUserId)
-            {
-                throw new PaymentAccessDeniedException(
-                    existing.Id,
-                    customerUserId);
-            }
-
-            return (await _initiationService.InitializeIfPreparedAsync(
-                existing,
-                cancellationToken)).Payment;
-        }
-
-        var job = await _jobQueries.FindForCustomerAsync(
-            customerUserId,
-            jobId,
-            cancellationToken)
-            ?? throw new JobNotFoundException(jobId);
-
-        if (
-            job.ProductionStatus != JobProductionStatus.Published ||
-            job.PaymentStatus != JobPaymentStatus.Unpaid)
-        {
-            throw new JobSettlementNotAllowedException(
-                job.ProductionStatus);
-        }
-
+        Payment preparedPayment;
         try
         {
-            return await CreatePreparedPaymentAsync(
-                customerUserId,
-                PaymentPurposeType.Job,
-                job.Id,
-                new Money(job.PriceMinorUnits),
-                creationRequestId: null,
+            preparedPayment = await _transaction.ExecuteAsync(
+                transactionCancellationToken =>
+                    PrepareJobPaymentInsideTransactionAsync(
+                        customerUserId,
+                        jobId,
+                        transactionCancellationToken),
                 cancellationToken);
         }
         catch (PaymentConcurrencyException)
@@ -177,9 +155,87 @@ public sealed class PaymentCreationService
 
             throw new BlockingJobPaymentAlreadyExistsException(jobId);
         }
+
+        return (await _initiationService.InitializeIfPreparedAsync(
+            preparedPayment,
+            cancellationToken)).Payment;
     }
 
-    private async Task<Payment> CreatePreparedPaymentAsync(
+    private async Task<Payment> PrepareJobPaymentInsideTransactionAsync(
+        Guid customerUserId,
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        var wasLocked = await _jobPaymentCoordination.LockJobAsync(
+            jobId,
+            cancellationToken);
+
+        if (!wasLocked)
+        {
+            throw new JobNotFoundException(jobId);
+        }
+
+        var job = await _jobQueries.FindForCustomerAsync(
+            customerUserId,
+            jobId,
+            cancellationToken)
+            ?? throw new JobNotFoundException(jobId);
+
+        if (
+            job.ProductionStatus != JobProductionStatus.Published ||
+            job.PaymentStatus != JobPaymentStatus.Unpaid)
+        {
+            throw new JobSettlementNotAllowedException(
+                job.ProductionStatus);
+        }
+
+        var existing = await _repository.FindBlockingForJobAsync(
+            jobId,
+            cancellationToken);
+
+        if (existing is not null)
+        {
+            if (existing.CustomerUserId != customerUserId)
+            {
+                throw new PaymentAccessDeniedException(
+                    existing.Id,
+                    customerUserId);
+            }
+
+            return existing;
+        }
+
+        return await AddPreparedPaymentAsync(
+            customerUserId,
+            PaymentPurposeType.Job,
+            job.Id,
+            new Money(job.PriceMinorUnits),
+            creationRequestId: null,
+            cancellationToken);
+    }
+
+    private async Task<Payment> CreateAndInitializePreparedPaymentAsync(
+        Guid customerUserId,
+        PaymentPurposeType purposeType,
+        Guid? jobId,
+        Money amount,
+        Guid? creationRequestId,
+        CancellationToken cancellationToken)
+    {
+        var payment = await AddPreparedPaymentAsync(
+            customerUserId,
+            purposeType,
+            jobId,
+            amount,
+            creationRequestId,
+            cancellationToken);
+
+        return (await _initiationService.InitializeAsync(
+            payment.Id,
+            cancellationToken)).Payment;
+    }
+
+    private async Task<Payment> AddPreparedPaymentAsync(
         Guid customerUserId,
         PaymentPurposeType purposeType,
         Guid? jobId,
@@ -225,9 +281,7 @@ public sealed class PaymentCreationService
             initiation,
             cancellationToken);
 
-        return (await _initiationService.InitializeAsync(
-            payment.Id,
-            cancellationToken)).Payment;
+        return payment;
     }
 
     private static void ValidateCustomerUserId(Guid customerUserId)

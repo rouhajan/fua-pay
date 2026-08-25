@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.BuildingBlocks.Notifications;
@@ -130,6 +131,8 @@ public sealed class JobManagementServiceTests
         var repository = new FakeJobRepository();
         var service = new JobManagementService(
             repository,
+            new NonBlockingJobPaymentCoordination(),
+            new ImmediateTransaction(),
             new FakeJobNumberAllocator(),
             new MissingServiceUnitQueries(),
             new FakeAccessUserQueries(),
@@ -278,11 +281,40 @@ public sealed class JobManagementServiceTests
         Assert.Equal(0, repository.SaveCalls);
     }
 
+    [Fact]
+    public async Task CancelAsync_BlockingDirectPayment_DoesNotCancelJob()
+    {
+        var serviceUnitId = Guid.NewGuid();
+        var actor = CreateRequesterActor(serviceUnitId);
+        var job = CreateDraft(actor.UserId, serviceUnitId);
+        job.Publish(CurrentTime.AddMinutes(-1));
+        var repository = new FakeJobRepository { Job = job };
+        var coordination = new NonBlockingJobPaymentCoordination
+        {
+            HasBlockingDirectPayment = true
+        };
+        var service = CreateService(repository, coordination);
+
+        var exception = await Assert.ThrowsAsync<
+            JobPaymentInProgressException>(
+                () => service.CancelAsync(actor, job.Id));
+
+        Assert.Equal(job.Id, exception.JobId);
+        Assert.Equal(
+            JobProductionStatus.Published,
+            job.ProductionStatus);
+        Assert.Null(job.CancelledAt);
+        Assert.Equal(0, repository.SaveCalls);
+    }
+
     private static JobManagementService CreateService(
-        IJobRepository repository)
+        IJobRepository repository,
+        IJobPaymentCoordination? coordination = null)
     {
         return new JobManagementService(
             repository,
+            coordination ?? new NonBlockingJobPaymentCoordination(),
+            new ImmediateTransaction(),
             new FakeJobNumberAllocator(),
             new FakeServiceUnitQueries(),
             new FakeAccessUserQueries(),
@@ -519,5 +551,30 @@ public sealed class JobManagementServiceTests
             SaveCalls++;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class NonBlockingJobPaymentCoordination :
+        IJobPaymentCoordination
+    {
+        public bool HasBlockingDirectPayment { get; set; }
+
+        public Task<bool> LockJobAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
+        public Task<bool> HasBlockingDirectPaymentAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(HasBlockingDirectPayment);
+    }
+
+    private sealed class ImmediateTransaction :
+        IApplicationTransaction
+    {
+        public Task<T> ExecuteAsync<T>(
+            Func<CancellationToken, Task<T>> operation,
+            CancellationToken cancellationToken = default) =>
+            operation(cancellationToken);
     }
 }

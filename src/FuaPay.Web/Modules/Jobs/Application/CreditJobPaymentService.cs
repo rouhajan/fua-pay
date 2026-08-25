@@ -9,6 +9,7 @@ namespace FuaPay.Web.Modules.Jobs.Application;
 public sealed class CreditJobPaymentService
 {
     private readonly IJobRepository _jobRepository;
+    private readonly IJobPaymentCoordination _jobPaymentCoordination;
     private readonly CreditService _creditService;
     private readonly IApplicationTransaction _transaction;
     private readonly IAuditTrail _auditTrail;
@@ -16,18 +17,21 @@ public sealed class CreditJobPaymentService
 
     public CreditJobPaymentService(
         IJobRepository jobRepository,
+        IJobPaymentCoordination jobPaymentCoordination,
         CreditService creditService,
         IApplicationTransaction transaction,
         IAuditTrail auditTrail,
         INotificationOutbox notificationOutbox)
     {
         ArgumentNullException.ThrowIfNull(jobRepository);
+        ArgumentNullException.ThrowIfNull(jobPaymentCoordination);
         ArgumentNullException.ThrowIfNull(creditService);
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(auditTrail);
         ArgumentNullException.ThrowIfNull(notificationOutbox);
 
         _jobRepository = jobRepository;
+        _jobPaymentCoordination = jobPaymentCoordination;
         _creditService = creditService;
         _transaction = transaction;
         _auditTrail = auditTrail;
@@ -63,14 +67,19 @@ public sealed class CreditJobPaymentService
         Guid jobId,
         CancellationToken cancellationToken)
     {
-        var job = await _jobRepository.FindByIdAsync(
+        var wasLocked = await _jobPaymentCoordination.LockJobAsync(
             jobId,
             cancellationToken);
 
-        if (job is null)
+        if (!wasLocked)
         {
             throw new JobNotFoundException(jobId);
         }
+
+        var job = await _jobRepository.FindByIdAsync(
+            jobId,
+            cancellationToken)
+            ?? throw new JobNotFoundException(jobId);
 
         if (job.CustomerUserId != customerUserId)
         {
@@ -91,6 +100,13 @@ public sealed class CreditJobPaymentService
                 JobSettlementType.Credit,
                 job.Id,
                 job.SettledAt.Value);
+        }
+
+        if (await _jobPaymentCoordination.HasBlockingDirectPaymentAsync(
+            job.Id,
+            cancellationToken))
+        {
+            throw new JobPaymentInProgressException(job.Id);
         }
 
         if (job.ProductionStatus != JobProductionStatus.Published)
