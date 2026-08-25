@@ -331,6 +331,7 @@ internal sealed class EfCsobPaymentRecoveryRepository :
                                 )
                             ORDER BY i.updated_at, i.payment_id
                             LIMIT {limit}
+                            FOR UPDATE OF i SKIP LOCKED
                         ),
                         changed AS
                         (
