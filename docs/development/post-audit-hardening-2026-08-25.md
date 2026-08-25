@@ -66,6 +66,8 @@ Nový singleton `CsobPaymentReconciliationHealth` drží pouze in-memory čas po
 
 `Disabled` a `Healthy` vracejí HTTP 200, ostatní stavy HTTP 503. Endpoint pracuje pouze s pamětí procesu a nekontaktuje databázi ani ČSOB. Semantika `/health/live` a `/health/ready` se nezměnila. Testy pokrývají všechny stavy, zotavení po chybě, stale detekci, pozitivní idle cyklus, DI registraci a disabled endpoint bez externí integrace.
 
+Anonymní HTTP response záměrně nezveřejňuje konkrétní název typu interní výjimky. `LastErrorType` zůstává součástí interního health snapshotu a úplná výjimka se dál zapisuje serverovým `LogError`; veřejný endpoint vrací pouze stav, časy posledního úspěchu a selhání a stale hranici. Endpointový test ověřuje, že stav `Failed` zůstává HTTP 503 a JSON neobsahuje `lastErrorType`.
+
 Status: implementováno bez persistence tabulky a bez nové závislosti.
 
 ## Finanční stav po F-01
@@ -96,7 +98,7 @@ Nevznikla žádná EF migrace, nová tabulka ani nová balíčková závislost.
   - locked restore: PASS;
   - Release build: PASS, 0 warningů a 0 chyb;
   - `dotnet format --verify-no-changes`: PASS;
-  - `FuaPay.Web.Tests`: 552/552 PASS, 0 skipped;
+  - `FuaPay.Web.Tests`: 553/553 PASS, 0 skipped;
   - EF pending-model check: PASS, model odpovídá poslední migraci.
 - GitHub Actions CI run 62 nad `e54a5fff858e35cb2681a50a2f92401e89a0c859`: PASS;
   - canonical verification: 552/552 PASS, 0 skipped;

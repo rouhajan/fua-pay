@@ -438,7 +438,6 @@ app.MapGet(
                     lastSuccessfulCycleAt =
                         snapshot.LastSuccessfulCycleAt,
                     lastFailedCycleAt = snapshot.LastFailedCycleAt,
-                    lastErrorType = snapshot.LastErrorType,
                     staleAfterSeconds =
                         snapshot.StaleAfter.TotalSeconds
                 },

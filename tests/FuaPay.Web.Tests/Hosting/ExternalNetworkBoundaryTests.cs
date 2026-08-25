@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 
 using FuaPay.Web.Modules.Access.Infrastructure.Entra;
 using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Http;
 
@@ -96,6 +98,72 @@ public sealed class ExternalNetworkBoundaryTests
             HttpStatusCode.ServiceUnavailable,
             readyResponse.StatusCode);
         Assert.Equal(0, counter.Count);
+    }
+
+    [Fact]
+    public async Task FailedReconciliationHealth_DoesNotExposeExceptionType()
+    {
+        using var externalFiles =
+            new TemporaryDirectory("fua-pay-worker-health-boundary");
+        var privateKeyPath = Path.Combine(
+            externalFiles.Path,
+            "merchant.key");
+        var publicKeyPath = Path.Combine(
+            externalFiles.Path,
+            "gateway.pub");
+        File.WriteAllText(privateKeyPath, "test-only");
+        File.WriteAllText(publicKeyPath, "test-only");
+
+        var health = new CsobPaymentReconciliationHealth();
+        health.RecordFailedCycle(
+            new DateTimeOffset(
+                2026,
+                8,
+                25,
+                14,
+                0,
+                0,
+                TimeSpan.Zero),
+            new InvalidOperationException("internal test failure"));
+
+        using var productionFactory =
+            new ConfiguredWebApplicationFactory(
+                Environments.Production,
+                CreateProductionSettings(
+                    externalFiles.Path,
+                    privateKeyPath,
+                    publicKeyPath));
+        using var instrumentedFactory =
+            productionFactory.WithWebHostBuilder(
+                builder => builder.ConfigureTestServices(
+                    services =>
+                    {
+                        services.RemoveAll<IHostedService>();
+                        services.RemoveAll<
+                            CsobPaymentReconciliationHealth>();
+                        services.AddSingleton(health);
+                    }));
+        using var client = CreateClient(
+            instrumentedFactory,
+            new Uri("https://fuapay.example.test"));
+
+        using var response = await client.GetAsync(
+            "/health/workers/csob-reconciliation");
+        using var document = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(
+            HttpStatusCode.ServiceUnavailable,
+            response.StatusCode);
+        Assert.Equal(
+            "Failed",
+            document.RootElement
+                .GetProperty("status")
+                .GetString());
+        Assert.False(
+            document.RootElement.TryGetProperty(
+                "lastErrorType",
+                out _));
     }
 
     private static HttpClient CreateClient(
