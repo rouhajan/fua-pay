@@ -1,14 +1,14 @@
 # Demo / staging deployment
 
-Status: 2026-08-24
+Status: 2026-08-25
 
 ## Deployment
 
 - URL: `https://fuapay.tul.cz`
 - Alternate URL: `https://fuapay.fa.tul.cz` redirects to the canonical URL.
-- Revision: `8f3f8109ccb32ab67ee9d91e5d9fe8f25cc51ade`
-- Active release: `/opt/fuapay/releases/8f3f8109ccb3`
-- Rollback release: `/opt/fuapay/releases/8f6cc4ae2a78`
+- Revision: `69853d416931860944a86188eb883576f914f404`
+- Active release: `/opt/fuapay/releases/69853d416931`
+- Rollback release: `/opt/fuapay/releases/8f3f8109ccb3`
 - Service account: `fuapay:fuapay`
 - Kestrel: `127.0.0.1:5080`
 - Reverse proxy: Nginx
@@ -28,21 +28,20 @@ remain disabled without explicit receipt configuration.
 
 Release archive SHA-256:
 
-`e6cc4f3f709ef30cc1df565d993ccfae8c3d02a6a62667710e671fce60e917bb`
+`38a332c1c72ef03cce4c991106e15943e17e183409a84ce9d599dc1e1d12d561`
 
 Verified after the atomic `/opt/fuapay/current` switch:
 
-- executable and working directory use release `8f3f8109ccb3`;
+- executable and working directory use release `69853d416931`;
 - `/health/live`: HTTP 200;
 - `/health/ready`: HTTP 200;
+- `/health/workers/csob-reconciliation`: HTTP 200 with status `Disabled`;
 - direct Kestrel smoke requests for `/`, `/Privacy`, `/Terms` and `/Development/SignIn` succeeded;
-- the public homepage contains the expected TUL sign-in copy;
-- the Privacy and Terms pages contain the expected public content;
-- the expected staging test-mode warning was emitted exactly once and no other warning/error condition was present in the new process log;
+- the new process log contained no warning/error entries;
 - HTTPS front door: HTTP 401 before Basic Authentication with realm `FUA Pay demo`;
 - `https://fuapay.fa.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
 - `http://fuapay.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
-- rollback release `/opt/fuapay/releases/8f6cc4ae2a78` remains present and executable.
+- rollback release `/opt/fuapay/releases/8f3f8109ccb3` remains present and executable.
 
 Direct Kestrel smoke requests that represent HTTPS must include both
 `Host: fuapay.tul.cz` and `X-Forwarded-Proto: https`. Without the forwarded
