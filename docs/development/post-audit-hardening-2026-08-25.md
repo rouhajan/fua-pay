@@ -26,7 +26,7 @@ Status: implementováno. PostgreSQL testy jsou součástí projektu a kompilují
 
 Původní candidate `SELECT` s `LEFT JOIN`, zámkem initiation řádku a následným samostatným načtením recovery mohl při `READ COMMITTED` vrátit stejného kandidáta dvěma transakcím. Durable recovery zůstala jedna, ale druhá transakce mohla nesprávně zvýšit count, verzi a vytvořit duplicitní audit.
 
-`ScheduleRecoverableUncertainAsync` nyní provede v jediném SQL statementu omezený výběr a `INSERT ... ON CONFLICT ... DO UPDATE ... WHERE ... RETURNING`. Konfliktní transakce dostane z `RETURNING` pouze řádky, u kterých skutečně vznikl nebo byl oprávněně obnoven durable scheduling stav. Vrácený count a `payment.provider-initiation.verification-scheduled` audit jsou odvozeny pouze z těchto řádků a zůstávají ve společné transakci.
+`ScheduleRecoverableUncertainAsync` nyní provede v jediném SQL statementu omezený výběr s `FOR UPDATE OF i SKIP LOCKED` a `INSERT ... ON CONFLICT ... DO UPDATE ... WHERE ... RETURNING`. Candidate-row lock zabrání dvěma schedulerům současně vložit stejnou provider reference; konfliktní transakce kandidáta přeskočí. Z `RETURNING` se dále zpracují pouze řádky, u kterých skutečně vznikl nebo byl oprávněně obnoven durable scheduling stav. Vrácený count a `payment.provider-initiation.verification-scheduled` audit jsou odvozeny pouze z těchto řádků a zůstávají ve společné transakci.
 
 Původní race test nově vedle součtu `1` ověřuje přesně jeden scheduling audit. Existující claim/lease token, stale-worker a settlement testy nebyly oslabeny.
 
