@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.BuildingBlocks.Persistence;
 using FuaPay.Web.Modules.Credits.Application;
@@ -274,6 +275,8 @@ public sealed class JobPaymentCoordinationPersistenceTests :
         var creditService = new CreditService(
             scope.ServiceProvider
                 .GetRequiredService<ICreditAccountRepository>(),
+            scope.ServiceProvider
+                .GetRequiredService<IApplicationTransaction>(),
             new FixedTimeProvider(TestTime));
 
         await creditService.CreditAsync(

@@ -71,6 +71,7 @@ public sealed class CreditJobPaymentPersistenceTests :
 
                 var creditService = new CreditService(
                     creditRepository,
+                    transaction,
                     new FixedTimeProvider(
                         TestTime.AddMinutes(20)));
 
@@ -195,6 +196,7 @@ public sealed class CreditJobPaymentPersistenceTests :
 
                 var creditService = new CreditService(
                     creditRepository,
+                    transaction,
                     new FixedTimeProvider(
                         TestTime.AddMinutes(20)));
 
@@ -291,6 +293,8 @@ public sealed class CreditJobPaymentPersistenceTests :
 
         var creditService = new CreditService(
             creditRepository,
+            scope.ServiceProvider
+                .GetRequiredService<IApplicationTransaction>(),
             new FixedTimeProvider(TestTime));
 
         await creditService.CreditAsync(

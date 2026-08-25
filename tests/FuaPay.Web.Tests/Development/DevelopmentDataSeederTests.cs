@@ -216,6 +216,16 @@ public sealed class DevelopmentDataSeederTests
                     account => account.OwnerId == ownerId));
         }
 
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            FindByOwnerIdAsync(ownerId, cancellationToken);
+
+        public Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
         public Task AddAsync(
             CreditAccount account,
             CancellationToken cancellationToken)

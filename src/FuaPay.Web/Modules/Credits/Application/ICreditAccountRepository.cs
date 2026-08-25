@@ -8,6 +8,14 @@ public interface ICreditAccountRepository
         Guid ownerId,
         CancellationToken cancellationToken);
 
+    Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+        Guid ownerId,
+        CancellationToken cancellationToken);
+
+    Task LockOwnerForAccountCreationAsync(
+        Guid ownerId,
+        CancellationToken cancellationToken);
+
     Task AddAsync(
         CreditAccount account,
         CancellationToken cancellationToken);

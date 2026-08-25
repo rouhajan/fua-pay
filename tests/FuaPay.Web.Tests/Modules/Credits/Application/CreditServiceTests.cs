@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
@@ -31,6 +32,8 @@ public sealed class CreditServiceTests
         Assert.Equal(CurrentTime, movement.RecordedAt);
         Assert.Equal(1, repository.AddCalls);
         Assert.Equal(0, repository.SaveCalls);
+        Assert.Equal(2, repository.FindForUpdateCalls);
+        Assert.Equal(1, repository.CreationLockCalls);
     }
 
     [Fact]
@@ -53,6 +56,8 @@ public sealed class CreditServiceTests
         Assert.Equal(new Money(2_500), account.Balance);
         Assert.Equal(0, repository.AddCalls);
         Assert.Equal(1, repository.SaveCalls);
+        Assert.Equal(1, repository.FindForUpdateCalls);
+        Assert.Equal(0, repository.CreationLockCalls);
     }
 
     [Fact]
@@ -178,6 +183,7 @@ public sealed class CreditServiceTests
     {
         return new CreditService(
             repository,
+            new ImmediateTransaction(),
             new FixedTimeProvider(CurrentTime));
     }
 
@@ -212,6 +218,10 @@ public sealed class CreditServiceTests
 
         public int SaveCalls { get; private set; }
 
+        public int FindForUpdateCalls { get; private set; }
+
+        public int CreationLockCalls { get; private set; }
+
         public Task<CreditAccount?> FindByOwnerIdAsync(
             Guid ownerId,
             CancellationToken cancellationToken)
@@ -224,6 +234,27 @@ public sealed class CreditServiceTests
                     : null;
 
             return Task.FromResult(result);
+        }
+
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken)
+        {
+            FindForUpdateCalls++;
+
+            return FindByOwnerIdAsync(
+                ownerId,
+                cancellationToken);
+        }
+
+        public Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CreationLockCalls++;
+
+            return Task.CompletedTask;
         }
 
         public Task AddAsync(
@@ -249,5 +280,14 @@ public sealed class CreditServiceTests
 
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class ImmediateTransaction :
+        IApplicationTransaction
+    {
+        public Task<T> ExecuteAsync<T>(
+            Func<CancellationToken, Task<T>> operation,
+            CancellationToken cancellationToken = default) =>
+            operation(cancellationToken);
     }
 }

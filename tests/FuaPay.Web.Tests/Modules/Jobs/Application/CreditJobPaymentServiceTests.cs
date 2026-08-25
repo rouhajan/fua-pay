@@ -283,6 +283,7 @@ public sealed class CreditJobPaymentServiceTests
     {
         var creditService = new CreditService(
             creditRepository,
+            transaction,
             new FixedTimeProvider(CurrentTime));
 
         return new CreditJobPaymentService(
@@ -366,10 +367,25 @@ public sealed class CreditJobPaymentServiceTests
             ArgumentNullException.ThrowIfNull(operation);
             cancellationToken.ThrowIfCancellationRequested();
 
-            ExecuteCalls++;
+            if (_isActive)
+            {
+                return await operation(cancellationToken);
+            }
 
-            return await operation(cancellationToken);
+            ExecuteCalls++;
+            _isActive = true;
+
+            try
+            {
+                return await operation(cancellationToken);
+            }
+            finally
+            {
+                _isActive = false;
+            }
         }
+
+        private bool _isActive;
     }
 
     private sealed class FakeJobPaymentCoordination :
@@ -467,6 +483,16 @@ public sealed class CreditJobPaymentServiceTests
 
             return Task.FromResult(result);
         }
+
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            FindByOwnerIdAsync(ownerId, cancellationToken);
+
+        public Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
 
         public Task AddAsync(
             CreditAccount account,

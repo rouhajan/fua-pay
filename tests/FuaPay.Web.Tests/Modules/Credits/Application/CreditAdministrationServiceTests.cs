@@ -70,10 +70,14 @@ public sealed class CreditAdministrationServiceTests
             AdministratorId = Guid.NewGuid();
             Accounts.Account = new CreditAccount(Guid.NewGuid(), OwnerId);
             Commands = new FakeCommandRepository(Accounts);
+            var transaction = new ImmediateTransaction();
             Service = new CreditAdministrationService(
-                new CreditService(Accounts, new FixedTimeProvider(CurrentTime)),
+                new CreditService(
+                    Accounts,
+                    transaction,
+                    new FixedTimeProvider(CurrentTime)),
                 Commands,
-                new ImmediateTransaction(),
+                transaction,
                 Audit,
                 new FixedTimeProvider(CurrentTime));
         }
@@ -111,6 +115,16 @@ public sealed class CreditAdministrationServiceTests
             Guid ownerId,
             CancellationToken cancellationToken) =>
             Task.FromResult(Account?.OwnerId == ownerId ? Account : null);
+
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            FindByOwnerIdAsync(ownerId, cancellationToken);
+
+        public Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
 
         public Task AddAsync(
             CreditAccount account,
