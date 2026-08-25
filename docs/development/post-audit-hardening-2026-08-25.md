@@ -98,6 +98,12 @@ Nevznikla žádná EF migrace, nová tabulka ani nová balíčková závislost.
   - `dotnet format --verify-no-changes`: PASS;
   - `FuaPay.Web.Tests`: 552/552 PASS, 0 skipped;
   - EF pending-model check: PASS, model odpovídá poslední migraci.
+- GitHub Actions CI run 62 nad `e54a5fff858e35cb2681a50a2f92401e89a0c859`: PASS;
+  - canonical verification: 552/552 PASS, 0 skipped;
+  - aplikace EF migrací do izolované `fuapay_test_ci`: PASS;
+  - `FuaPay.DatabaseTests`: 99/99 PASS, 0 skipped;
+  - NuGet vulnerability audit, locked `linux-x64` restore, self-contained publish a clean-tree kontrola: PASS.
+- GitHub CodeQL run 63 nad stejným commitem: PASS.
 - Cílené F-01 testy: 36/36 PASS; `FuaPay.DatabaseTests` Release build PASS.
 - Cílené F-02 testy recovery scheduleru/processoru: 8/8 PASS; DB test project build PASS.
 - Cílené F-03 processor testy: 8/8 PASS.
@@ -112,7 +118,7 @@ Přímé spuštění `scripts/verify.ps1` bez bypassu bylo zastaveno lokální P
 
 ### NOT RUN
 
-- PostgreSQL integrační test suite. Safety guard správně odmítl nakonfigurovanou vývojovou databázi. Pokus vytvořit oddělenou `fuapay_test_hardening` a následně `fuapay_test` selhal na PostgreSQL `42501: permission denied to create database`, protože lokální aplikační role nemá `CREATEDB`. Žádný DB test není vykázán jako PASS; musí jej provést CI nad `fuapay_test_ci`.
+- PostgreSQL integrační test suite nebyla spuštěna lokálně. Safety guard správně odmítl nakonfigurovanou vývojovou databázi. Pokus vytvořit oddělenou `fuapay_test_hardening` a následně `fuapay_test` selhal na PostgreSQL `42501: permission denied to create database`, protože lokální aplikační role nemá `CREATEDB`. Remote CI ji následně provedlo nad izolovanou `fuapay_test_ci` s výsledkem 99/99 PASS, jak uvádí sekce PASS.
 - Live Microsoft Entra a live ČSOB sandbox/production testy; potřebné externí konfigurace a credentials nebyly součástí tohoto milestone.
 
 ### FAIL
