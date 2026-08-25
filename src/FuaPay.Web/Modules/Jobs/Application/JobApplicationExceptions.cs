@@ -87,6 +87,26 @@ public sealed class JobPaymentAccessDeniedException :
     public Guid CustomerUserId { get; }
 }
 
+public sealed class JobPaymentInProgressException :
+    InvalidOperationException
+{
+    public JobPaymentInProgressException(Guid jobId)
+        : base(
+            $"Zakázka '{jobId}' má otevřený pokus o přímou platbu.")
+    {
+        if (jobId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "ID zakázky nesmí být prázdné.",
+                nameof(jobId));
+        }
+
+        JobId = jobId;
+    }
+
+    public Guid JobId { get; }
+}
+
 public sealed class JobConcurrencyException :
     InvalidOperationException
 {

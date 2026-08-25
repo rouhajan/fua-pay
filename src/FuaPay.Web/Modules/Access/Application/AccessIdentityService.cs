@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.Modules.Access.Domain;
 
 namespace FuaPay.Web.Modules.Access.Application;
@@ -8,16 +9,20 @@ public sealed class AccessIdentityService
         "first-login";
 
     private readonly IAccessUserRepository _repository;
+    private readonly IAuditTrail _auditTrail;
     private readonly TimeProvider _timeProvider;
 
     public AccessIdentityService(
         IAccessUserRepository repository,
+        IAuditTrail auditTrail,
         TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(auditTrail);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _repository = repository;
+        _auditTrail = auditTrail;
         _timeProvider = timeProvider;
     }
 
@@ -77,6 +82,15 @@ public sealed class AccessIdentityService
             createdAt,
             RoleChangeActor.ForProcess(
                 FirstLoginProcess));
+
+        _auditTrail.Stage(AuditEntry.ForProcess(
+            FirstLoginProcess,
+            "access.user-provisioned",
+            "access-user",
+            user.Id.ToString(),
+            "Při prvním přihlášení byl vytvořen interní " +
+            "uživatel, externí identita a role Customer.",
+            createdAt));
 
         try
         {

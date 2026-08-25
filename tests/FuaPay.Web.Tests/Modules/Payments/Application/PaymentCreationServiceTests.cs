@@ -106,6 +106,10 @@ public sealed class PaymentCreationServiceTests
         existing.MarkPending("DEV-EXISTING", CurrentTime);
 
         var queries = new StubJobQueries();
+        queries.Job = CreateJobDetail(customerUserId) with
+        {
+            Id = jobId
+        };
         var harness = new CreationHarness(jobQueries: queries);
         harness.Payments.OpenPayment = existing;
 
@@ -114,7 +118,7 @@ public sealed class PaymentCreationServiceTests
             jobId);
 
         Assert.Same(existing, result);
-        Assert.Equal(0, queries.FindForCustomerCalls);
+        Assert.Equal(1, queries.FindForCustomerCalls);
         Assert.Equal(0, harness.Payments.AddPreparedCalls);
         Assert.Equal(0, harness.Provider.InitializeCalls);
     }
@@ -302,6 +306,8 @@ public sealed class PaymentCreationServiceTests
             Service = new PaymentCreationService(
                 Payments,
                 jobQueries ?? new StubJobQueries(),
+                new AvailableJobPaymentCoordination(),
+                new ImmediateTransaction(),
                 new FixedTimeProvider(CurrentTime),
                 audit,
                 OrderNumbers,
@@ -490,6 +496,20 @@ public sealed class PaymentCreationServiceTests
             Func<CancellationToken, Task<T>> operation,
             CancellationToken cancellationToken = default) =>
             operation(cancellationToken);
+    }
+
+    private sealed class AvailableJobPaymentCoordination :
+        IJobPaymentCoordination
+    {
+        public Task<bool> LockJobAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
+        public Task<bool> HasBlockingDirectPaymentAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(false);
     }
 
     private sealed class RecordingAuditTrail : IAuditTrail

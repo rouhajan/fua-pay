@@ -64,6 +64,11 @@ public sealed class CreditJobPaymentPersistenceTests :
                         .GetRequiredService<
                             IApplicationTransaction>();
 
+                var coordination =
+                    scope.ServiceProvider
+                        .GetRequiredService<
+                            IJobPaymentCoordination>();
+
                 var creditService = new CreditService(
                     creditRepository,
                     new FixedTimeProvider(
@@ -71,6 +76,7 @@ public sealed class CreditJobPaymentPersistenceTests :
 
                 var service = new CreditJobPaymentService(
                     jobRepository,
+                    coordination,
                     creditService,
                     transaction,
                     NullAuditTrail.Instance,
@@ -194,6 +200,7 @@ public sealed class CreditJobPaymentPersistenceTests :
 
                 var service = new CreditJobPaymentService(
                     conflictingJobRepository,
+                    new NonLockingJobPaymentCoordination(),
                     creditService,
                     transaction,
                     NullAuditTrail.Instance,
@@ -375,6 +382,20 @@ public sealed class CreditJobPaymentPersistenceTests :
         {
             return _utcNow;
         }
+    }
+
+    private sealed class NonLockingJobPaymentCoordination :
+        IJobPaymentCoordination
+    {
+        public Task<bool> LockJobAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
+        public Task<bool> HasBlockingDirectPaymentAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(false);
     }
 
     private sealed class ConflictingJobRepository :

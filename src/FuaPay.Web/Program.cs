@@ -417,6 +417,36 @@ app.MapGet(
         })
     .AllowAnonymous();
 
+app.MapGet(
+        "/health/workers/csob-reconciliation",
+        (
+            CsobPaymentReconciliationHealth health,
+            TimeProvider timeProvider) =>
+        {
+            var snapshot = health.GetSnapshot(
+                timeProvider.GetUtcNow(),
+                csobReconciliationConfiguration.Enabled,
+                csobReconciliationConfiguration.PollInterval);
+            var isHealthy = snapshot.Status is
+                CsobPaymentReconciliationHealthStatus.Disabled or
+                CsobPaymentReconciliationHealthStatus.Healthy;
+
+            return Results.Json(
+                new
+                {
+                    status = snapshot.Status.ToString(),
+                    lastSuccessfulCycleAt =
+                        snapshot.LastSuccessfulCycleAt,
+                    lastFailedCycleAt = snapshot.LastFailedCycleAt,
+                    staleAfterSeconds =
+                        snapshot.StaleAfter.TotalSeconds
+                },
+                statusCode: isHealthy
+                    ? StatusCodes.Status200OK
+                    : StatusCodes.Status503ServiceUnavailable);
+        })
+    .AllowAnonymous();
+
 if (csobGatewayConfiguration.Enabled)
 {
     app.MapCsobPaymentReturn();

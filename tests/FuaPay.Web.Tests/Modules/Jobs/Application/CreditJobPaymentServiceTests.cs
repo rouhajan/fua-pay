@@ -241,10 +241,45 @@ public sealed class CreditJobPaymentServiceTests
         Assert.Equal(0, jobRepository.SaveCalls);
     }
 
+    [Fact]
+    public async Task PayAsync_BlockingDirectPayment_DoesNotDebitCredit()
+    {
+        var customerUserId = Guid.NewGuid();
+        var job = CreatePublishedJob(customerUserId);
+        var account = CreateFundedAccount(customerUserId);
+        var jobRepository = new FakeJobRepository(job);
+        var creditRepository =
+            new FakeCreditAccountRepository(account);
+        var coordination = new FakeJobPaymentCoordination
+        {
+            HasBlockingDirectPayment = true
+        };
+
+        var service = CreateService(
+            jobRepository,
+            creditRepository,
+            new FakeApplicationTransaction(),
+            coordination);
+
+        var exception = await Assert.ThrowsAsync<
+            JobPaymentInProgressException>(
+                () => service.PayAsync(
+                    customerUserId,
+                    job.Id));
+
+        Assert.Equal(job.Id, exception.JobId);
+        Assert.Equal(new Money(20_000), account.Balance);
+        Assert.Equal(JobPaymentStatus.Unpaid, job.PaymentStatus);
+        Assert.Equal(0, creditRepository.FindCalls);
+        Assert.Equal(0, creditRepository.SaveCalls);
+        Assert.Equal(0, jobRepository.SaveCalls);
+    }
+
     private static CreditJobPaymentService CreateService(
         IJobRepository jobRepository,
         ICreditAccountRepository creditRepository,
-        IApplicationTransaction transaction)
+        IApplicationTransaction transaction,
+        IJobPaymentCoordination? coordination = null)
     {
         var creditService = new CreditService(
             creditRepository,
@@ -252,6 +287,7 @@ public sealed class CreditJobPaymentServiceTests
 
         return new CreditJobPaymentService(
             jobRepository,
+            coordination ?? new FakeJobPaymentCoordination(),
             creditService,
             transaction,
             NullAuditTrail.Instance,
@@ -334,6 +370,22 @@ public sealed class CreditJobPaymentServiceTests
 
             return await operation(cancellationToken);
         }
+    }
+
+    private sealed class FakeJobPaymentCoordination :
+        IJobPaymentCoordination
+    {
+        public bool HasBlockingDirectPayment { get; set; }
+
+        public Task<bool> LockJobAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
+        public Task<bool> HasBlockingDirectPaymentAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(HasBlockingDirectPayment);
     }
 
     private sealed class FakeJobRepository :

@@ -35,6 +35,7 @@ public sealed class CsobPaymentRecoveryProcessorTests
         Assert.Equal(1, result.RescheduledCount);
         Assert.Equal(0, result.CompletedCount);
         Assert.Equal(0, result.RequiresAttentionCount);
+        Assert.Equal(0, result.LostClaimCount);
         var reschedule = Assert.IsType<RescheduleCall>(repository.Reschedule);
         Assert.Equal(TestTime, reschedule.AttemptedAt);
         Assert.Equal(TestTime.AddSeconds(15), reschedule.NextAttemptAt);
@@ -62,8 +63,40 @@ public sealed class CsobPaymentRecoveryProcessorTests
         Assert.Equal(1, result.CompletedCount);
         Assert.Equal(0, result.RescheduledCount);
         Assert.Equal(0, result.RequiresAttentionCount);
+        Assert.Equal(0, result.LostClaimCount);
         var completed = Assert.IsType<CompletedCall>(repository.Completed);
         Assert.Equal(8, completed.GatewayPaymentStatus);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_LostClaim_DoesNotReportCompletedTransition()
+    {
+        var paymentId = Guid.NewGuid();
+        var claim = CreateClaim(paymentId, attemptCount: 0);
+        var repository = new RecordingRecoveryRepository(claim)
+        {
+            TransitionSucceeds = false
+        };
+        var processor = CreateProcessor(
+            repository,
+            new StubReconciliationService(
+                new CsobPaymentReconciliationResult(
+                    paymentId,
+                    PaymentStatus.Succeeded,
+                    GatewayPaymentStatus: 8,
+                    StateChanged: false)),
+            maximumAttempts: 4);
+
+        var result = await processor.RunOnceAsync();
+
+        Assert.Equal(1, result.ClaimedCount);
+        Assert.Equal(1, result.LostClaimCount);
+        Assert.Equal(0, result.CompletedCount);
+        Assert.Equal(0, result.RescheduledCount);
+        Assert.Equal(0, result.RequiresAttentionCount);
+        Assert.NotNull(repository.Completed);
+        Assert.Null(repository.Reschedule);
+        Assert.Null(repository.Attention);
     }
 
     [Fact]
@@ -272,6 +305,8 @@ public sealed class CsobPaymentRecoveryProcessorTests
 
         public int StaleCount { get; }
 
+        public bool TransitionSucceeds { get; set; } = true;
+
         public DateTimeOffset? StaleBefore { get; private set; }
 
         public DateTimeOffset? StaleObservedAt { get; private set; }
@@ -340,7 +375,7 @@ public sealed class CsobPaymentRecoveryProcessorTests
                 gatewayPaymentStatus,
                 resultCode,
                 error);
-            return Task.FromResult(true);
+            return Task.FromResult(TransitionSucceeds);
         }
 
         public Task<bool> MarkRequiresAttentionAsync(
@@ -356,7 +391,7 @@ public sealed class CsobPaymentRecoveryProcessorTests
                 gatewayPaymentStatus,
                 resultCode,
                 error);
-            return Task.FromResult(true);
+            return Task.FromResult(TransitionSucceeds);
         }
 
         public Task<bool> MarkCompletedAsync(
@@ -370,7 +405,7 @@ public sealed class CsobPaymentRecoveryProcessorTests
                 attemptedAt,
                 gatewayPaymentStatus,
                 resultCode);
-            return Task.FromResult(true);
+            return Task.FromResult(TransitionSucceeds);
         }
     }
 

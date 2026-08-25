@@ -44,6 +44,7 @@ public static class PageOperationError
             JobNotFoundException or
             JobAccessDeniedException or
             JobPaymentAccessDeniedException or
+            JobPaymentInProgressException or
             JobConcurrencyException or
             JobSettlementReferenceAlreadyUsedException or
             JobNumberAlreadyUsedException or
@@ -161,7 +162,8 @@ public static class PageOperationError
                 "Platební služba nyní není dostupná.",
             JobPriceNotAllowedException =>
                 "Cena zakázky je mimo povolený rozsah.",
-            BlockingJobPaymentAlreadyExistsException =>
+            BlockingJobPaymentAlreadyExistsException or
+            JobPaymentInProgressException =>
                 "Pro zakázku už existuje otevřený platební pokus.",
             JobPaymentAccessDeniedException or PaymentAccessDeniedException =>
                 "Tuto platební operaci nelze provést.",

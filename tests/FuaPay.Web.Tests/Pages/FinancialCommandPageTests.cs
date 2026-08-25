@@ -32,6 +32,8 @@ public sealed class FinancialCommandPageTests
             new PaymentCreationService(
                 repository,
                 new NullJobQueries(),
+                new NullJobPaymentCoordination(),
+                new ImmediateTransaction(),
                 TimeProvider.System,
                 NullAuditTrail.Instance,
                 new NullOrderNumberAllocator(),
@@ -112,6 +114,20 @@ public sealed class FinancialCommandPageTests
             Func<CancellationToken, Task<T>> operation,
             CancellationToken cancellationToken = default) =>
             operation(cancellationToken);
+    }
+
+    private sealed class NullJobPaymentCoordination :
+        IJobPaymentCoordination
+    {
+        public Task<bool> LockJobAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(false);
+
+        public Task<bool> HasBlockingDirectPaymentAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(false);
     }
 
     private sealed class NullJobQueries : IJobQueries

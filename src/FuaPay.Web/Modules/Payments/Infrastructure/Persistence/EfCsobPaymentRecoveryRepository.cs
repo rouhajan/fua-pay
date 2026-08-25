@@ -299,80 +299,121 @@ internal sealed class EfCsobPaymentRecoveryRepository :
         return ExecuteAuditedBatchAsync(
             async ct =>
             {
-                var candidates = await _dbContext.PaymentInitiations
-                    .FromSqlInterpolated(
+                var scheduled = await _dbContext.Database
+                    .SqlQuery<ScheduledRecovery>(
                         $"""
-                        SELECT i.*
-                        FROM payments.payment_initiations AS i
-                        INNER JOIN payments.payments AS p
-                            ON p.id = i.payment_id
-                        LEFT JOIN payments.csob_payment_reconciliation AS r
-                            ON r.payment_id = i.payment_id
-                        WHERE
-                            i.provider = {(int)PaymentProvider.Csob}
-                            AND i.state = {(int)PaymentInitiationState.Uncertain}
-                            AND i.observed_provider_reference IS NOT NULL
-                            AND p.provider = {(int)PaymentProvider.Csob}
-                            AND p.status = {(int)PaymentStatus.Created}
-                            AND
-                            (
-                                r.payment_id IS NULL
-                                OR
+                        WITH candidates AS
+                        (
+                            SELECT
+                                i.payment_id,
+                                i.observed_provider_reference,
+                                i.updated_at
+                            FROM payments.payment_initiations AS i
+                            INNER JOIN payments.payments AS p
+                                ON p.id = i.payment_id
+                            LEFT JOIN payments.csob_payment_reconciliation AS r
+                                ON r.payment_id = i.payment_id
+                            WHERE
+                                i.provider = {(int)PaymentProvider.Csob}
+                                AND i.state = {(int)PaymentInitiationState.Uncertain}
+                                AND i.observed_provider_reference IS NOT NULL
+                                AND p.provider = {(int)PaymentProvider.Csob}
+                                AND p.status = {(int)PaymentStatus.Created}
+                                AND
                                 (
-                                    r.state = {(int)PaymentReconciliationState.RequiresAttention}
-                                    AND r.provider_reference IS NULL
+                                    r.payment_id IS NULL
+                                    OR
+                                    (
+                                        r.state =
+                                            {(int)PaymentReconciliationState.RequiresAttention}
+                                        AND r.provider_reference IS NULL
+                                    )
                                 )
+                            ORDER BY i.updated_at, i.payment_id
+                            LIMIT {limit}
+                            FOR UPDATE OF i SKIP LOCKED
+                        ),
+                        changed AS
+                        (
+                            INSERT INTO payments.csob_payment_reconciliation
+                                AS recovery
+                            (
+                                payment_id,
+                                provider_reference,
+                                state,
+                                attempt_count,
+                                next_attempt_at,
+                                lease_token,
+                                lease_expires_at,
+                                last_attempt_at,
+                                last_browser_return_at,
+                                last_gateway_payment_status,
+                                last_result_code,
+                                last_error,
+                                created_at,
+                                updated_at,
+                                completed_at,
+                                version
                             )
-                        ORDER BY i.updated_at, i.payment_id
-                        LIMIT {limit}
-                        FOR UPDATE OF i SKIP LOCKED
+                            SELECT
+                                candidate.payment_id,
+                                candidate.observed_provider_reference,
+                                {(int)PaymentReconciliationState.Scheduled},
+                                0,
+                                {scheduledAt},
+                                NULL,
+                                NULL,
+                                NULL,
+                                NULL,
+                                NULL,
+                                NULL,
+                                NULL,
+                                {scheduledAt},
+                                {scheduledAt},
+                                NULL,
+                                1
+                            FROM candidates AS candidate
+                            ON CONFLICT (payment_id) DO UPDATE
+                            SET
+                                provider_reference =
+                                    EXCLUDED.provider_reference,
+                                state = EXCLUDED.state,
+                                next_attempt_at =
+                                    EXCLUDED.next_attempt_at,
+                                last_error = NULL,
+                                updated_at = GREATEST(
+                                    recovery.updated_at,
+                                    EXCLUDED.updated_at),
+                                version =
+                                    recovery.version + 1
+                            WHERE
+                                recovery.state =
+                                    {(int)PaymentReconciliationState.RequiresAttention}
+                                AND recovery.provider_reference IS NULL
+                            RETURNING
+                                payment_id AS "PaymentId",
+                                provider_reference AS "ObservedProviderReference"
+                        )
+                        SELECT "PaymentId", "ObservedProviderReference"
+                        FROM changed
                         """)
-                    .AsNoTracking()
                     .ToListAsync(ct);
 
-                foreach (var initiation in candidates)
+                foreach (var scheduledRecovery in scheduled)
                 {
-                    var reference = initiation.ObservedProviderReference
+                    var reference = scheduledRecovery.ObservedProviderReference
                         ?? throw new InvalidDataException(
-                            $"Nejasná inicializace '{initiation.PaymentId}' nemá candidate payId.");
-                    var recovery = await _dbContext.CsobPaymentRecoveries
-                        .SingleOrDefaultAsync(
-                            item => item.PaymentId == initiation.PaymentId,
-                            ct);
-
-                    if (recovery is null)
-                    {
-                        _dbContext.CsobPaymentRecoveries.Add(
-                            CreateRecovery(
-                                initiation.PaymentId,
-                                reference,
-                                PaymentReconciliationState.Scheduled,
-                                scheduledAt,
-                                error: null));
-                    }
-                    else
-                    {
-                        recovery.ProviderReference = reference;
-                        recovery.State =
-                            (int)PaymentReconciliationState.Scheduled;
-                        recovery.NextAttemptAt = scheduledAt;
-                        recovery.LastError = null;
-                        recovery.UpdatedAt = Max(
-                            recovery.UpdatedAt,
-                            scheduledAt);
-                        recovery.Version = checked(recovery.Version + 1);
-                    }
-
+                            $"Nejasná inicializace '{scheduledRecovery.PaymentId}' nemá candidate payId.");
                     StageRecoveryAudit(
-                        initiation.PaymentId,
+                        scheduledRecovery.PaymentId,
                         "payment.provider-initiation.verification-scheduled",
                         $"Candidate payId {reference} platby " +
-                        $"{initiation.PaymentId} byl zařazen do lease queue " +
+                        $"{scheduledRecovery.PaymentId} byl zařazen do lease queue " +
                         "pro payment/status; stav platby zůstal Created.",
                         scheduledAt);
                 }
 
-                return candidates.Count;
+                return scheduled.Count;
             },
             cancellationToken);
     }
@@ -698,6 +739,10 @@ internal sealed class EfCsobPaymentRecoveryRepository :
             throw;
         }
     }
+
+    private sealed record ScheduledRecovery(
+        Guid PaymentId,
+        string? ObservedProviderReference);
 
     private static CsobPaymentRecoveryEntity CreateRecovery(
         Guid paymentId,

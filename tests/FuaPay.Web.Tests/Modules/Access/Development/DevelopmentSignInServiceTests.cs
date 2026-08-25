@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Development;
 using FuaPay.Web.Modules.Access.Domain;
@@ -18,6 +19,7 @@ public sealed class DevelopmentSignInServiceTests
         var identityService =
             new AccessIdentityService(
                 repository,
+                NullAuditTrail.Instance,
                 timeProvider);
 
         var service =
@@ -59,6 +61,7 @@ public sealed class DevelopmentSignInServiceTests
         var identityService =
             new AccessIdentityService(
                 repository,
+                NullAuditTrail.Instance,
                 timeProvider);
 
         var service =
@@ -98,6 +101,7 @@ public sealed class DevelopmentSignInServiceTests
         var timeProvider = new FixedTimeProvider(CurrentTime);
         var identityService = new AccessIdentityService(
             repository,
+            NullAuditTrail.Instance,
             timeProvider);
         var service = new DevelopmentSignInService(
             identityService,
