@@ -46,14 +46,16 @@ public sealed class CsobPaymentReconciliationWorker : BackgroundService
                     result.SeededAttentionCount > 0 ||
                     result.ClaimedCount > 0 ||
                     result.ScheduledCount > 0 ||
-                    result.RequiresAttentionCount > 0)
+                    result.RequiresAttentionCount > 0 ||
+                    result.LostClaimCount > 0)
                 {
                     _logger.LogInformation(
                         "CSOB reconciliation cycle: stale in-progress {Stale}, " +
                         "recovered {Recovered}, " +
                         "seeded attention {SeededAttention}, scheduled {Scheduled}, " +
                         "claimed {Claimed}, completed {Completed}, " +
-                        "rescheduled {Rescheduled}, attention {Attention}.",
+                        "rescheduled {Rescheduled}, attention {Attention}, " +
+                        "lost claims {LostClaims}.",
                         result.StaleInProgressCount,
                         result.ScheduledUncertainCount,
                         result.SeededAttentionCount,
@@ -61,7 +63,8 @@ public sealed class CsobPaymentReconciliationWorker : BackgroundService
                         result.ClaimedCount,
                         result.CompletedCount,
                         result.RescheduledCount,
-                        result.RequiresAttentionCount);
+                        result.RequiresAttentionCount,
+                        result.LostClaimCount);
                 }
             }
             catch (OperationCanceledException)

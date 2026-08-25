@@ -56,6 +56,7 @@ public sealed class CsobPaymentRecoveryProcessor
                 0,
                 0,
                 0,
+                0,
                 0);
         }
 
@@ -90,6 +91,7 @@ public sealed class CsobPaymentRecoveryProcessor
         var completed = 0;
         var rescheduled = 0;
         var attention = 0;
+        var lostClaims = 0;
 
         foreach (var claim in claims)
         {
@@ -108,6 +110,9 @@ public sealed class CsobPaymentRecoveryProcessor
                 case CsobPaymentRecoveryDisposition.RequiresAttention:
                     attention++;
                     break;
+                case CsobPaymentRecoveryDisposition.ClaimLost:
+                    lostClaims++;
+                    break;
             }
         }
 
@@ -119,7 +124,8 @@ public sealed class CsobPaymentRecoveryProcessor
             claims.Count,
             completed,
             rescheduled,
-            attention);
+            attention,
+            lostClaims);
     }
 
     private async Task<CsobPaymentRecoveryDisposition> ProcessClaimAsync(
@@ -146,7 +152,7 @@ public sealed class CsobPaymentRecoveryProcessor
                     cancellationToken);
             }
 
-            await TransitionWithAuditAsync(
+            var completed = await TransitionWithAuditAsync(
                 ct => _repository.MarkCompletedAsync(
                     claim,
                     attemptedAt,
@@ -161,42 +167,50 @@ public sealed class CsobPaymentRecoveryProcessor
                     attemptedAt),
                 cancellationToken);
 
-            return CsobPaymentRecoveryDisposition.Completed;
+            return completed
+                ? CsobPaymentRecoveryDisposition.Completed
+                : CsobPaymentRecoveryDisposition.ClaimLost;
         }
         catch (CsobPaymentRequiresAttentionException exception)
         {
-            await RequireAttentionAsync(
+            var attentionTransitioned = await RequireAttentionAsync(
                 claim,
                 attemptedAt,
                 exception.GatewayPaymentStatus,
                 exception.ResultCode,
                 "Ověřený stav ČSOB vyžaduje ruční provozní kontrolu.",
                 cancellationToken);
-            return CsobPaymentRecoveryDisposition.RequiresAttention;
+            return attentionTransitioned
+                ? CsobPaymentRecoveryDisposition.RequiresAttention
+                : CsobPaymentRecoveryDisposition.ClaimLost;
         }
         catch (PaymentProviderReferenceNotFoundException)
         {
-            await RequireAttentionAsync(
+            var transitioned = await RequireAttentionAsync(
                 claim,
                 attemptedAt,
                 gatewayPaymentStatus: null,
                 resultCode: null,
                 "Lokální vazba ČSOB payId na platbu nebyla nalezena.",
                 cancellationToken);
-            return CsobPaymentRecoveryDisposition.RequiresAttention;
+            return transitioned
+                ? CsobPaymentRecoveryDisposition.RequiresAttention
+                : CsobPaymentRecoveryDisposition.ClaimLost;
         }
         catch (CsobGatewayException exception)
         {
             if (!IsTransientGatewayFailure(exception))
             {
-                await RequireAttentionAsync(
+                var transitioned = await RequireAttentionAsync(
                     claim,
                     attemptedAt,
                     gatewayPaymentStatus: null,
                     exception.ResultCode,
                     "Serverové ověření ČSOB vrátilo nedůvěryhodný nebo netransientní výsledek.",
                     cancellationToken);
-                return CsobPaymentRecoveryDisposition.RequiresAttention;
+                return transitioned
+                    ? CsobPaymentRecoveryDisposition.RequiresAttention
+                    : CsobPaymentRecoveryDisposition.ClaimLost;
             }
 
             return await RetryOrRequireAttentionAsync(
@@ -260,18 +274,20 @@ public sealed class CsobPaymentRecoveryProcessor
 
         if (nextAttemptNumber >= _configuration.MaximumAttempts)
         {
-            await RequireAttentionAsync(
+            var attentionTransitioned = await RequireAttentionAsync(
                 claim,
                 attemptedAt,
                 gatewayPaymentStatus,
                 resultCode,
                 "Reconciliation vyčerpala automatický limit pokusů.",
                 cancellationToken);
-            return CsobPaymentRecoveryDisposition.RequiresAttention;
+            return attentionTransitioned
+                ? CsobPaymentRecoveryDisposition.RequiresAttention
+                : CsobPaymentRecoveryDisposition.ClaimLost;
         }
 
         var nextAttemptAt = attemptedAt + CalculateBackoff(nextAttemptNumber);
-        await TransitionWithAuditAsync(
+        var transitioned = await TransitionWithAuditAsync(
             ct => _repository.RescheduleAsync(
                 claim,
                 attemptedAt,
@@ -288,10 +304,12 @@ public sealed class CsobPaymentRecoveryProcessor
                 attemptedAt),
             cancellationToken);
 
-        return CsobPaymentRecoveryDisposition.Rescheduled;
+        return transitioned
+            ? CsobPaymentRecoveryDisposition.Rescheduled
+            : CsobPaymentRecoveryDisposition.ClaimLost;
     }
 
-    private async Task RequireAttentionAsync(
+    private Task<bool> RequireAttentionAsync(
         CsobPaymentRecoveryClaim claim,
         DateTimeOffset attemptedAt,
         int? gatewayPaymentStatus,
@@ -299,7 +317,7 @@ public sealed class CsobPaymentRecoveryProcessor
         string error,
         CancellationToken cancellationToken)
     {
-        await TransitionWithAuditAsync(
+        return TransitionWithAuditAsync(
             ct => _repository.MarkRequiresAttentionAsync(
                 claim,
                 attemptedAt,
@@ -394,11 +412,13 @@ public sealed record CsobPaymentRecoveryCycleResult(
     int ClaimedCount,
     int CompletedCount,
     int RescheduledCount,
-    int RequiresAttentionCount);
+    int RequiresAttentionCount,
+    int LostClaimCount);
 
 internal enum CsobPaymentRecoveryDisposition
 {
     Completed,
     Rescheduled,
-    RequiresAttention
+    RequiresAttention,
+    ClaimLost
 }
