@@ -122,6 +122,25 @@ public sealed class PaymentInitiationRacePersistenceTests :
                 Assert.Equal(1, scheduled.Sum());
             }
 
+            using (var auditScope = factory.Services.CreateScope())
+            {
+                var auditCount = await auditScope.ServiceProvider
+                    .GetRequiredService<FuaPayDbContext>()
+                    .Database.SqlQuery<int>(
+                        $"""
+                        SELECT COUNT(*)::int AS "Value"
+                        FROM audit.events
+                        WHERE
+                            action =
+                                'payment.provider-initiation.verification-scheduled'
+                            AND entity_type = 'payment'
+                            AND entity_id = {payment.Id.ToString()}
+                        """)
+                    .SingleAsync();
+
+                Assert.Equal(1, auditCount);
+            }
+
             using var verifyScope = factory.Services.CreateScope();
             var persistedPayment = Assert.IsType<Payment>(
                 await verifyScope.ServiceProvider
