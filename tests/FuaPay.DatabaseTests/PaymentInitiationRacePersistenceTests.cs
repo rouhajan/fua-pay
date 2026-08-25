@@ -405,10 +405,18 @@ public sealed class PaymentInitiationRacePersistenceTests :
         Guid paymentId)
     {
         using var scope = factory.Services.CreateScope();
-        await scope.ServiceProvider
+        var database = scope.ServiceProvider
             .GetRequiredService<FuaPayDbContext>()
-            .Database.ExecuteSqlInterpolatedAsync(
-                $"DELETE FROM payments.payments WHERE id = {paymentId}");
+            .Database;
+
+        await database.ExecuteSqlInterpolatedAsync(
+            $"""
+            DELETE FROM audit.events
+            WHERE entity_type = 'payment'
+              AND entity_id = {paymentId.ToString()}
+            """);
+        await database.ExecuteSqlInterpolatedAsync(
+            $"DELETE FROM payments.payments WHERE id = {paymentId}");
     }
 
     public enum LateEvidenceVariant

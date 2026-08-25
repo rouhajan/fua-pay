@@ -557,6 +557,13 @@ public sealed class PaymentInitiationPersistenceTests :
 
         await dbContext.Database.ExecuteSqlInterpolatedAsync(
             $"""
+            DELETE FROM audit.events
+            WHERE entity_type = 'payment'
+              AND entity_id = {paymentId.ToString()}
+            """);
+
+        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"""
             DELETE FROM payments.payments
             WHERE id = {paymentId}
             """);
