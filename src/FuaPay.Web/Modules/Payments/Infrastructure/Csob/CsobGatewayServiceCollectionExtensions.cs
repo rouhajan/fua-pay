@@ -70,6 +70,7 @@ public static class CsobGatewayServiceCollectionExtensions
         services.AddScoped<IPaymentReconciliationQueries>(
             provider => provider.GetRequiredService<
                 EfCsobPaymentRecoveryRepository>());
+        services.TryAddSingleton<CsobPaymentReconciliationHealth>();
 
         if (!configuration.Enabled)
         {

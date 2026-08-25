@@ -549,7 +549,12 @@ public sealed class ModuleRegistrationTests
             services,
             descriptor =>
                 descriptor.ServiceType ==
-                typeof(CsobPaymentRecoveryProcessor));
+                    typeof(CsobPaymentRecoveryProcessor));
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(CsobPaymentReconciliationHealth));
         Assert.Contains(
             services,
             descriptor =>

@@ -23,8 +23,15 @@ public sealed class ExternalNetworkBoundaryTests
         using var factory = new ConfiguredWebApplicationFactory();
         using var client = CreateClient(factory);
         using var response = await client.GetAsync("/health/live");
+        using var workerResponse = await client.GetAsync(
+            "/health/workers/csob-reconciliation");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, workerResponse.StatusCode);
+        Assert.Contains(
+            "\"status\":\"Disabled\"",
+            await workerResponse.Content.ReadAsStringAsync(),
+            StringComparison.Ordinal);
 
         var schemes = factory.Services
             .GetRequiredService<IAuthenticationSchemeProvider>();
