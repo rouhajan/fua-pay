@@ -85,10 +85,196 @@ public sealed class PrintReservationServicePersistenceTests :
             Assert.Equal(1, state.MovementCount);
             Assert.Equal(1, state.ReservationCount);
             Assert.Equal(400, state.ReservedMinorUnits);
+            Assert.Equal(
+                1,
+                await CountReservationAuditAsync(
+                    created.Id,
+                    "print-reservation.reserved"));
         }
         finally
         {
             await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
+    [Fact]
+    public async Task ReserveAsync_AuditPersistenceFailure_RollsBackReservationAndBookedAmount()
+    {
+        var ownerId = Guid.NewGuid();
+        var duplicateAudit = CreateDuplicateAudit(
+            "Audit row used to force reserve rollback.");
+
+        try
+        {
+            await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            await WriteAuditAsync(duplicateAudit);
+            var reserveAuditCount = await CountAuditActionAsync(
+                "print-reservation.reserved");
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var services = scope.ServiceProvider;
+                var service = new PrintReservationService(
+                    services.GetRequiredService<ICreditAccountRepository>(),
+                    services.GetRequiredService<IPrintReservationRepository>(),
+                    services.GetRequiredService<IApplicationTransaction>(),
+                    new DuplicateAuditTrail(
+                        services.GetRequiredService<IAuditTrail>(),
+                        duplicateAudit),
+                    services.GetRequiredService<TimeProvider>());
+
+                await Assert.ThrowsAsync<DbUpdateException>(
+                    () => service.ReserveAsync(
+                        CreateCommand(ownerId, amountMinorUnits: 400)));
+            }
+
+            var state = await ReadAccountStateAsync(
+                ownerId,
+                printSourceId: null);
+
+            Assert.Equal(1_000, state.BalanceMinorUnits);
+            Assert.Equal(1, state.MovementCount);
+            Assert.Equal(0, state.ReservationCount);
+            Assert.Equal(0, state.ReservedMinorUnits);
+            Assert.Equal(
+                reserveAuditCount,
+                await CountAuditActionAsync(
+                    "print-reservation.reserved"));
+        }
+        finally
+        {
+            await DeleteScenarioAsync([ownerId]);
+            await DeleteAuditAsync(duplicateAudit.Id);
+        }
+    }
+
+    [Fact]
+    public async Task CaptureAsync_CreditPersistenceFailure_RollsBackDebitAndKeepsReservationBlocking()
+    {
+        var ownerId = Guid.NewGuid();
+
+        try
+        {
+            await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            var reservation = await CreateReservedAsync(
+                ownerId,
+                amountMinorUnits: 700);
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var services = scope.ServiceProvider;
+                var service = new PrintReservationService(
+                    new ThrowingCreditSaveRepository(
+                        services.GetRequiredService<ICreditAccountRepository>()),
+                    services.GetRequiredService<IPrintReservationRepository>(),
+                    services.GetRequiredService<IApplicationTransaction>(),
+                    services.GetRequiredService<IAuditTrail>(),
+                    services.GetRequiredService<TimeProvider>());
+
+                var exception = await Assert.ThrowsAsync<TimeoutException>(
+                    () => service.CaptureAsync(
+                        new CapturePrintReservationCommand(
+                            reservation.Id,
+                            reservation.PrintSourceId,
+                            Guid.NewGuid())));
+
+                Assert.Equal(
+                    ThrowingCreditSaveRepository.FailureMessage,
+                    exception.Message);
+            }
+
+            await AssertFailedCaptureStateAsync(ownerId, reservation);
+        }
+        finally
+        {
+            await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
+    [Fact]
+    public async Task CaptureAsync_ReservationSaveFailure_RollsBackPriorCreditSaveChanges()
+    {
+        var ownerId = Guid.NewGuid();
+
+        try
+        {
+            await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            var reservation = await CreateReservedAsync(
+                ownerId,
+                amountMinorUnits: 700);
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var services = scope.ServiceProvider;
+                var service = new PrintReservationService(
+                    services.GetRequiredService<ICreditAccountRepository>(),
+                    new ThrowingReservationSaveRepository(
+                        services.GetRequiredService<IPrintReservationRepository>()),
+                    services.GetRequiredService<IApplicationTransaction>(),
+                    services.GetRequiredService<IAuditTrail>(),
+                    services.GetRequiredService<TimeProvider>());
+
+                var exception = await Assert.ThrowsAsync<TimeoutException>(
+                    () => service.CaptureAsync(
+                        new CapturePrintReservationCommand(
+                            reservation.Id,
+                            reservation.PrintSourceId,
+                            Guid.NewGuid())));
+
+                Assert.Equal(
+                    ThrowingReservationSaveRepository.FailureMessage,
+                    exception.Message);
+            }
+
+            await AssertFailedCaptureStateAsync(ownerId, reservation);
+        }
+        finally
+        {
+            await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
+    [Fact]
+    public async Task CaptureAsync_AuditPersistenceFailure_RollsBackEntireFinancialTransition()
+    {
+        var ownerId = Guid.NewGuid();
+        var duplicateAudit = CreateDuplicateAudit(
+            "Audit row used to force capture rollback.");
+
+        try
+        {
+            await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            var reservation = await CreateReservedAsync(
+                ownerId,
+                amountMinorUnits: 700);
+            await WriteAuditAsync(duplicateAudit);
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var services = scope.ServiceProvider;
+                var service = new PrintReservationService(
+                    services.GetRequiredService<ICreditAccountRepository>(),
+                    services.GetRequiredService<IPrintReservationRepository>(),
+                    services.GetRequiredService<IApplicationTransaction>(),
+                    new DuplicateAuditTrail(
+                        services.GetRequiredService<IAuditTrail>(),
+                        duplicateAudit),
+                    services.GetRequiredService<TimeProvider>());
+
+                await Assert.ThrowsAsync<DbUpdateException>(
+                    () => service.CaptureAsync(
+                        new CapturePrintReservationCommand(
+                            reservation.Id,
+                            reservation.PrintSourceId,
+                            Guid.NewGuid())));
+            }
+
+            await AssertFailedCaptureStateAsync(ownerId, reservation);
+        }
+        finally
+        {
+            await DeleteScenarioAsync([ownerId]);
+            await DeleteAuditAsync(duplicateAudit.Id);
         }
     }
 
@@ -556,7 +742,7 @@ public sealed class PrintReservationServicePersistenceTests :
             Assert.Equal(1, state.CaptureMovementCount);
             Assert.Equal(2, state.ReservationCount);
             Assert.Equal(0, state.BlockingMinorUnits);
-            Assert.Equal(3, state.AuditCount);
+            Assert.Equal(5, state.AuditCount);
         }
         finally
         {
@@ -631,7 +817,7 @@ public sealed class PrintReservationServicePersistenceTests :
             Assert.Equal(2, state.MovementCount);
             Assert.Equal(1, state.CaptureMovementCount);
             Assert.Equal(400, state.BlockingMinorUnits);
-            Assert.Equal(2, state.AuditCount);
+            Assert.Equal(4, state.AuditCount);
         }
         finally
         {
@@ -721,7 +907,7 @@ public sealed class PrintReservationServicePersistenceTests :
             Assert.Equal(2, state.MovementCount);
             Assert.Equal(1, state.CaptureMovementCount);
             Assert.Equal(0, state.BlockingMinorUnits);
-            Assert.Equal(1, state.AuditCount);
+            Assert.Equal(2, state.AuditCount);
         }
         finally
         {
@@ -825,7 +1011,7 @@ public sealed class PrintReservationServicePersistenceTests :
                 firstState.BlockingMinorUnits +
                 secondState.BlockingMinorUnits);
             Assert.Equal(
-                1,
+                3,
                 firstState.AuditCount + secondState.AuditCount);
         }
         finally
@@ -901,7 +1087,7 @@ public sealed class PrintReservationServicePersistenceTests :
                 firstOperation == "capture" ? 1 : 0,
                 state.CaptureMovementCount);
             Assert.Equal(0, state.BlockingMinorUnits);
-            Assert.Equal(1, state.AuditCount);
+            Assert.Equal(2, state.AuditCount);
         }
         finally
         {
@@ -984,7 +1170,7 @@ public sealed class PrintReservationServicePersistenceTests :
                 state.BalanceMinorUnits);
             Assert.Equal(0, state.BlockingMinorUnits);
             Assert.Equal(
-                firstOperation == "resolution" ? 2 : 1,
+                firstOperation == "resolution" ? 3 : 2,
                 state.AuditCount);
         }
         finally
@@ -1059,7 +1245,7 @@ public sealed class PrintReservationServicePersistenceTests :
             Assert.Equal(3, state.MovementCount);
             Assert.Equal(1, state.CaptureMovementCount);
             Assert.Equal(300, state.BlockingMinorUnits);
-            Assert.Equal(1, state.AuditCount);
+            Assert.Equal(3, state.AuditCount);
         }
         finally
         {
@@ -1143,7 +1329,7 @@ public sealed class PrintReservationServicePersistenceTests :
                 firstOperation == "debit" ? 1 : 2,
                 state.MovementCount);
             Assert.Equal(0, state.BlockingMinorUnits);
-            Assert.Equal(1, state.AuditCount);
+            Assert.Equal(2, state.AuditCount);
         }
         finally
         {
@@ -1427,6 +1613,83 @@ public sealed class PrintReservationServicePersistenceTests :
             Guid.NewGuid());
     }
 
+    private async Task<PrintReservationResult> CreateReservedAsync(
+        Guid ownerId,
+        long amountMinorUnits)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider
+            .GetRequiredService<PrintReservationService>()
+            .ReserveAsync(
+                CreateCommand(ownerId, amountMinorUnits));
+    }
+
+    private async Task AssertFailedCaptureStateAsync(
+        Guid ownerId,
+        PrintReservationResult reservation)
+    {
+        var state = await ReadLifecycleStateAsync(ownerId);
+
+        Assert.Equal(1_000, state.BalanceMinorUnits);
+        Assert.Equal(1, state.MovementCount);
+        Assert.Equal(0, state.CaptureMovementCount);
+        Assert.Equal(1, state.ReservationCount);
+        Assert.Equal(
+            reservation.Amount.MinorUnits,
+            state.BlockingMinorUnits);
+        Assert.Equal(1, state.AuditCount);
+
+        using var scope = _factory.Services.CreateScope();
+        var persisted = await scope.ServiceProvider
+            .GetRequiredService<IPrintReservationRepository>()
+            .FindByIdAsync(
+                reservation.Id,
+                CancellationToken.None);
+
+        Assert.NotNull(persisted);
+        Assert.Equal(PrintReservationStatus.Reserved, persisted.Status);
+        Assert.Null(persisted.DebitOperationId);
+        Assert.Equal(
+            1,
+            await CountReservationAuditAsync(
+                reservation.Id,
+                "print-reservation.reserved"));
+        Assert.Equal(
+            0,
+            await CountReservationAuditAsync(
+                reservation.Id,
+                "print-reservation.captured"));
+    }
+
+    private static AuditEntry CreateDuplicateAudit(string description)
+    {
+        return AuditEntry.ForProcess(
+            "database-test",
+            "test.audit-duplicate",
+            "test",
+            Guid.NewGuid().ToString(),
+            description,
+            SeedTime);
+    }
+
+    private async Task WriteAuditAsync(AuditEntry audit)
+    {
+        using var scope = _factory.Services.CreateScope();
+        await scope.ServiceProvider
+            .GetRequiredService<IAuditTrail>()
+            .WriteAsync(audit);
+    }
+
+    private async Task DeleteAuditAsync(Guid auditId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+
+        _ = await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"DELETE FROM audit.events WHERE id = {auditId}");
+    }
+
     private static ReservePrintCreditCommand CreateCommand(
         Guid ownerId,
         Guid printSourceId,
@@ -1618,6 +1881,40 @@ public sealed class PrintReservationServicePersistenceTests :
             .SingleAsync();
     }
 
+    private async Task<int> CountAuditActionAsync(string action)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+
+        return await dbContext.Database.SqlQuery<int>(
+            $"""
+            SELECT count(*)::integer AS "Value"
+            FROM audit.events
+            WHERE action = {action}
+            """)
+            .SingleAsync();
+    }
+
+    private async Task<int> CountReservationAuditAsync(
+        Guid reservationId,
+        string action)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+
+        return await dbContext.Database.SqlQuery<int>(
+            $"""
+            SELECT count(*)::integer AS "Value"
+            FROM audit.events
+            WHERE entity_type = 'print-reservation'
+              AND entity_id = {reservationId.ToString()}
+              AND action = {action}
+            """)
+            .SingleAsync();
+    }
+
     private async Task DeleteScenarioAsync(Guid[] ownerIds)
     {
         using var scope = _factory.Services.CreateScope();
@@ -1682,6 +1979,155 @@ public sealed class PrintReservationServicePersistenceTests :
                 Result: null,
                 exception);
         }
+    }
+
+    private sealed class ThrowingCreditSaveRepository :
+        ICreditAccountRepository
+    {
+        public const string FailureMessage =
+            "Injected failure during credit persistence.";
+
+        private readonly ICreditAccountRepository _inner;
+
+        public ThrowingCreditSaveRepository(
+            ICreditAccountRepository inner)
+        {
+            _inner = inner;
+        }
+
+        public Task<CreditAccount?> FindByOwnerIdAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByOwnerIdAsync(ownerId, cancellationToken);
+
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByOwnerIdForUpdateAsync(ownerId, cancellationToken);
+
+        public Task<CreditAccount?> FindByIdForUpdateAsync(
+            Guid accountId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByIdForUpdateAsync(accountId, cancellationToken);
+
+        public Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            _inner.LockOwnerForAccountCreationAsync(
+                ownerId,
+                cancellationToken);
+
+        public Task AddAsync(
+            CreditAccount account,
+            CancellationToken cancellationToken) =>
+            _inner.AddAsync(account, cancellationToken);
+
+        public Task SaveAsync(
+            CreditAccount account,
+            CancellationToken cancellationToken) =>
+            throw new TimeoutException(FailureMessage);
+    }
+
+    private sealed class ThrowingReservationSaveRepository :
+        IPrintReservationRepository
+    {
+        public const string FailureMessage =
+            "Injected failure during reservation persistence.";
+
+        private readonly IPrintReservationRepository _inner;
+
+        public ThrowingReservationSaveRepository(
+            IPrintReservationRepository inner)
+        {
+            _inner = inner;
+        }
+
+        public Task<PrintReservationResult?> FindByIdAsync(
+            Guid reservationId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByIdAsync(reservationId, cancellationToken);
+
+        public Task<PrintReservation?> FindByIdForUpdateAsync(
+            Guid reservationId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByIdForUpdateAsync(
+                reservationId,
+                cancellationToken);
+
+        public Task<PrintReservationResult?> FindByReserveCommandAsync(
+            Guid printSourceId,
+            Guid reserveCommandId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByReserveCommandAsync(
+                printSourceId,
+                reserveCommandId,
+                cancellationToken);
+
+        public Task<PrintReservationResult?> FindByPrintJobAsync(
+            Guid printSourceId,
+            string jobUuid,
+            CancellationToken cancellationToken) =>
+            _inner.FindByPrintJobAsync(
+                printSourceId,
+                jobUuid,
+                cancellationToken);
+
+        public Task<PrintReservationResult?> FindByResolutionCommandAsync(
+            Guid printSourceId,
+            Guid resolutionCommandId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByResolutionCommandAsync(
+                printSourceId,
+                resolutionCommandId,
+                cancellationToken);
+
+        public Task<PrintReservationResult?> FindByTerminalCommandAsync(
+            Guid printSourceId,
+            Guid terminalCommandId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByTerminalCommandAsync(
+                printSourceId,
+                terminalCommandId,
+                cancellationToken);
+
+        public Task<Money> GetBlockingAmountAsync(
+            Guid creditAccountId,
+            CancellationToken cancellationToken) =>
+            _inner.GetBlockingAmountAsync(
+                creditAccountId,
+                cancellationToken);
+
+        public Task AddAsync(
+            PrintReservation reservation,
+            CancellationToken cancellationToken) =>
+            _inner.AddAsync(reservation, cancellationToken);
+
+        public Task SaveAsync(
+            PrintReservation reservation,
+            CancellationToken cancellationToken) =>
+            throw new TimeoutException(FailureMessage);
+    }
+
+    private sealed class DuplicateAuditTrail : IAuditTrail
+    {
+        private readonly IAuditTrail _inner;
+        private readonly AuditEntry _duplicate;
+
+        public DuplicateAuditTrail(
+            IAuditTrail inner,
+            AuditEntry duplicate)
+        {
+            _inner = inner;
+            _duplicate = duplicate;
+        }
+
+        public void Stage(AuditEntry entry) =>
+            _inner.Stage(_duplicate);
+
+        public Task WriteAsync(
+            AuditEntry entry,
+            CancellationToken cancellationToken = default) =>
+            _inner.WriteAsync(_duplicate, cancellationToken);
     }
 
     private sealed class AddBarrierRepository :

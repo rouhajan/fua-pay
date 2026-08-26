@@ -73,10 +73,12 @@ public sealed class PrintReservationServiceTests
         var reservationRepository =
             new FakePrintReservationRepository(calls);
         var transaction = new ImmediateTransaction();
+        var audit = new RecordingAuditTrail();
         var service = CreateService(
             accountRepository,
             reservationRepository,
-            transaction);
+            transaction,
+            audit);
         var command = CreateCommand(ownerId, amountMinorUnits: 400);
         var balanceBefore = account.Balance;
         var movementCountBefore = account.Movements.Count;
@@ -104,6 +106,15 @@ public sealed class PrintReservationServiceTests
             ],
             calls);
         Assert.Equal(1, transaction.ExecutionCount);
+        var auditEntry = Assert.Single(audit.Entries);
+        Assert.Equal("fua-print-payments", auditEntry.ActorProcessName);
+        Assert.Equal("print-reservation.reserved", auditEntry.Action);
+        Assert.Equal("print-reservation", auditEntry.EntityType);
+        Assert.Equal(result.Id.ToString(), auditEntry.EntityId);
+        Assert.Contains(result.Id.ToString(), auditEntry.Description);
+        Assert.Contains(command.JobUuid, auditEntry.Description);
+        Assert.Contains("400", auditEntry.Description);
+        Assert.Contains("Reserved", auditEntry.Description);
     }
 
     [Fact]
@@ -195,10 +206,12 @@ public sealed class PrintReservationServiceTests
             PrintReservationStatus.Captured,
             version: 4);
         repository.Reservations.Add(existing);
+        var audit = new RecordingAuditTrail();
         var service = CreateService(
             new FakeCreditAccountRepository(account, []),
             repository,
-            new ImmediateTransaction());
+            new ImmediateTransaction(),
+            audit);
 
         var result = await service.ReserveAsync(command);
 
@@ -206,6 +219,7 @@ public sealed class PrintReservationServiceTests
         Assert.Equal(PrintReservationStatus.Captured, result.Status);
         Assert.Equal(4, result.Version);
         Assert.Equal(0, repository.AddCount);
+        Assert.Empty(audit.Entries);
     }
 
     [Theory]

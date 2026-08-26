@@ -379,6 +379,17 @@ public sealed class PrintReservationService
             occurredAt));
     }
 
+    private void StageReserveAudit(PrintReservation reservation)
+    {
+        _auditTrail.Stage(AuditEntry.ForProcess(
+            AuditActorProcessName,
+            "print-reservation.reserved",
+            "print-reservation",
+            reservation.Id.ToString(),
+            $"Rezervace {reservation.Id} pro tisk {reservation.JobUuid} v částce {reservation.Amount.MinorUnits} haléřů byla vytvořena; stav {reservation.Status}.",
+            reservation.CreatedAt));
+    }
+
     private void StageCaptureAudit(
         PrintReservation reservation,
         DateTimeOffset occurredAt)
@@ -462,6 +473,7 @@ public sealed class PrintReservationService
             command.ReserveCommandId,
             _timeProvider.GetUtcNow());
 
+        StageReserveAudit(reservation);
         await _reservationRepository.AddAsync(
             reservation,
             cancellationToken);
