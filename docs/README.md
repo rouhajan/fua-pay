@@ -14,5 +14,6 @@ Aktuální dokumentace je záměrně malá:
 - [GitHub repository hardening 2026-08-20](testing/github-repository-hardening-2026-08-20.md);
 - [bezpečnostní ověření 2026-08-21](testing/security-verification-2026-08-21.md);
 - [ověření serializace kreditního účtu 2026-08-25](testing/credit-account-locking-verification-2026-08-25.md);
+- [ověření lifecycle rezervací tisku 2026-08-26](testing/print-reservation-lifecycle-verification-2026-08-26.md);
 - [bezpečnost](../SECURITY.md);
 - [vendored frontendové závislosti](development/third-party-frontend-inventory.md).
