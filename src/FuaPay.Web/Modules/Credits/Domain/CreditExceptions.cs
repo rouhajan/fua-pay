@@ -18,3 +18,22 @@ public sealed class DuplicateCreditOperationException : InvalidOperationExceptio
 
     public Guid OperationId { get; }
 }
+
+public sealed class InvalidPrintReservationStateTransitionException :
+    InvalidOperationException
+{
+    public InvalidPrintReservationStateTransitionException(
+        PrintReservationStatus currentStatus,
+        PrintReservationStatus targetStatus)
+        : base(
+            $"Print reservation cannot transition from '{currentStatus}' " +
+            $"to '{targetStatus}'.")
+    {
+        CurrentStatus = currentStatus;
+        TargetStatus = targetStatus;
+    }
+
+    public PrintReservationStatus CurrentStatus { get; }
+
+    public PrintReservationStatus TargetStatus { get; }
+}

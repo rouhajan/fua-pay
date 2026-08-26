@@ -12,6 +12,11 @@ public interface ICreditAccountRepository
         Guid ownerId,
         CancellationToken cancellationToken);
 
+    Task<CreditAccount?> FindByIdForUpdateAsync(
+        Guid accountId,
+        CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
+
     Task LockOwnerForAccountCreationAsync(
         Guid ownerId,
         CancellationToken cancellationToken);

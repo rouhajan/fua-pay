@@ -24,8 +24,10 @@ public sealed class PrintReservationPersistenceTests :
 
     [Theory]
     [InlineData(1, false, false, false)]
-    [InlineData(2, true, true, false)]
+    [InlineData(2, true, false, false)]
+    [InlineData(3, false, true, true)]
     [InlineData(3, true, true, true)]
+    [InlineData(4, false, true, false)]
     [InlineData(4, true, true, false)]
     public async Task SupportedStateShapes_AreAccepted(
         int status,
@@ -91,6 +93,8 @@ public sealed class PrintReservationPersistenceTests :
     [InlineData("reversed-time", "ck_credits_print_reservations_timestamps_ordered")]
     [InlineData("zero-version", "ck_credits_print_reservations_version_positive")]
     [InlineData("reserved-with-terminal", "ck_credits_print_reservations_state_consistent")]
+    [InlineData("resolution-without-command", "ck_credits_print_reservations_state_consistent")]
+    [InlineData("resolution-with-terminal", "ck_credits_print_reservations_state_consistent")]
     [InlineData("resolution-with-debit", "ck_credits_print_reservations_state_consistent")]
     [InlineData("captured-without-debit", "ck_credits_print_reservations_state_consistent")]
     [InlineData("released-with-debit", "ck_credits_print_reservations_state_consistent")]
@@ -317,7 +321,18 @@ public sealed class PrintReservationPersistenceTests :
             "resolution-with-debit" => row with
             {
                 Status = 2,
+                ResolutionCommandId = Guid.NewGuid(),
                 DebitOperationId = Guid.NewGuid()
+            },
+            "resolution-without-command" => row with
+            {
+                Status = 2
+            },
+            "resolution-with-terminal" => row with
+            {
+                Status = 2,
+                ResolutionCommandId = Guid.NewGuid(),
+                TerminalCommandId = Guid.NewGuid()
             },
             "captured-without-debit" => row with
             {

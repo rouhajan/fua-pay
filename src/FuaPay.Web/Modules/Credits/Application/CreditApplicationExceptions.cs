@@ -178,3 +178,130 @@ public sealed class PrintReservationPrintJobAlreadyExistsException :
 
     public string JobUuid { get; }
 }
+
+public sealed class PrintReservationNotFoundException :
+    InvalidOperationException
+{
+    public PrintReservationNotFoundException(Guid reservationId)
+        : base($"Print reservation '{reservationId}' was not found.")
+    {
+        ReservationId = reservationId;
+    }
+
+    public Guid ReservationId { get; }
+}
+
+public sealed class PrintReservationSourceConflictException :
+    InvalidOperationException
+{
+    public PrintReservationSourceConflictException(
+        Guid reservationId,
+        Guid printSourceId)
+        : base(
+            $"Print reservation '{reservationId}' does not belong to " +
+            $"print source '{printSourceId}'.")
+    {
+        ReservationId = reservationId;
+        PrintSourceId = printSourceId;
+    }
+
+    public Guid ReservationId { get; }
+
+    public Guid PrintSourceId { get; }
+}
+
+public sealed class PrintReservationResolutionCommandConflictException :
+    InvalidOperationException
+{
+    public PrintReservationResolutionCommandConflictException(
+        Guid printSourceId,
+        Guid resolutionCommandId)
+        : base(
+            $"Print reservation resolution command '{resolutionCommandId}' " +
+            $"for source '{printSourceId}' conflicts with persisted state.")
+    {
+        PrintSourceId = printSourceId;
+        ResolutionCommandId = resolutionCommandId;
+    }
+
+    public Guid PrintSourceId { get; }
+
+    public Guid ResolutionCommandId { get; }
+}
+
+public sealed class PrintReservationTerminalCommandConflictException :
+    InvalidOperationException
+{
+    public PrintReservationTerminalCommandConflictException(
+        Guid printSourceId,
+        Guid terminalCommandId)
+        : base(
+            $"Print reservation terminal command '{terminalCommandId}' " +
+            $"for source '{printSourceId}' conflicts with persisted state.")
+    {
+        PrintSourceId = printSourceId;
+        TerminalCommandId = terminalCommandId;
+    }
+
+    public Guid PrintSourceId { get; }
+
+    public Guid TerminalCommandId { get; }
+}
+
+public sealed class PrintReservationConcurrencyException :
+    InvalidOperationException
+{
+    public PrintReservationConcurrencyException(
+        Guid reservationId,
+        Exception innerException)
+        : base(
+            $"Print reservation '{reservationId}' was changed concurrently.",
+            innerException)
+    {
+        ReservationId = reservationId;
+    }
+
+    public Guid ReservationId { get; }
+}
+
+public sealed class PrintReservationResolutionCommandAlreadyExistsException :
+    InvalidOperationException
+{
+    public PrintReservationResolutionCommandAlreadyExistsException(
+        Guid printSourceId,
+        Guid resolutionCommandId,
+        Exception innerException)
+        : base(
+            $"Print reservation resolution command '{resolutionCommandId}' " +
+            $"for source '{printSourceId}' already exists.",
+            innerException)
+    {
+        PrintSourceId = printSourceId;
+        ResolutionCommandId = resolutionCommandId;
+    }
+
+    public Guid PrintSourceId { get; }
+
+    public Guid ResolutionCommandId { get; }
+}
+
+public sealed class PrintReservationTerminalCommandAlreadyExistsException :
+    InvalidOperationException
+{
+    public PrintReservationTerminalCommandAlreadyExistsException(
+        Guid printSourceId,
+        Guid terminalCommandId,
+        Exception innerException)
+        : base(
+            $"Print reservation terminal command '{terminalCommandId}' " +
+            $"for source '{printSourceId}' already exists.",
+            innerException)
+    {
+        PrintSourceId = printSourceId;
+        TerminalCommandId = terminalCommandId;
+    }
+
+    public Guid PrintSourceId { get; }
+
+    public Guid TerminalCommandId { get; }
+}

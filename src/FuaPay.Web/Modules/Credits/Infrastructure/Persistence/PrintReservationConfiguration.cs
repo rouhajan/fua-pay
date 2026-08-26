@@ -14,6 +14,15 @@ internal sealed class PrintReservationConfiguration :
     internal const string ReserveCommandUniqueConstraint =
         "uq_credits_print_reservations_reserve_command";
 
+    internal const string ResolutionCommandUniqueConstraint =
+        "uq_credits_print_reservations_resolution_command";
+
+    internal const string TerminalCommandUniqueConstraint =
+        "uq_credits_print_reservations_terminal_command";
+
+    internal const string DebitOperationUniqueConstraint =
+        "uq_credits_print_reservations_debit_operation";
+
     public void Configure(
         EntityTypeBuilder<PrintReservationEntity> builder)
     {
@@ -72,6 +81,8 @@ internal sealed class PrintReservationConfiguration :
                     OR
                     (
                         status = 2
+                        AND resolution_command_id IS NOT NULL
+                        AND terminal_command_id IS NULL
                         AND debit_operation_id IS NULL
                     )
                     OR
@@ -165,7 +176,7 @@ internal sealed class PrintReservationConfiguration :
             .IsUnique()
             .HasFilter("resolution_command_id IS NOT NULL")
             .HasDatabaseName(
-                "uq_credits_print_reservations_resolution_command");
+                ResolutionCommandUniqueConstraint);
 
         builder.HasIndex(
                 reservation => new
@@ -176,13 +187,13 @@ internal sealed class PrintReservationConfiguration :
             .IsUnique()
             .HasFilter("terminal_command_id IS NOT NULL")
             .HasDatabaseName(
-                "uq_credits_print_reservations_terminal_command");
+                TerminalCommandUniqueConstraint);
 
         builder.HasIndex(reservation => reservation.DebitOperationId)
             .IsUnique()
             .HasFilter("debit_operation_id IS NOT NULL")
             .HasDatabaseName(
-                "uq_credits_print_reservations_debit_operation");
+                DebitOperationUniqueConstraint);
 
         builder.HasIndex(
                 reservation => new

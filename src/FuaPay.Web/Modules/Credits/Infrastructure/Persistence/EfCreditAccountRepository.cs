@@ -81,6 +81,45 @@ internal sealed class EfCreditAccountRepository :
                 cancellationToken);
     }
 
+    public async Task<CreditAccount?> FindByIdForUpdateAsync(
+        Guid accountId,
+        CancellationToken cancellationToken)
+    {
+        ValidateAccountId(accountId);
+        EnsureActiveTransaction();
+
+        var lockedAccount = await _dbContext.CreditAccounts
+            .FromSqlInterpolated(
+                $"SELECT * FROM credits.accounts WHERE id = {accountId} FOR UPDATE")
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (lockedAccount is null)
+        {
+            return null;
+        }
+
+        var entity = await _dbContext.CreditAccounts
+            .AsNoTracking()
+            .Include(account => account.Movements)
+            .SingleAsync(
+                account => account.Id == accountId,
+                cancellationToken);
+        var account = Restore(entity);
+
+        _loadedAccounts[account.Id] = new LoadedAccountState(
+            entity.Version,
+            entity.Movements
+                .Select(movement => movement.OperationId)
+                .ToHashSet(),
+            entity.Movements.Count == 0
+                ? 0
+                : entity.Movements.Max(
+                    movement => movement.Sequence));
+
+        return account;
+    }
+
     public async Task LockOwnerForAccountCreationAsync(
         Guid ownerId,
         CancellationToken cancellationToken)
@@ -435,6 +474,16 @@ internal sealed class EfCreditAccountRepository :
             throw new ArgumentException(
                 "The credit account owner ID must not be empty.",
                 nameof(ownerId));
+        }
+    }
+
+    private static void ValidateAccountId(Guid accountId)
+    {
+        if (accountId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "The credit account ID must not be empty.",
+                nameof(accountId));
         }
     }
 

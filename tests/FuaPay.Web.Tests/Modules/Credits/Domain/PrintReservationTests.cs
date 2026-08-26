@@ -85,6 +85,182 @@ public sealed class PrintReservationTests
             () => IppJobUuid.Normalize(value));
     }
 
+    [Fact]
+    public void RequireResolution_TransitionsReservedAndReplaysSameCommand()
+    {
+        var reservation = CreateReservation();
+        var commandId = Guid.NewGuid();
+        var changedAt = CreatedAt.AddMinutes(1);
+
+        var changed = reservation.RequireResolution(
+            commandId,
+            changedAt);
+        var replayChanged = reservation.RequireResolution(
+            commandId,
+            changedAt.AddMinutes(1));
+
+        Assert.True(changed);
+        Assert.False(replayChanged);
+        Assert.Equal(
+            PrintReservationStatus.ResolutionRequired,
+            reservation.Status);
+        Assert.Equal(commandId, reservation.ResolutionCommandId);
+        Assert.Equal(changedAt, reservation.StateChangedAt);
+        Assert.Null(reservation.TerminalCommandId);
+        Assert.Null(reservation.DebitOperationId);
+    }
+
+    [Theory]
+    [InlineData(false, "capture")]
+    [InlineData(true, "capture")]
+    [InlineData(false, "release")]
+    [InlineData(true, "release")]
+    public void BlockingState_CanTransitionToTerminalState(
+        bool resolutionRequired,
+        string transition)
+    {
+        var reservation = CreateReservation();
+        var changedAt = CreatedAt.AddMinutes(1);
+
+        if (resolutionRequired)
+        {
+            _ = reservation.RequireResolution(
+                Guid.NewGuid(),
+                changedAt);
+            changedAt = changedAt.AddMinutes(1);
+        }
+
+        var terminalCommandId = Guid.NewGuid();
+        var debitOperationId = Guid.NewGuid();
+
+        if (transition == "capture")
+        {
+            Assert.True(reservation.Capture(
+                terminalCommandId,
+                debitOperationId,
+                changedAt));
+            Assert.Equal(
+                PrintReservationStatus.Captured,
+                reservation.Status);
+            Assert.Equal(
+                debitOperationId,
+                reservation.DebitOperationId);
+        }
+        else
+        {
+            Assert.True(reservation.Release(
+                terminalCommandId,
+                changedAt));
+            Assert.Equal(
+                PrintReservationStatus.Released,
+                reservation.Status);
+            Assert.Null(reservation.DebitOperationId);
+        }
+
+        Assert.Equal(terminalCommandId, reservation.TerminalCommandId);
+        Assert.Equal(changedAt, reservation.StateChangedAt);
+    }
+
+    [Theory]
+    [InlineData("captured", "release")]
+    [InlineData("released", "capture")]
+    [InlineData("captured", "capture")]
+    [InlineData("released", "release")]
+    public void TerminalState_RejectsAnotherTerminalTransition(
+        string currentState,
+        string attemptedTransition)
+    {
+        var reservation = CreateReservation();
+        var firstCommandId = Guid.NewGuid();
+
+        if (currentState == "captured")
+        {
+            _ = reservation.Capture(
+                firstCommandId,
+                Guid.NewGuid(),
+                CreatedAt.AddMinutes(1));
+        }
+        else
+        {
+            _ = reservation.Release(
+                firstCommandId,
+                CreatedAt.AddMinutes(1));
+        }
+
+        Assert.Throws<InvalidPrintReservationStateTransitionException>(
+            () =>
+            {
+                if (attemptedTransition == "capture")
+                {
+                    _ = reservation.Capture(
+                        Guid.NewGuid(),
+                        Guid.NewGuid(),
+                        CreatedAt.AddMinutes(2));
+                }
+                else
+                {
+                    _ = reservation.Release(
+                        Guid.NewGuid(),
+                        CreatedAt.AddMinutes(2));
+                }
+            });
+    }
+
+    [Theory]
+    [InlineData("resolution-command")]
+    [InlineData("terminal-command")]
+    [InlineData("debit-operation")]
+    public void Transition_RejectsEmptyCommandIdentifiers(string emptyValue)
+    {
+        var reservation = CreateReservation();
+
+        Assert.Throws<ArgumentException>(
+            () =>
+            {
+                if (emptyValue == "resolution-command")
+                {
+                    _ = reservation.RequireResolution(
+                        Guid.Empty,
+                        CreatedAt.AddMinutes(1));
+                    return;
+                }
+
+                _ = reservation.Capture(
+                    emptyValue == "terminal-command"
+                        ? Guid.Empty
+                        : Guid.NewGuid(),
+                    emptyValue == "debit-operation"
+                        ? Guid.Empty
+                        : Guid.NewGuid(),
+                    CreatedAt.AddMinutes(1));
+            });
+    }
+
+    [Fact]
+    public void Transition_RejectsMissingOrRegressingTimestamp()
+    {
+        var reservation = CreateReservation();
+
+        Assert.Throws<ArgumentException>(
+            () => reservation.Release(Guid.NewGuid(), default));
+        Assert.Throws<ArgumentException>(
+            () => reservation.Release(
+                Guid.NewGuid(),
+                CreatedAt.AddTicks(-1)));
+    }
+
+    private static PrintReservation CreateReservation()
+    {
+        return new PrintReservation(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            $"urn:uuid:{Guid.NewGuid():D}",
+            new Money(1_250),
+            Guid.NewGuid(),
+            CreatedAt);
+    }
+
     private static Guid ToGuid(int marker) =>
         marker == 0 ? Guid.Empty : Guid.NewGuid();
 }
