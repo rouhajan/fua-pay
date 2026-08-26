@@ -276,6 +276,8 @@ public sealed class JobPaymentCoordinationPersistenceTests :
             scope.ServiceProvider
                 .GetRequiredService<ICreditAccountRepository>(),
             scope.ServiceProvider
+                .GetRequiredService<IPrintReservationRepository>(),
+            scope.ServiceProvider
                 .GetRequiredService<IApplicationTransaction>(),
             new FixedTimeProvider(TestTime));
 

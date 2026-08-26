@@ -198,7 +198,7 @@ public sealed class ModuleRegistrationTests
     }
 
     [Fact]
-    public void AddCreditsModule_RegistersCreditQueries()
+    public void AddCreditsModule_RegistersCreditServicesAndRepositories()
     {
         var services = new ServiceCollection();
 
@@ -208,7 +208,19 @@ public sealed class ModuleRegistrationTests
             services,
             descriptor =>
                 descriptor.ServiceType ==
-                typeof(ICreditQueries));
+                    typeof(ICreditQueries));
+
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(PrintReservationService));
+
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IPrintReservationRepository));
     }
     [Fact]
     public void AddAccessModule_RegistersAdministrationAndQueries()

@@ -44,8 +44,12 @@ public sealed class CreditServiceTests
         {
             Account = account
         };
+        var reservations = new FakePrintReservationRepository
+        {
+            BlockingAmount = new Money(6_000)
+        };
 
-        var service = CreateService(repository);
+        var service = CreateService(repository, reservations);
 
         await service.CreditAsync(
             account.OwnerId,
@@ -58,6 +62,7 @@ public sealed class CreditServiceTests
         Assert.Equal(1, repository.SaveCalls);
         Assert.Equal(1, repository.FindForUpdateCalls);
         Assert.Equal(0, repository.CreationLockCalls);
+        Assert.Equal(0, reservations.BlockingAmountCalls);
     }
 
     [Fact]
@@ -75,8 +80,12 @@ public sealed class CreditServiceTests
         {
             Account = account
         };
+        var reservations = new FakePrintReservationRepository
+        {
+            BlockingAmount = new Money(6_000)
+        };
 
-        var service = CreateService(repository);
+        var service = CreateService(repository, reservations);
 
         var movement = await service.DebitAsync(
             account.OwnerId,
@@ -88,6 +97,7 @@ public sealed class CreditServiceTests
         Assert.Equal(new Money(6_000), movement.BalanceAfter);
         Assert.Equal(CurrentTime, movement.RecordedAt);
         Assert.Equal(1, repository.SaveCalls);
+        Assert.Equal(1, reservations.BlockingAmountCalls);
     }
 
     [Fact]
@@ -111,6 +121,77 @@ public sealed class CreditServiceTests
         Assert.Equal(ownerId, exception.OwnerId);
         Assert.Equal(0, repository.AddCalls);
         Assert.Equal(0, repository.SaveCalls);
+    }
+
+    [Fact]
+    public async Task DebitAsync_WhenReservationsExhaustAvailable_DoesNotMutateOrSave()
+    {
+        var account = CreateAccount();
+
+        account.Credit(
+            Guid.NewGuid(),
+            new Money(10_000),
+            CurrentTime.AddMinutes(-1),
+            "Initial credit");
+
+        var repository = new FakeCreditAccountRepository
+        {
+            Account = account
+        };
+        var reservations = new FakePrintReservationRepository
+        {
+            BlockingAmount = new Money(6_000)
+        };
+        var service = CreateService(repository, reservations);
+        var movementCountBefore = account.Movements.Count;
+
+        await Assert.ThrowsAsync<InsufficientCreditException>(
+            () => service.DebitAsync(
+                account.OwnerId,
+                Guid.NewGuid(),
+                new Money(5_000),
+                "Job payment"));
+
+        Assert.Equal(new Money(10_000), account.Balance);
+        Assert.Equal(movementCountBefore, account.Movements.Count);
+        Assert.Equal(0, repository.SaveCalls);
+        Assert.Equal(1, reservations.BlockingAmountCalls);
+    }
+
+    [Fact]
+    public async Task DebitAsync_DuplicateRetryWinsBeforeAvailableCreditCheck()
+    {
+        var account = CreateAccount();
+        account.Credit(
+            Guid.NewGuid(),
+            new Money(1_000),
+            CurrentTime.AddMinutes(-1),
+            "Initial credit");
+        var repository = new FakeCreditAccountRepository
+        {
+            Account = account
+        };
+        var reservations = new FakePrintReservationRepository();
+        var service = CreateService(repository, reservations);
+        var operationId = Guid.NewGuid();
+
+        _ = await service.DebitAsync(
+            account.OwnerId,
+            operationId,
+            new Money(600),
+            "First debit");
+
+        await Assert.ThrowsAsync<DuplicateCreditOperationException>(
+            () => service.DebitAsync(
+                account.OwnerId,
+                operationId,
+                new Money(600),
+                "First debit"));
+
+        Assert.Equal(new Money(400), account.Balance);
+        Assert.Equal(2, account.Movements.Count);
+        Assert.Equal(1, repository.SaveCalls);
+        Assert.Equal(2, reservations.BlockingAmountCalls);
     }
 
     [Fact]
@@ -179,10 +260,13 @@ public sealed class CreditServiceTests
     }
 
     private static CreditService CreateService(
-        ICreditAccountRepository repository)
+        ICreditAccountRepository repository,
+        IPrintReservationRepository? reservationRepository = null)
     {
         return new CreditService(
             repository,
+            reservationRepository ??
+                new FakePrintReservationRepository(),
             new ImmediateTransaction(),
             new FixedTimeProvider(CurrentTime));
     }
@@ -289,5 +373,39 @@ public sealed class CreditServiceTests
             Func<CancellationToken, Task<T>> operation,
             CancellationToken cancellationToken = default) =>
             operation(cancellationToken);
+    }
+
+    private sealed class FakePrintReservationRepository :
+        IPrintReservationRepository
+    {
+        public Money BlockingAmount { get; set; } = Money.Zero;
+
+        public int BlockingAmountCalls { get; private set; }
+
+        public Task<PrintReservationResult?> FindByReserveCommandAsync(
+            Guid printSourceId,
+            Guid reserveCommandId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PrintReservationResult?> FindByPrintJobAsync(
+            Guid printSourceId,
+            string jobUuid,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<Money> GetBlockingAmountAsync(
+            Guid creditAccountId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            BlockingAmountCalls++;
+            return Task.FromResult(BlockingAmount);
+        }
+
+        public Task AddAsync(
+            PrintReservation reservation,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

@@ -283,6 +283,7 @@ public sealed class CreditJobPaymentServiceTests
     {
         var creditService = new CreditService(
             creditRepository,
+            new NoBlockingPrintReservationRepository(),
             transaction,
             new FixedTimeProvider(CurrentTime));
 
@@ -512,5 +513,31 @@ public sealed class CreditJobPaymentServiceTests
 
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class NoBlockingPrintReservationRepository :
+        IPrintReservationRepository
+    {
+        public Task<PrintReservationResult?> FindByReserveCommandAsync(
+            Guid printSourceId,
+            Guid reserveCommandId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PrintReservationResult?> FindByPrintJobAsync(
+            Guid printSourceId,
+            string jobUuid,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<Money> GetBlockingAmountAsync(
+            Guid creditAccountId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Money.Zero);
+
+        public Task AddAsync(
+            PrintReservation reservation,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

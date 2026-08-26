@@ -8,6 +8,12 @@ namespace FuaPay.Web.Modules.Credits.Infrastructure.Persistence;
 internal sealed class PrintReservationConfiguration :
     IEntityTypeConfiguration<PrintReservationEntity>
 {
+    internal const string PrintJobUniqueConstraint =
+        "uq_credits_print_reservations_print_job";
+
+    internal const string ReserveCommandUniqueConstraint =
+        "uq_credits_print_reservations_reserve_command";
+
     public void Configure(
         EntityTypeBuilder<PrintReservationEntity> builder)
     {
@@ -139,8 +145,7 @@ internal sealed class PrintReservationConfiguration :
                     reservation.JobUuid
                 })
             .IsUnique()
-            .HasDatabaseName(
-                "uq_credits_print_reservations_print_job");
+            .HasDatabaseName(PrintJobUniqueConstraint);
 
         builder.HasIndex(
                 reservation => new
@@ -149,8 +154,7 @@ internal sealed class PrintReservationConfiguration :
                     reservation.ReserveCommandId
                 })
             .IsUnique()
-            .HasDatabaseName(
-                "uq_credits_print_reservations_reserve_command");
+            .HasDatabaseName(ReserveCommandUniqueConstraint);
 
         builder.HasIndex(
                 reservation => new

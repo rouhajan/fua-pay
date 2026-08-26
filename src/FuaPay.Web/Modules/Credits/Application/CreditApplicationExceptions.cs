@@ -1,3 +1,5 @@
+using FuaPay.Web.BuildingBlocks.Domain;
+
 namespace FuaPay.Web.Modules.Credits.Application;
 
 public sealed class CreditAccountNotFoundException : InvalidOperationException
@@ -72,4 +74,107 @@ public sealed class CreditAdjustmentReasonNotAllowedException :
         : base("Důvod administrativní korekce není platný.")
     {
     }
+}
+
+public sealed class InsufficientAvailablePrintCreditException :
+    InvalidOperationException
+{
+    public InsufficientAvailablePrintCreditException(
+        Guid ownerId,
+        Money requested,
+        Money available)
+        : base(
+            $"Credit account '{ownerId}' has {available.MinorUnits} " +
+            $"minor units available, but {requested.MinorUnits} were requested.")
+    {
+        OwnerId = ownerId;
+        Requested = requested;
+        Available = available;
+    }
+
+    public Guid OwnerId { get; }
+
+    public Money Requested { get; }
+
+    public Money Available { get; }
+}
+
+public sealed class PrintReservationCommandConflictException :
+    InvalidOperationException
+{
+    public PrintReservationCommandConflictException(
+        Guid printSourceId,
+        Guid reserveCommandId)
+        : base(
+            $"Print reservation command '{reserveCommandId}' for source " +
+            $"'{printSourceId}' was already used with different data.")
+    {
+        PrintSourceId = printSourceId;
+        ReserveCommandId = reserveCommandId;
+    }
+
+    public Guid PrintSourceId { get; }
+
+    public Guid ReserveCommandId { get; }
+}
+
+public sealed class PrintReservationJobConflictException :
+    InvalidOperationException
+{
+    public PrintReservationJobConflictException(
+        Guid printSourceId,
+        string jobUuid)
+        : base(
+            $"Print job '{jobUuid}' for source '{printSourceId}' already " +
+            "has a reservation created by another command.")
+    {
+        PrintSourceId = printSourceId;
+        JobUuid = jobUuid;
+    }
+
+    public Guid PrintSourceId { get; }
+
+    public string JobUuid { get; }
+}
+
+public sealed class PrintReservationReserveCommandAlreadyExistsException :
+    InvalidOperationException
+{
+    public PrintReservationReserveCommandAlreadyExistsException(
+        Guid printSourceId,
+        Guid reserveCommandId,
+        Exception innerException)
+        : base(
+            $"Print reservation command '{reserveCommandId}' for source " +
+            $"'{printSourceId}' already exists.",
+            innerException)
+    {
+        PrintSourceId = printSourceId;
+        ReserveCommandId = reserveCommandId;
+    }
+
+    public Guid PrintSourceId { get; }
+
+    public Guid ReserveCommandId { get; }
+}
+
+public sealed class PrintReservationPrintJobAlreadyExistsException :
+    InvalidOperationException
+{
+    public PrintReservationPrintJobAlreadyExistsException(
+        Guid printSourceId,
+        string jobUuid,
+        Exception innerException)
+        : base(
+            $"Print job '{jobUuid}' for source '{printSourceId}' already " +
+            "has a reservation.",
+            innerException)
+    {
+        PrintSourceId = printSourceId;
+        JobUuid = jobUuid;
+    }
+
+    public Guid PrintSourceId { get; }
+
+    public string JobUuid { get; }
 }

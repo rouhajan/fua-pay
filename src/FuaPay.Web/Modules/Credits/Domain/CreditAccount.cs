@@ -69,9 +69,41 @@ public sealed class CreditAccount
         DateTimeOffset recordedAt,
         string description)
     {
+        return DebitCore(
+            operationId,
+            amount,
+            Balance,
+            recordedAt,
+            description);
+    }
+
+    internal CreditMovement Debit(
+        Guid operationId,
+        Money amount,
+        Money spendableBalance,
+        DateTimeOffset recordedAt,
+        string description)
+    {
+        return DebitCore(
+            operationId,
+            amount,
+            spendableBalance,
+            recordedAt,
+            description);
+    }
+
+    private CreditMovement DebitCore(
+        Guid operationId,
+        Money amount,
+        Money spendableBalance,
+        DateTimeOffset recordedAt,
+        string description)
+    {
         ValidateOperation(operationId, amount, description);
 
-        if (amount.MinorUnits > Balance.MinorUnits)
+        if (
+            amount.MinorUnits > spendableBalance.MinorUnits ||
+            amount.MinorUnits > Balance.MinorUnits)
         {
             throw new InsufficientCreditException();
         }

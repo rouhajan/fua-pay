@@ -16,6 +16,7 @@ public static class CreditsModule
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<CreditService>();
         services.AddScoped<CreditAdministrationService>();
+        services.AddScoped<PrintReservationService>();
         services.AddScoped<
             ICreditQueries,
             EfCreditQueries>();
@@ -25,6 +26,9 @@ public static class CreditsModule
         services.AddScoped<
             ICreditAdjustmentCommandRepository,
             EfCreditAdjustmentCommandRepository>();
+        services.AddScoped<
+            IPrintReservationRepository,
+            EfPrintReservationRepository>();
 
         return services;
     }

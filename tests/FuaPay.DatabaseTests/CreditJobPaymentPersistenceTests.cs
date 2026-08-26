@@ -71,6 +71,8 @@ public sealed class CreditJobPaymentPersistenceTests :
 
                 var creditService = new CreditService(
                     creditRepository,
+                    scope.ServiceProvider
+                        .GetRequiredService<IPrintReservationRepository>(),
                     transaction,
                     new FixedTimeProvider(
                         TestTime.AddMinutes(20)));
@@ -196,6 +198,8 @@ public sealed class CreditJobPaymentPersistenceTests :
 
                 var creditService = new CreditService(
                     creditRepository,
+                    scope.ServiceProvider
+                        .GetRequiredService<IPrintReservationRepository>(),
                     transaction,
                     new FixedTimeProvider(
                         TestTime.AddMinutes(20)));
@@ -293,6 +297,8 @@ public sealed class CreditJobPaymentPersistenceTests :
 
         var creditService = new CreditService(
             creditRepository,
+            scope.ServiceProvider
+                .GetRequiredService<IPrintReservationRepository>(),
             scope.ServiceProvider
                 .GetRequiredService<IApplicationTransaction>(),
             new FixedTimeProvider(TestTime));
