@@ -1,4 +1,5 @@
 using FuaPay.Web.BuildingBlocks.Application;
+using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
@@ -325,15 +326,259 @@ public sealed class PrintReservationServiceTests
         Assert.Equal(0, repository.AddCount);
     }
 
+    [Theory]
+    [InlineData("resolution", "reservation")]
+    [InlineData("capture", "source")]
+    [InlineData("release", "command")]
+    public void LifecycleCommand_RejectsEmptyIdentifiers(
+        string operation,
+        string emptyIdentifier)
+    {
+        var reservationId = emptyIdentifier == "reservation"
+            ? Guid.Empty
+            : Guid.NewGuid();
+        var printSourceId = emptyIdentifier == "source"
+            ? Guid.Empty
+            : Guid.NewGuid();
+        var commandId = emptyIdentifier == "command"
+            ? Guid.Empty
+            : Guid.NewGuid();
+
+        Assert.Throws<ArgumentException>(
+            () =>
+            {
+                object lifecycleCommand = operation switch
+                {
+                    "resolution" =>
+                        new RequirePrintReservationResolutionCommand(
+                            reservationId,
+                            printSourceId,
+                            commandId),
+                    "capture" => new CapturePrintReservationCommand(
+                        reservationId,
+                        printSourceId,
+                        commandId),
+                    "release" => new ReleasePrintReservationCommand(
+                        reservationId,
+                        printSourceId,
+                        commandId),
+                    _ => throw new ArgumentOutOfRangeException(
+                        nameof(operation))
+                };
+                _ = lifecycleCommand;
+            });
+    }
+
+    [Fact]
+    public async Task RequireResolutionAsync_IsBlockingAuditedAndIdempotent()
+    {
+        var calls = new List<string>();
+        var ownerId = Guid.NewGuid();
+        var account = CreateAccount(ownerId, balanceMinorUnits: 1_000);
+        var repository = new FakePrintReservationRepository(calls);
+        var reserved = CreateResult(
+            account.Id,
+            amountMinorUnits: 400,
+            PrintReservationStatus.Reserved);
+        repository.Reservations.Add(reserved);
+        var audit = new RecordingAuditTrail();
+        var service = CreateService(
+            new FakeCreditAccountRepository(account, calls),
+            repository,
+            new ImmediateTransaction(),
+            audit);
+        var command =
+            new RequirePrintReservationResolutionCommand(
+                reserved.Id,
+                reserved.PrintSourceId,
+                Guid.NewGuid());
+
+        var changed = await service.RequireResolutionAsync(command);
+        var replayed = await service.RequireResolutionAsync(command);
+
+        Assert.Equal(changed, replayed);
+        Assert.Equal(
+            PrintReservationStatus.ResolutionRequired,
+            changed.Status);
+        Assert.Equal(
+            command.ResolutionCommandId,
+            changed.ResolutionCommandId);
+        Assert.Equal(new Money(400), await repository.GetBlockingAmountAsync(
+            account.Id,
+            CancellationToken.None));
+        Assert.Equal(1, repository.SaveCount);
+        var auditEntry = Assert.Single(audit.Entries);
+        Assert.Equal(
+            "fua-print-payments",
+            auditEntry.ActorProcessName);
+        Assert.Equal(
+            "print-reservation.resolution-required",
+            auditEntry.Action);
+        Assert.True(
+            calls.IndexOf("account-lock-by-id") <
+            calls.IndexOf("reservation-lock"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CaptureAsync_DebitsOwnReservationExactlyOnce(
+        bool resolutionRequired)
+    {
+        var ownerId = Guid.NewGuid();
+        var account = CreateAccount(ownerId, balanceMinorUnits: 1_000);
+        var repository = new FakePrintReservationRepository([]);
+        var reservation = CreateResult(
+            account.Id,
+            amountMinorUnits: 700,
+            resolutionRequired
+                ? PrintReservationStatus.ResolutionRequired
+                : PrintReservationStatus.Reserved);
+        repository.Reservations.Add(reservation);
+        repository.Reservations.Add(
+            CreateResult(
+                account.Id,
+                amountMinorUnits: 300,
+                PrintReservationStatus.Reserved));
+        var audit = new RecordingAuditTrail();
+        var service = CreateService(
+            new FakeCreditAccountRepository(account, []),
+            repository,
+            new ImmediateTransaction(),
+            audit);
+        var command = new CapturePrintReservationCommand(
+            reservation.Id,
+            reservation.PrintSourceId,
+            Guid.NewGuid());
+
+        var captured = await service.CaptureAsync(command);
+        var replayed = await service.CaptureAsync(command);
+
+        Assert.Equal(captured, replayed);
+        Assert.Equal(PrintReservationStatus.Captured, captured.Status);
+        Assert.NotNull(captured.DebitOperationId);
+        Assert.NotEqual(
+            command.TerminalCommandId,
+            captured.DebitOperationId);
+        Assert.Equal(new Money(300), account.Balance);
+        var debit = Assert.Single(
+            account.Movements,
+            movement =>
+                movement.Type == CreditMovementType.Debit);
+        Assert.Equal(new Money(700), debit.Amount);
+        Assert.Equal(captured.DebitOperationId, debit.OperationId);
+        Assert.Equal(new Money(300), await repository.GetBlockingAmountAsync(
+            account.Id,
+            CancellationToken.None));
+        Assert.Equal(1, repository.SaveCount);
+        Assert.Equal(
+            "print-reservation.captured",
+            Assert.Single(audit.Entries).Action);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReleaseAsync_RemovesBlockingWithoutBookedMovement(
+        bool resolutionRequired)
+    {
+        var ownerId = Guid.NewGuid();
+        var account = CreateAccount(ownerId, balanceMinorUnits: 1_000);
+        var repository = new FakePrintReservationRepository([]);
+        var reservation = CreateResult(
+            account.Id,
+            amountMinorUnits: 700,
+            resolutionRequired
+                ? PrintReservationStatus.ResolutionRequired
+                : PrintReservationStatus.Reserved);
+        repository.Reservations.Add(reservation);
+        var audit = new RecordingAuditTrail();
+        var service = CreateService(
+            new FakeCreditAccountRepository(account, []),
+            repository,
+            new ImmediateTransaction(),
+            audit);
+        var command = new ReleasePrintReservationCommand(
+            reservation.Id,
+            reservation.PrintSourceId,
+            Guid.NewGuid());
+        var movementCount = account.Movements.Count;
+
+        var released = await service.ReleaseAsync(command);
+        var replayed = await service.ReleaseAsync(command);
+
+        Assert.Equal(released, replayed);
+        Assert.Equal(PrintReservationStatus.Released, released.Status);
+        Assert.Equal(new Money(1_000), account.Balance);
+        Assert.Equal(movementCount, account.Movements.Count);
+        Assert.Equal(Money.Zero, await repository.GetBlockingAmountAsync(
+            account.Id,
+            CancellationToken.None));
+        Assert.Equal(1, repository.SaveCount);
+        Assert.Equal(
+            "print-reservation.released",
+            Assert.Single(audit.Entries).Action);
+    }
+
+    [Fact]
+    public async Task CaptureAndRelease_ConflictsCannotChangeTerminalState()
+    {
+        var ownerId = Guid.NewGuid();
+        var account = CreateAccount(ownerId, balanceMinorUnits: 1_000);
+        var repository = new FakePrintReservationRepository([]);
+        var reservation = CreateResult(
+            account.Id,
+            amountMinorUnits: 400,
+            PrintReservationStatus.Reserved);
+        repository.Reservations.Add(reservation);
+        var audit = new RecordingAuditTrail();
+        var service = CreateService(
+            new FakeCreditAccountRepository(account, []),
+            repository,
+            new ImmediateTransaction(),
+            audit);
+        var terminalCommandId = Guid.NewGuid();
+
+        var captured = await service.CaptureAsync(
+            new CapturePrintReservationCommand(
+                reservation.Id,
+                reservation.PrintSourceId,
+                terminalCommandId));
+
+        await Assert.ThrowsAsync<PrintReservationTerminalCommandConflictException>(
+            () => service.ReleaseAsync(
+                new ReleasePrintReservationCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    terminalCommandId)));
+        await Assert.ThrowsAsync<PrintReservationTerminalCommandConflictException>(
+            () => service.ReleaseAsync(
+                new ReleasePrintReservationCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    Guid.NewGuid())));
+
+        Assert.Equal(
+            PrintReservationStatus.Captured,
+            repository.Reservations.Single(
+                item => item.Id == reservation.Id).Status);
+        Assert.Equal(new Money(600), account.Balance);
+        Assert.Equal(1, repository.SaveCount);
+        Assert.Single(audit.Entries);
+        Assert.Equal(captured.DebitOperationId, account.Movements[^1].OperationId);
+    }
+
     private static PrintReservationService CreateService(
         ICreditAccountRepository accountRepository,
         IPrintReservationRepository reservationRepository,
-        IApplicationTransaction transaction)
+        IApplicationTransaction transaction,
+        IAuditTrail? auditTrail = null)
     {
         return new PrintReservationService(
             accountRepository,
             reservationRepository,
             transaction,
+            auditTrail ?? NullAuditTrail.Instance,
             new FixedTimeProvider(TestTime));
     }
 
@@ -448,6 +693,15 @@ public sealed class PrintReservationServiceTests
             Task.FromResult(
                 _account?.OwnerId == ownerId ? _account : null);
 
+        public Task<CreditAccount?> FindByIdForUpdateAsync(
+            Guid accountId,
+            CancellationToken cancellationToken)
+        {
+            _calls.Add("account-lock-by-id");
+            return Task.FromResult(
+                _account?.Id == accountId ? _account : null);
+        }
+
         public Task LockOwnerForAccountCreationAsync(
             Guid ownerId,
             CancellationToken cancellationToken) =>
@@ -460,8 +714,11 @@ public sealed class PrintReservationServiceTests
 
         public Task SaveAsync(
             CreditAccount account,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+            CancellationToken cancellationToken)
+        {
+            _calls.Add("account-save");
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakePrintReservationRepository :
@@ -478,9 +735,32 @@ public sealed class PrintReservationServiceTests
 
         public int AddCount { get; private set; }
 
+        public int SaveCount { get; private set; }
+
         public Action<PrintReservation>? BeforeAdd { get; set; }
 
         public Exception? AddException { get; set; }
+
+        public Task<PrintReservationResult?> FindByIdAsync(
+            Guid reservationId,
+            CancellationToken cancellationToken)
+        {
+            _calls.Add("reservation-read");
+            return Task.FromResult(
+                Reservations.SingleOrDefault(
+                    reservation => reservation.Id == reservationId));
+        }
+
+        public Task<PrintReservation?> FindByIdForUpdateAsync(
+            Guid reservationId,
+            CancellationToken cancellationToken)
+        {
+            _calls.Add("reservation-lock");
+            var result = Reservations.SingleOrDefault(
+                reservation => reservation.Id == reservationId);
+            return Task.FromResult(
+                result is null ? null : Restore(result));
+        }
 
         public Task<PrintReservationResult?> FindByReserveCommandAsync(
             Guid printSourceId,
@@ -506,6 +786,34 @@ public sealed class PrintReservationServiceTests
                     reservation =>
                         reservation.PrintSourceId == printSourceId &&
                         reservation.JobUuid == jobUuid));
+        }
+
+        public Task<PrintReservationResult?> FindByResolutionCommandAsync(
+            Guid printSourceId,
+            Guid resolutionCommandId,
+            CancellationToken cancellationToken)
+        {
+            _calls.Add("resolution-command-read");
+            return Task.FromResult(
+                Reservations.SingleOrDefault(
+                    reservation =>
+                        reservation.PrintSourceId == printSourceId &&
+                        reservation.ResolutionCommandId ==
+                            resolutionCommandId));
+        }
+
+        public Task<PrintReservationResult?> FindByTerminalCommandAsync(
+            Guid printSourceId,
+            Guid terminalCommandId,
+            CancellationToken cancellationToken)
+        {
+            _calls.Add("terminal-command-read");
+            return Task.FromResult(
+                Reservations.SingleOrDefault(
+                    reservation =>
+                        reservation.PrintSourceId == printSourceId &&
+                        reservation.TerminalCommandId ==
+                            terminalCommandId));
         }
 
         public Task<Money> GetBlockingAmountAsync(
@@ -557,6 +865,68 @@ public sealed class PrintReservationServiceTests
 
             return Task.CompletedTask;
         }
+
+        public Task SaveAsync(
+            PrintReservation reservation,
+            CancellationToken cancellationToken)
+        {
+            _calls.Add("reservation-save");
+            SaveCount++;
+            var index = Reservations.FindIndex(
+                item => item.Id == reservation.Id);
+            var current = Reservations[index];
+            Reservations[index] = new PrintReservationResult(
+                reservation.Id,
+                reservation.CreditAccountId,
+                reservation.PrintSourceId,
+                reservation.JobUuid,
+                reservation.Amount,
+                reservation.Status,
+                reservation.ReserveCommandId,
+                reservation.ResolutionCommandId,
+                reservation.TerminalCommandId,
+                reservation.DebitOperationId,
+                reservation.CreatedAt,
+                reservation.StateChangedAt,
+                current.Version + 1);
+            return Task.CompletedTask;
+        }
+
+        private static PrintReservation Restore(
+            PrintReservationResult result)
+        {
+            var reservation = new PrintReservation(
+                result.Id,
+                result.CreditAccountId,
+                result.PrintSourceId,
+                result.JobUuid,
+                result.Amount,
+                result.ReserveCommandId,
+                result.CreatedAt);
+
+            if (result.ResolutionCommandId.HasValue)
+            {
+                _ = reservation.RequireResolution(
+                    result.ResolutionCommandId.Value,
+                    result.StateChangedAt);
+            }
+
+            if (result.Status == PrintReservationStatus.Captured)
+            {
+                _ = reservation.Capture(
+                    result.TerminalCommandId!.Value,
+                    result.DebitOperationId!.Value,
+                    result.StateChangedAt);
+            }
+            else if (result.Status == PrintReservationStatus.Released)
+            {
+                _ = reservation.Release(
+                    result.TerminalCommandId!.Value,
+                    result.StateChangedAt);
+            }
+
+            return reservation;
+        }
     }
 
     private sealed class ImmediateTransaction : IApplicationTransaction
@@ -582,5 +952,17 @@ public sealed class PrintReservationServiceTests
         }
 
         public override DateTimeOffset GetUtcNow() => _utcNow;
+    }
+
+    private sealed class RecordingAuditTrail : IAuditTrail
+    {
+        public List<AuditEntry> Entries { get; } = [];
+
+        public void Stage(AuditEntry entry) => Entries.Add(entry);
+
+        public Task WriteAsync(
+            AuditEntry entry,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

@@ -1,4 +1,5 @@
 using FuaPay.Web.BuildingBlocks.Application;
+using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.BuildingBlocks.Persistence;
 using FuaPay.Web.Modules.Credits.Application;
@@ -472,6 +473,685 @@ public sealed class PrintReservationServicePersistenceTests :
         }
     }
 
+    [Fact]
+    public async Task LifecycleAsync_IsAtomicAuditedAndIdempotent()
+    {
+        var ownerId = Guid.NewGuid();
+        var printSourceId = Guid.NewGuid();
+
+        try
+        {
+            await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            using var scope = _factory.Services.CreateScope();
+            var reservations = scope.ServiceProvider
+                .GetRequiredService<PrintReservationService>();
+            var credit = scope.ServiceProvider
+                .GetRequiredService<CreditService>();
+            var first = await reservations.ReserveAsync(
+                CreateCommand(
+                    ownerId,
+                    printSourceId,
+                    amountMinorUnits: 600));
+            var second = await reservations.ReserveAsync(
+                CreateCommand(
+                    ownerId,
+                    printSourceId,
+                    amountMinorUnits: 400));
+            var resolutionCommand =
+                new RequirePrintReservationResolutionCommand(
+                    first.Id,
+                    printSourceId,
+                    Guid.NewGuid());
+
+            var unresolved = await reservations.RequireResolutionAsync(
+                resolutionCommand);
+            var resolutionReplay =
+                await reservations.RequireResolutionAsync(
+                    resolutionCommand);
+
+            Assert.Equal(unresolved, resolutionReplay);
+            Assert.Equal(
+                PrintReservationStatus.ResolutionRequired,
+                unresolved.Status);
+
+            var captureCommand = new CapturePrintReservationCommand(
+                first.Id,
+                printSourceId,
+                Guid.NewGuid());
+            var captured = await reservations.CaptureAsync(captureCommand);
+            var captureReplay =
+                await reservations.CaptureAsync(captureCommand);
+
+            Assert.Equal(captured, captureReplay);
+            Assert.Equal(PrintReservationStatus.Captured, captured.Status);
+            Assert.NotNull(captured.DebitOperationId);
+            Assert.NotEqual(
+                captureCommand.TerminalCommandId,
+                captured.DebitOperationId);
+            Assert.Equal(3, captured.Version);
+
+            await Assert.ThrowsAsync<InsufficientCreditException>(
+                () => credit.DebitAsync(
+                    ownerId,
+                    Guid.NewGuid(),
+                    new Money(1),
+                    "Debit of another reservation"));
+
+            var releaseCommand = new ReleasePrintReservationCommand(
+                second.Id,
+                printSourceId,
+                Guid.NewGuid());
+            var released = await reservations.ReleaseAsync(releaseCommand);
+            var releaseReplay =
+                await reservations.ReleaseAsync(releaseCommand);
+
+            Assert.Equal(released, releaseReplay);
+            Assert.Equal(PrintReservationStatus.Released, released.Status);
+            Assert.Equal(2, released.Version);
+
+            var state = await ReadLifecycleStateAsync(ownerId);
+
+            Assert.Equal(400, state.BalanceMinorUnits);
+            Assert.Equal(2, state.MovementCount);
+            Assert.Equal(1, state.CaptureMovementCount);
+            Assert.Equal(2, state.ReservationCount);
+            Assert.Equal(0, state.BlockingMinorUnits);
+            Assert.Equal(3, state.AuditCount);
+        }
+        finally
+        {
+            await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
+    [Fact]
+    public async Task LifecycleCommands_ConflictDeterministically()
+    {
+        var ownerId = Guid.NewGuid();
+        var printSourceId = Guid.NewGuid();
+
+        try
+        {
+            await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            using var scope = _factory.Services.CreateScope();
+            var service = scope.ServiceProvider
+                .GetRequiredService<PrintReservationService>();
+            var first = await service.ReserveAsync(
+                CreateCommand(
+                    ownerId,
+                    printSourceId,
+                    amountMinorUnits: 400));
+            var second = await service.ReserveAsync(
+                CreateCommand(
+                    ownerId,
+                    printSourceId,
+                    amountMinorUnits: 400));
+            var resolutionCommandId = Guid.NewGuid();
+
+            _ = await service.RequireResolutionAsync(
+                new RequirePrintReservationResolutionCommand(
+                    first.Id,
+                    printSourceId,
+                    resolutionCommandId));
+            await Assert.ThrowsAsync<PrintReservationResolutionCommandConflictException>(
+                () => service.RequireResolutionAsync(
+                    new RequirePrintReservationResolutionCommand(
+                        second.Id,
+                        printSourceId,
+                        resolutionCommandId)));
+
+            var terminalCommandId = Guid.NewGuid();
+            _ = await service.CaptureAsync(
+                new CapturePrintReservationCommand(
+                    first.Id,
+                    printSourceId,
+                    terminalCommandId));
+            await Assert.ThrowsAsync<PrintReservationTerminalCommandConflictException>(
+                () => service.ReleaseAsync(
+                    new ReleasePrintReservationCommand(
+                        first.Id,
+                        printSourceId,
+                        terminalCommandId)));
+            await Assert.ThrowsAsync<PrintReservationTerminalCommandConflictException>(
+                () => service.ReleaseAsync(
+                    new ReleasePrintReservationCommand(
+                        first.Id,
+                        printSourceId,
+                        Guid.NewGuid())));
+            await Assert.ThrowsAsync<PrintReservationTerminalCommandConflictException>(
+                () => service.ReleaseAsync(
+                    new ReleasePrintReservationCommand(
+                        second.Id,
+                        printSourceId,
+                        terminalCommandId)));
+
+            var state = await ReadLifecycleStateAsync(ownerId);
+
+            Assert.Equal(600, state.BalanceMinorUnits);
+            Assert.Equal(2, state.MovementCount);
+            Assert.Equal(1, state.CaptureMovementCount);
+            Assert.Equal(400, state.BlockingMinorUnits);
+            Assert.Equal(2, state.AuditCount);
+        }
+        finally
+        {
+            await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CaptureAsync_ConcurrentSameReservationCreatesOneDebit(
+        bool sameCommand)
+    {
+        var ownerId = Guid.NewGuid();
+        var gate = new AccountLockGate();
+
+        try
+        {
+            var accountId =
+                await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            PrintReservationResult reservation;
+
+            using (var seedScope = _factory.Services.CreateScope())
+            {
+                reservation = await seedScope.ServiceProvider
+                    .GetRequiredService<PrintReservationService>()
+                    .ReserveAsync(CreateCommand(
+                        ownerId,
+                        amountMinorUnits: 700));
+            }
+
+            using var factory = CreateCoordinatedFactory(
+                ownerId,
+                gate,
+                accountId);
+            using var firstScope = factory.Services.CreateScope();
+            using var secondScope = factory.Services.CreateScope();
+            var firstService = firstScope.ServiceProvider
+                .GetRequiredService<PrintReservationService>();
+            var secondService = secondScope.ServiceProvider
+                .GetRequiredService<PrintReservationService>();
+            var firstCommandId = Guid.NewGuid();
+            var secondCommandId = sameCommand
+                ? firstCommandId
+                : Guid.NewGuid();
+            var firstTask = CaptureAsync(
+                firstService.CaptureAsync(
+                    new CapturePrintReservationCommand(
+                        reservation.Id,
+                        reservation.PrintSourceId,
+                        firstCommandId)));
+
+            await gate.FirstLockAcquired.WaitAsync(
+                TimeSpan.FromSeconds(30));
+
+            var secondTask = CaptureAsync(
+                secondService.CaptureAsync(
+                    new CapturePrintReservationCommand(
+                        reservation.Id,
+                        reservation.PrintSourceId,
+                        secondCommandId)));
+
+            await gate.SecondLockAttempted.WaitAsync(
+                TimeSpan.FromSeconds(30));
+            gate.ReleaseFirstLock();
+
+            var attempts = await Task.WhenAll(firstTask, secondTask);
+
+            Assert.NotNull(attempts[0].Result);
+
+            if (sameCommand)
+            {
+                Assert.NotNull(attempts[1].Result);
+                Assert.Equal(
+                    attempts[0].Result!.DebitOperationId,
+                    attempts[1].Result!.DebitOperationId);
+            }
+            else
+            {
+                Assert.IsType<PrintReservationTerminalCommandConflictException>(
+                    attempts[1].Exception);
+            }
+
+            var state = await ReadLifecycleStateAsync(ownerId);
+
+            Assert.Equal(300, state.BalanceMinorUnits);
+            Assert.Equal(2, state.MovementCount);
+            Assert.Equal(1, state.CaptureMovementCount);
+            Assert.Equal(0, state.BlockingMinorUnits);
+            Assert.Equal(1, state.AuditCount);
+        }
+        finally
+        {
+            gate.ReleaseFirstLock();
+            await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
+    [Theory]
+    [InlineData("resolution")]
+    [InlineData("capture")]
+    [InlineData("release")]
+    public async Task LifecycleCommand_ConcurrentDifferentAccountsHasOneEffect(
+        string operation)
+    {
+        var firstOwnerId = Guid.NewGuid();
+        var secondOwnerId = Guid.NewGuid();
+        var printSourceId = Guid.NewGuid();
+
+        try
+        {
+            await CreateAccountAsync(
+                firstOwnerId,
+                balanceMinorUnits: 1_000);
+            await CreateAccountAsync(
+                secondOwnerId,
+                balanceMinorUnits: 1_000);
+            PrintReservationResult firstReservation;
+            PrintReservationResult secondReservation;
+
+            using (var seedScope = _factory.Services.CreateScope())
+            {
+                var service = seedScope.ServiceProvider
+                    .GetRequiredService<PrintReservationService>();
+                firstReservation = await service.ReserveAsync(
+                    CreateCommand(
+                        firstOwnerId,
+                        printSourceId,
+                        amountMinorUnits: 400));
+                secondReservation = await service.ReserveAsync(
+                    CreateCommand(
+                        secondOwnerId,
+                        printSourceId,
+                        amountMinorUnits: 400));
+            }
+
+            using var firstScope = _factory.Services.CreateScope();
+            using var secondScope = _factory.Services.CreateScope();
+            var barrier = new AsyncBarrier(participantCount: 2);
+            var firstService = CreateServiceWithAddBarrier(
+                firstScope.ServiceProvider,
+                barrier);
+            var secondService = CreateServiceWithAddBarrier(
+                secondScope.ServiceProvider,
+                barrier);
+            var sharedCommandId = Guid.NewGuid();
+
+            var attempts = await Task.WhenAll(
+                CaptureAsync(ExecuteLifecycleWithCommandAsync(
+                    firstService,
+                    firstReservation,
+                    operation,
+                    sharedCommandId)),
+                CaptureAsync(ExecuteLifecycleWithCommandAsync(
+                    secondService,
+                    secondReservation,
+                    operation,
+                    sharedCommandId)));
+
+            Assert.Single(
+                attempts,
+                attempt => attempt.Result is not null);
+            var failure = Assert.Single(
+                attempts,
+                attempt => attempt.Exception is not null);
+
+            if (operation == "resolution")
+            {
+                Assert.IsType<PrintReservationResolutionCommandConflictException>(
+                    failure.Exception);
+            }
+            else
+            {
+                Assert.IsType<PrintReservationTerminalCommandConflictException>(
+                    failure.Exception);
+            }
+
+            var firstState = await ReadLifecycleStateAsync(firstOwnerId);
+            var secondState = await ReadLifecycleStateAsync(secondOwnerId);
+
+            Assert.Equal(
+                operation == "capture" ? 1_600 : 2_000,
+                firstState.BalanceMinorUnits +
+                secondState.BalanceMinorUnits);
+            Assert.Equal(
+                operation == "capture" ? 1 : 0,
+                firstState.CaptureMovementCount +
+                secondState.CaptureMovementCount);
+            Assert.Equal(
+                operation == "resolution" ? 800 : 400,
+                firstState.BlockingMinorUnits +
+                secondState.BlockingMinorUnits);
+            Assert.Equal(
+                1,
+                firstState.AuditCount + secondState.AuditCount);
+        }
+        finally
+        {
+            await DeleteScenarioAsync([firstOwnerId, secondOwnerId]);
+        }
+    }
+
+    [Theory]
+    [InlineData("capture")]
+    [InlineData("release")]
+    public async Task CaptureAndRelease_ConcurrentFirstTerminalWins(
+        string firstOperation)
+    {
+        var ownerId = Guid.NewGuid();
+        var gate = new AccountLockGate();
+
+        try
+        {
+            var accountId =
+                await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            PrintReservationResult reservation;
+
+            using (var seedScope = _factory.Services.CreateScope())
+            {
+                reservation = await seedScope.ServiceProvider
+                    .GetRequiredService<PrintReservationService>()
+                    .ReserveAsync(CreateCommand(
+                        ownerId,
+                        amountMinorUnits: 700));
+            }
+
+            using var factory = CreateCoordinatedFactory(
+                ownerId,
+                gate,
+                accountId);
+            using var firstScope = factory.Services.CreateScope();
+            using var secondScope = factory.Services.CreateScope();
+            var firstTask = CaptureAsync(ExecuteTerminalAsync(
+                firstScope.ServiceProvider,
+                reservation,
+                firstOperation,
+                Guid.NewGuid()));
+
+            await gate.FirstLockAcquired.WaitAsync(
+                TimeSpan.FromSeconds(30));
+
+            var secondTask = CaptureAsync(ExecuteTerminalAsync(
+                secondScope.ServiceProvider,
+                reservation,
+                firstOperation == "capture" ? "release" : "capture",
+                Guid.NewGuid()));
+
+            await gate.SecondLockAttempted.WaitAsync(
+                TimeSpan.FromSeconds(30));
+            gate.ReleaseFirstLock();
+
+            var attempts = await Task.WhenAll(firstTask, secondTask);
+
+            Assert.NotNull(attempts[0].Result);
+            Assert.IsType<PrintReservationTerminalCommandConflictException>(
+                attempts[1].Exception);
+
+            var state = await ReadLifecycleStateAsync(ownerId);
+
+            Assert.Equal(
+                firstOperation == "capture" ? 300 : 1_000,
+                state.BalanceMinorUnits);
+            Assert.Equal(
+                firstOperation == "capture" ? 2 : 1,
+                state.MovementCount);
+            Assert.Equal(
+                firstOperation == "capture" ? 1 : 0,
+                state.CaptureMovementCount);
+            Assert.Equal(0, state.BlockingMinorUnits);
+            Assert.Equal(1, state.AuditCount);
+        }
+        finally
+        {
+            gate.ReleaseFirstLock();
+            await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
+    [Theory]
+    [InlineData("resolution", "capture")]
+    [InlineData("resolution", "release")]
+    [InlineData("capture", "resolution")]
+    [InlineData("release", "resolution")]
+    public async Task ResolutionAndTerminal_ConcurrentLifecycleIsSerialized(
+        string firstOperation,
+        string secondOperation)
+    {
+        var ownerId = Guid.NewGuid();
+        var gate = new AccountLockGate();
+
+        try
+        {
+            var accountId =
+                await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            PrintReservationResult reservation;
+
+            using (var seedScope = _factory.Services.CreateScope())
+            {
+                reservation = await seedScope.ServiceProvider
+                    .GetRequiredService<PrintReservationService>()
+                    .ReserveAsync(CreateCommand(
+                        ownerId,
+                        amountMinorUnits: 700));
+            }
+
+            using var factory = CreateCoordinatedFactory(
+                ownerId,
+                gate,
+                accountId);
+            using var firstScope = factory.Services.CreateScope();
+            using var secondScope = factory.Services.CreateScope();
+            var firstTask = CaptureAsync(ExecuteLifecycleAsync(
+                firstScope.ServiceProvider,
+                reservation,
+                firstOperation));
+
+            await gate.FirstLockAcquired.WaitAsync(
+                TimeSpan.FromSeconds(30));
+
+            var secondTask = CaptureAsync(ExecuteLifecycleAsync(
+                secondScope.ServiceProvider,
+                reservation,
+                secondOperation));
+
+            await gate.SecondLockAttempted.WaitAsync(
+                TimeSpan.FromSeconds(30));
+            gate.ReleaseFirstLock();
+
+            var attempts = await Task.WhenAll(firstTask, secondTask);
+
+            Assert.NotNull(attempts[0].Result);
+
+            if (firstOperation == "resolution")
+            {
+                Assert.NotNull(attempts[1].Result);
+            }
+            else
+            {
+                Assert.IsType<PrintReservationResolutionCommandConflictException>(
+                    attempts[1].Exception);
+            }
+
+            var terminalOperation = firstOperation == "resolution"
+                ? secondOperation
+                : firstOperation;
+            var state = await ReadLifecycleStateAsync(ownerId);
+
+            Assert.Equal(
+                terminalOperation == "capture" ? 300 : 1_000,
+                state.BalanceMinorUnits);
+            Assert.Equal(0, state.BlockingMinorUnits);
+            Assert.Equal(
+                firstOperation == "resolution" ? 2 : 1,
+                state.AuditCount);
+        }
+        finally
+        {
+            gate.ReleaseFirstLock();
+            await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
+    [Theory]
+    [InlineData("debit")]
+    [InlineData("capture")]
+    public async Task DebitAndCapture_ConcurrentMutationsPreserveOtherReservation(
+        string firstOperation)
+    {
+        var ownerId = Guid.NewGuid();
+        var gate = new AccountLockGate();
+
+        try
+        {
+            var accountId =
+                await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            PrintReservationResult capturedReservation;
+
+            using (var seedScope = _factory.Services.CreateScope())
+            {
+                var service = seedScope.ServiceProvider
+                    .GetRequiredService<PrintReservationService>();
+                capturedReservation = await service.ReserveAsync(
+                    CreateCommand(ownerId, amountMinorUnits: 600));
+                _ = await service.ReserveAsync(
+                    CreateCommand(ownerId, amountMinorUnits: 300));
+            }
+
+            using var factory = CreateCoordinatedFactory(
+                ownerId,
+                gate,
+                accountId);
+            using var firstScope = factory.Services.CreateScope();
+            using var secondScope = factory.Services.CreateScope();
+            var secondOperation = firstOperation == "debit"
+                ? "capture"
+                : "debit";
+            var firstTask = Record.ExceptionAsync(
+                () => ExecuteDebitOrCaptureAsync(
+                    firstScope.ServiceProvider,
+                    ownerId,
+                    capturedReservation,
+                    firstOperation));
+
+            await gate.FirstLockAcquired.WaitAsync(
+                TimeSpan.FromSeconds(30));
+
+            var secondTask = Record.ExceptionAsync(
+                () => ExecuteDebitOrCaptureAsync(
+                    secondScope.ServiceProvider,
+                    ownerId,
+                    capturedReservation,
+                    secondOperation));
+
+            await gate.SecondLockAttempted.WaitAsync(
+                TimeSpan.FromSeconds(30));
+            gate.ReleaseFirstLock();
+
+            var failures = await Task.WhenAll(firstTask, secondTask);
+
+            Assert.All(failures, Assert.Null);
+
+            var state = await ReadLifecycleStateAsync(ownerId);
+
+            Assert.Equal(300, state.BalanceMinorUnits);
+            Assert.Equal(3, state.MovementCount);
+            Assert.Equal(1, state.CaptureMovementCount);
+            Assert.Equal(300, state.BlockingMinorUnits);
+            Assert.Equal(1, state.AuditCount);
+        }
+        finally
+        {
+            gate.ReleaseFirstLock();
+            await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
+    [Theory]
+    [InlineData("debit")]
+    [InlineData("release")]
+    public async Task DebitAndRelease_ConcurrentOutcomeFollowsAccountLockOrder(
+        string firstOperation)
+    {
+        var ownerId = Guid.NewGuid();
+        var gate = new AccountLockGate();
+
+        try
+        {
+            var accountId =
+                await CreateAccountAsync(ownerId, balanceMinorUnits: 1_000);
+            PrintReservationResult reservation;
+
+            using (var seedScope = _factory.Services.CreateScope())
+            {
+                reservation = await seedScope.ServiceProvider
+                    .GetRequiredService<PrintReservationService>()
+                    .ReserveAsync(CreateCommand(
+                        ownerId,
+                        amountMinorUnits: 700));
+            }
+
+            using var factory = CreateCoordinatedFactory(
+                ownerId,
+                gate,
+                accountId);
+            using var firstScope = factory.Services.CreateScope();
+            using var secondScope = factory.Services.CreateScope();
+            var secondOperation = firstOperation == "debit"
+                ? "release"
+                : "debit";
+            var firstTask = Record.ExceptionAsync(
+                () => ExecuteDebitOrReleaseAsync(
+                    firstScope.ServiceProvider,
+                    ownerId,
+                    reservation,
+                    firstOperation));
+
+            await gate.FirstLockAcquired.WaitAsync(
+                TimeSpan.FromSeconds(30));
+
+            var secondTask = Record.ExceptionAsync(
+                () => ExecuteDebitOrReleaseAsync(
+                    secondScope.ServiceProvider,
+                    ownerId,
+                    reservation,
+                    secondOperation));
+
+            await gate.SecondLockAttempted.WaitAsync(
+                TimeSpan.FromSeconds(30));
+            gate.ReleaseFirstLock();
+
+            var failures = await Task.WhenAll(firstTask, secondTask);
+
+            if (firstOperation == "debit")
+            {
+                Assert.IsType<InsufficientCreditException>(failures[0]);
+                Assert.Null(failures[1]);
+            }
+            else
+            {
+                Assert.All(failures, Assert.Null);
+            }
+
+            var state = await ReadLifecycleStateAsync(ownerId);
+
+            Assert.Equal(
+                firstOperation == "debit" ? 1_000 : 0,
+                state.BalanceMinorUnits);
+            Assert.Equal(
+                firstOperation == "debit" ? 1 : 2,
+                state.MovementCount);
+            Assert.Equal(0, state.BlockingMinorUnits);
+            Assert.Equal(1, state.AuditCount);
+        }
+        finally
+        {
+            gate.ReleaseFirstLock();
+            await DeleteScenarioAsync([ownerId]);
+        }
+    }
+
     private async Task<Guid> CreateAccountAsync(
         Guid ownerId,
         long balanceMinorUnits)
@@ -504,12 +1184,14 @@ public sealed class PrintReservationServicePersistenceTests :
                 services.GetRequiredService<IPrintReservationRepository>(),
                 barrier),
             services.GetRequiredService<IApplicationTransaction>(),
+            services.GetRequiredService<IAuditTrail>(),
             services.GetRequiredService<TimeProvider>());
     }
 
     private WebApplicationFactory<Program> CreateCoordinatedFactory(
         Guid ownerId,
-        AccountLockGate gate)
+        AccountLockGate gate,
+        Guid? accountId = null)
     {
         return _factory.WithWebHostBuilder(
             builder => builder.ConfigureTestServices(
@@ -528,6 +1210,7 @@ public sealed class PrintReservationServicePersistenceTests :
                                     provider,
                                     descriptor),
                                 ownerId,
+                                accountId,
                                 gate));
                 }));
     }
@@ -586,6 +1269,152 @@ public sealed class PrintReservationServicePersistenceTests :
         throw new ArgumentOutOfRangeException(nameof(operation));
     }
 
+    private static Task<PrintReservationResult> ExecuteTerminalAsync(
+        IServiceProvider services,
+        PrintReservationResult reservation,
+        string operation,
+        Guid commandId)
+    {
+        var service = services
+            .GetRequiredService<PrintReservationService>();
+
+        return operation switch
+        {
+            "capture" => service.CaptureAsync(
+                new CapturePrintReservationCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    commandId)),
+            "release" => service.ReleaseAsync(
+                new ReleasePrintReservationCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    commandId)),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation))
+        };
+    }
+
+    private static Task<PrintReservationResult> ExecuteLifecycleAsync(
+        IServiceProvider services,
+        PrintReservationResult reservation,
+        string operation)
+    {
+        var service = services
+            .GetRequiredService<PrintReservationService>();
+
+        return operation switch
+        {
+            "resolution" => service.RequireResolutionAsync(
+                new RequirePrintReservationResolutionCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    Guid.NewGuid())),
+            "capture" => service.CaptureAsync(
+                new CapturePrintReservationCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    Guid.NewGuid())),
+            "release" => service.ReleaseAsync(
+                new ReleasePrintReservationCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    Guid.NewGuid())),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation))
+        };
+    }
+
+    private static Task<PrintReservationResult>
+        ExecuteLifecycleWithCommandAsync(
+            PrintReservationService service,
+            PrintReservationResult reservation,
+            string operation,
+            Guid commandId)
+    {
+        return operation switch
+        {
+            "resolution" => service.RequireResolutionAsync(
+                new RequirePrintReservationResolutionCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    commandId)),
+            "capture" => service.CaptureAsync(
+                new CapturePrintReservationCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    commandId)),
+            "release" => service.ReleaseAsync(
+                new ReleasePrintReservationCommand(
+                    reservation.Id,
+                    reservation.PrintSourceId,
+                    commandId)),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation))
+        };
+    }
+
+    private static async Task ExecuteDebitOrCaptureAsync(
+        IServiceProvider services,
+        Guid ownerId,
+        PrintReservationResult reservation,
+        string operation)
+    {
+        if (operation == "debit")
+        {
+            _ = await services.GetRequiredService<CreditService>()
+                .DebitAsync(
+                    ownerId,
+                    Guid.NewGuid(),
+                    new Money(100),
+                    "Concurrent ordinary debit");
+            return;
+        }
+
+        if (operation == "capture")
+        {
+            _ = await services
+                .GetRequiredService<PrintReservationService>()
+                .CaptureAsync(
+                    new CapturePrintReservationCommand(
+                        reservation.Id,
+                        reservation.PrintSourceId,
+                        Guid.NewGuid()));
+            return;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(operation));
+    }
+
+    private static async Task ExecuteDebitOrReleaseAsync(
+        IServiceProvider services,
+        Guid ownerId,
+        PrintReservationResult reservation,
+        string operation)
+    {
+        if (operation == "debit")
+        {
+            _ = await services.GetRequiredService<CreditService>()
+                .DebitAsync(
+                    ownerId,
+                    Guid.NewGuid(),
+                    new Money(1_000),
+                    "Concurrent debit around release");
+            return;
+        }
+
+        if (operation == "release")
+        {
+            _ = await services
+                .GetRequiredService<PrintReservationService>()
+                .ReleaseAsync(
+                    new ReleasePrintReservationCommand(
+                        reservation.Id,
+                        reservation.PrintSourceId,
+                        Guid.NewGuid()));
+            return;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(operation));
+    }
+
     private static ReservePrintCreditCommand CreateCommand(
         Guid ownerId,
         long amountMinorUnits)
@@ -593,6 +1422,19 @@ public sealed class PrintReservationServicePersistenceTests :
         return new ReservePrintCreditCommand(
             ownerId,
             Guid.NewGuid(),
+            $"urn:uuid:{Guid.NewGuid():D}",
+            new Money(amountMinorUnits),
+            Guid.NewGuid());
+    }
+
+    private static ReservePrintCreditCommand CreateCommand(
+        Guid ownerId,
+        Guid printSourceId,
+        long amountMinorUnits)
+    {
+        return new ReservePrintCreditCommand(
+            ownerId,
+            printSourceId,
             $"urn:uuid:{Guid.NewGuid():D}",
             new Money(amountMinorUnits),
             Guid.NewGuid());
@@ -704,6 +1546,63 @@ public sealed class PrintReservationServicePersistenceTests :
             .SingleAsync();
     }
 
+    private async Task<LifecycleState> ReadLifecycleStateAsync(
+        Guid ownerId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+
+        return await dbContext.Database
+            .SqlQuery<LifecycleState>(
+                $"""
+                SELECT
+                    account.balance_minor_units AS "BalanceMinorUnits",
+                    (
+                        SELECT count(*)::integer
+                        FROM credits.movements AS movement
+                        WHERE movement.account_id = account.id
+                    ) AS "MovementCount",
+                    (
+                        SELECT count(*)::integer
+                        FROM credits.movements AS movement
+                        WHERE movement.account_id = account.id
+                          AND movement.operation_id IN
+                          (
+                              SELECT reservation.debit_operation_id
+                              FROM credits.print_reservations AS reservation
+                              WHERE reservation.credit_account_id = account.id
+                                AND reservation.debit_operation_id IS NOT NULL
+                          )
+                    ) AS "CaptureMovementCount",
+                    (
+                        SELECT count(*)::integer
+                        FROM credits.print_reservations AS reservation
+                        WHERE reservation.credit_account_id = account.id
+                    ) AS "ReservationCount",
+                    (
+                        SELECT COALESCE(sum(reservation.amount_minor_units), 0)::bigint
+                        FROM credits.print_reservations AS reservation
+                        WHERE reservation.credit_account_id = account.id
+                          AND reservation.status IN (1, 2)
+                    ) AS "BlockingMinorUnits",
+                    (
+                        SELECT count(*)::integer
+                        FROM audit.events AS audit
+                        WHERE audit.entity_type = 'print-reservation'
+                          AND audit.entity_id IN
+                          (
+                              SELECT reservation.id::text
+                              FROM credits.print_reservations AS reservation
+                              WHERE reservation.credit_account_id = account.id
+                          )
+                    ) AS "AuditCount"
+                FROM credits.accounts AS account
+                WHERE account.owner_id = {ownerId}
+                """)
+            .SingleAsync();
+    }
+
     private async Task<int> CountReservationsAsync(Guid printSourceId)
     {
         using var scope = _factory.Services.CreateScope();
@@ -727,6 +1626,19 @@ public sealed class PrintReservationServicePersistenceTests :
 
         foreach (var ownerId in ownerIds)
         {
+            _ = await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                DELETE FROM audit.events
+                WHERE entity_type = 'print-reservation'
+                  AND entity_id IN
+                  (
+                      SELECT reservation.id::text
+                      FROM credits.print_reservations AS reservation
+                      JOIN credits.accounts AS account
+                        ON account.id = reservation.credit_account_id
+                      WHERE account.owner_id = {ownerId}
+                  )
+                """);
             _ = await dbContext.Database.ExecuteSqlInterpolatedAsync(
                 $"""
                 DELETE FROM credits.print_reservations
@@ -786,6 +1698,20 @@ public sealed class PrintReservationServicePersistenceTests :
             _barrier = barrier;
         }
 
+        public Task<PrintReservationResult?> FindByIdAsync(
+            Guid reservationId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByIdAsync(
+                reservationId,
+                cancellationToken);
+
+        public Task<PrintReservation?> FindByIdForUpdateAsync(
+            Guid reservationId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByIdForUpdateAsync(
+                reservationId,
+                cancellationToken);
+
         public Task<PrintReservationResult?> FindByReserveCommandAsync(
             Guid printSourceId,
             Guid reserveCommandId,
@@ -804,6 +1730,24 @@ public sealed class PrintReservationServicePersistenceTests :
                 jobUuid,
                 cancellationToken);
 
+        public Task<PrintReservationResult?> FindByResolutionCommandAsync(
+            Guid printSourceId,
+            Guid resolutionCommandId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByResolutionCommandAsync(
+                printSourceId,
+                resolutionCommandId,
+                cancellationToken);
+
+        public Task<PrintReservationResult?> FindByTerminalCommandAsync(
+            Guid printSourceId,
+            Guid terminalCommandId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByTerminalCommandAsync(
+                printSourceId,
+                terminalCommandId,
+                cancellationToken);
+
         public Task<Money> GetBlockingAmountAsync(
             Guid creditAccountId,
             CancellationToken cancellationToken) =>
@@ -817,6 +1761,14 @@ public sealed class PrintReservationServicePersistenceTests :
         {
             await _barrier.SignalAndWaitAsync(cancellationToken);
             await _inner.AddAsync(reservation, cancellationToken);
+        }
+
+        public async Task SaveAsync(
+            PrintReservation reservation,
+            CancellationToken cancellationToken)
+        {
+            await _barrier.SignalAndWaitAsync(cancellationToken);
+            await _inner.SaveAsync(reservation, cancellationToken);
         }
     }
 
@@ -879,15 +1831,18 @@ public sealed class PrintReservationServicePersistenceTests :
     {
         private readonly ICreditAccountRepository _inner;
         private readonly Guid _ownerId;
+        private readonly Guid? _accountId;
         private readonly AccountLockGate _gate;
 
         public CoordinatingCreditAccountRepository(
             ICreditAccountRepository inner,
             Guid ownerId,
+            Guid? accountId,
             AccountLockGate gate)
         {
             _inner = inner;
             _ownerId = ownerId;
+            _accountId = accountId;
             _gate = gate;
         }
 
@@ -906,6 +1861,18 @@ public sealed class PrintReservationServicePersistenceTests :
                         cancellationToken))
                 : _inner.FindByOwnerIdForUpdateAsync(
                     ownerId,
+                    cancellationToken);
+
+        public Task<CreditAccount?> FindByIdForUpdateAsync(
+            Guid accountId,
+            CancellationToken cancellationToken) =>
+            accountId == _accountId
+                ? CoordinateAsync(
+                    () => _inner.FindByIdForUpdateAsync(
+                        accountId,
+                        cancellationToken))
+                : _inner.FindByIdForUpdateAsync(
+                    accountId,
                     cancellationToken);
 
         public Task LockOwnerForAccountCreationAsync(
@@ -956,4 +1923,12 @@ public sealed class PrintReservationServicePersistenceTests :
         int MovementCount,
         int ReservationCount,
         long ReservedMinorUnits);
+
+    private sealed record LifecycleState(
+        long BalanceMinorUnits,
+        int MovementCount,
+        int CaptureMovementCount,
+        int ReservationCount,
+        long BlockingMinorUnits,
+        int AuditCount);
 }

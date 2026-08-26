@@ -65,3 +65,103 @@ public sealed record PrintReservationResult(
     DateTimeOffset CreatedAt,
     DateTimeOffset StateChangedAt,
     long Version);
+
+public sealed record RequirePrintReservationResolutionCommand
+{
+    public RequirePrintReservationResolutionCommand(
+        Guid reservationId,
+        Guid printSourceId,
+        Guid resolutionCommandId)
+    {
+        PrintReservationCommandValidation.ValidateId(
+            reservationId,
+            nameof(reservationId));
+        PrintReservationCommandValidation.ValidateId(
+            printSourceId,
+            nameof(printSourceId));
+        PrintReservationCommandValidation.ValidateId(
+            resolutionCommandId,
+            nameof(resolutionCommandId));
+
+        ReservationId = reservationId;
+        PrintSourceId = printSourceId;
+        ResolutionCommandId = resolutionCommandId;
+    }
+
+    public Guid ReservationId { get; }
+
+    public Guid PrintSourceId { get; }
+
+    public Guid ResolutionCommandId { get; }
+}
+
+public sealed record CapturePrintReservationCommand
+{
+    public CapturePrintReservationCommand(
+        Guid reservationId,
+        Guid printSourceId,
+        Guid terminalCommandId)
+    {
+        PrintReservationCommandValidation.ValidateId(
+            reservationId,
+            nameof(reservationId));
+        PrintReservationCommandValidation.ValidateId(
+            printSourceId,
+            nameof(printSourceId));
+        PrintReservationCommandValidation.ValidateId(
+            terminalCommandId,
+            nameof(terminalCommandId));
+
+        ReservationId = reservationId;
+        PrintSourceId = printSourceId;
+        TerminalCommandId = terminalCommandId;
+    }
+
+    public Guid ReservationId { get; }
+
+    public Guid PrintSourceId { get; }
+
+    public Guid TerminalCommandId { get; }
+}
+
+public sealed record ReleasePrintReservationCommand
+{
+    public ReleasePrintReservationCommand(
+        Guid reservationId,
+        Guid printSourceId,
+        Guid terminalCommandId)
+    {
+        PrintReservationCommandValidation.ValidateId(
+            reservationId,
+            nameof(reservationId));
+        PrintReservationCommandValidation.ValidateId(
+            printSourceId,
+            nameof(printSourceId));
+        PrintReservationCommandValidation.ValidateId(
+            terminalCommandId,
+            nameof(terminalCommandId));
+
+        ReservationId = reservationId;
+        PrintSourceId = printSourceId;
+        TerminalCommandId = terminalCommandId;
+    }
+
+    public Guid ReservationId { get; }
+
+    public Guid PrintSourceId { get; }
+
+    public Guid TerminalCommandId { get; }
+}
+
+internal static class PrintReservationCommandValidation
+{
+    internal static void ValidateId(Guid value, string parameterName)
+    {
+        if (value == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "The reservation command identifier must not be empty.",
+                parameterName);
+        }
+    }
+}
