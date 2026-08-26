@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.BuildingBlocks.Persistence;
 using FuaPay.Web.Modules.Credits.Application;
@@ -274,6 +275,10 @@ public sealed class JobPaymentCoordinationPersistenceTests :
         var creditService = new CreditService(
             scope.ServiceProvider
                 .GetRequiredService<ICreditAccountRepository>(),
+            scope.ServiceProvider
+                .GetRequiredService<IPrintReservationRepository>(),
+            scope.ServiceProvider
+                .GetRequiredService<IApplicationTransaction>(),
             new FixedTimeProvider(TestTime));
 
         await creditService.CreditAsync(
@@ -346,6 +351,17 @@ public sealed class JobPaymentCoordinationPersistenceTests :
         await using var transaction =
             await database.BeginTransactionAsync();
 
+        await database.ExecuteSqlInterpolatedAsync(
+            $"""
+            DELETE FROM audit.events
+            WHERE entity_type = 'payment'
+              AND entity_id IN
+              (
+                  SELECT id::text
+                  FROM payments.payments
+                  WHERE job_id = {scenario.JobId}
+              )
+            """);
         await database.ExecuteSqlInterpolatedAsync(
             $"DELETE FROM payments.csob_payment_reconciliation WHERE payment_id IN (SELECT id FROM payments.payments WHERE job_id = {scenario.JobId})");
         await database.ExecuteSqlInterpolatedAsync(

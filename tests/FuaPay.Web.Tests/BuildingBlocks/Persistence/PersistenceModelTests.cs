@@ -92,6 +92,83 @@ public sealed class PersistenceModelTests
     }
 
     [Fact]
+    public void CreditsPrintReservations_HaveExpectedSchemaRelationshipsAndIndexes()
+    {
+        using var context = CreateContext();
+
+        var entityType = context.Model
+            .GetEntityTypes()
+            .Single(
+                type =>
+                    type.GetSchema() == "credits" &&
+                    type.GetTableName() == "print_reservations");
+
+        Assert.True(
+            entityType.FindProperty("Version")!
+                .IsConcurrencyToken);
+        Assert.Equal(
+            45,
+            entityType.FindProperty("JobUuid")!
+                .GetMaxLength());
+
+        var foreignKey = Assert.Single(
+            entityType.GetForeignKeys());
+
+        Assert.Equal(
+            DeleteBehavior.Restrict,
+            foreignKey.DeleteBehavior);
+
+        (string Name, string[] Properties, string? Filter)[]
+            expectedUniqueIndexes =
+            [
+                (
+                    "uq_credits_print_reservations_print_job",
+                    ["PrintSourceId", "JobUuid"],
+                    null),
+                (
+                    "uq_credits_print_reservations_reserve_command",
+                    ["PrintSourceId", "ReserveCommandId"],
+                    null),
+                (
+                    "uq_credits_print_reservations_resolution_command",
+                    ["PrintSourceId", "ResolutionCommandId"],
+                    "resolution_command_id IS NOT NULL"),
+                (
+                    "uq_credits_print_reservations_terminal_command",
+                    ["PrintSourceId", "TerminalCommandId"],
+                    "terminal_command_id IS NOT NULL"),
+                (
+                    "uq_credits_print_reservations_debit_operation",
+                    ["DebitOperationId"],
+                    "debit_operation_id IS NOT NULL")
+            ];
+
+        foreach (var expected in expectedUniqueIndexes)
+        {
+            Assert.Contains(
+                entityType.GetIndexes(),
+                index =>
+                    index.IsUnique &&
+                    index.GetDatabaseName() == expected.Name &&
+                    index.GetFilter() == expected.Filter &&
+                    index.Properties
+                        .Select(property => property.Name)
+                        .SequenceEqual(expected.Properties));
+        }
+
+        Assert.Contains(
+            entityType.GetIndexes(),
+            index =>
+                !index.IsUnique &&
+                index.GetDatabaseName() ==
+                    "ix_credits_print_reservations_account_status" &&
+                index.Properties
+                    .Select(property => property.Name)
+                    .SequenceEqual(
+                        ["CreditAccountId", "Status"]));
+    }
+
+    [Fact]
     public void ServiceUnits_HaveUniqueCodeAndConcurrencyToken()
     {
         using var context = CreateContext();

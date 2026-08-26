@@ -283,6 +283,8 @@ public sealed class CreditJobPaymentServiceTests
     {
         var creditService = new CreditService(
             creditRepository,
+            new NoBlockingPrintReservationRepository(),
+            transaction,
             new FixedTimeProvider(CurrentTime));
 
         return new CreditJobPaymentService(
@@ -366,10 +368,25 @@ public sealed class CreditJobPaymentServiceTests
             ArgumentNullException.ThrowIfNull(operation);
             cancellationToken.ThrowIfCancellationRequested();
 
-            ExecuteCalls++;
+            if (_isActive)
+            {
+                return await operation(cancellationToken);
+            }
 
-            return await operation(cancellationToken);
+            ExecuteCalls++;
+            _isActive = true;
+
+            try
+            {
+                return await operation(cancellationToken);
+            }
+            finally
+            {
+                _isActive = false;
+            }
         }
+
+        private bool _isActive;
     }
 
     private sealed class FakeJobPaymentCoordination :
@@ -468,6 +485,16 @@ public sealed class CreditJobPaymentServiceTests
             return Task.FromResult(result);
         }
 
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            FindByOwnerIdAsync(ownerId, cancellationToken);
+
+        public Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
         public Task AddAsync(
             CreditAccount account,
             CancellationToken cancellationToken)
@@ -486,5 +513,31 @@ public sealed class CreditJobPaymentServiceTests
 
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class NoBlockingPrintReservationRepository :
+        IPrintReservationRepository
+    {
+        public Task<PrintReservationResult?> FindByReserveCommandAsync(
+            Guid printSourceId,
+            Guid reserveCommandId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PrintReservationResult?> FindByPrintJobAsync(
+            Guid printSourceId,
+            string jobUuid,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<Money> GetBlockingAmountAsync(
+            Guid creditAccountId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Money.Zero);
+
+        public Task AddAsync(
+            PrintReservation reservation,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

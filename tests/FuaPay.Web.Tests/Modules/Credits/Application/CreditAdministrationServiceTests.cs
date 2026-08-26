@@ -70,10 +70,15 @@ public sealed class CreditAdministrationServiceTests
             AdministratorId = Guid.NewGuid();
             Accounts.Account = new CreditAccount(Guid.NewGuid(), OwnerId);
             Commands = new FakeCommandRepository(Accounts);
+            var transaction = new ImmediateTransaction();
             Service = new CreditAdministrationService(
-                new CreditService(Accounts, new FixedTimeProvider(CurrentTime)),
+                new CreditService(
+                    Accounts,
+                    new NoBlockingPrintReservationRepository(),
+                    transaction,
+                    new FixedTimeProvider(CurrentTime)),
                 Commands,
-                new ImmediateTransaction(),
+                transaction,
                 Audit,
                 new FixedTimeProvider(CurrentTime));
         }
@@ -111,6 +116,16 @@ public sealed class CreditAdministrationServiceTests
             Guid ownerId,
             CancellationToken cancellationToken) =>
             Task.FromResult(Account?.OwnerId == ownerId ? Account : null);
+
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            FindByOwnerIdAsync(ownerId, cancellationToken);
+
+        public Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
 
         public Task AddAsync(
             CreditAccount account,
@@ -206,5 +221,31 @@ public sealed class CreditAdministrationServiceTests
         }
 
         public override DateTimeOffset GetUtcNow() => _time;
+    }
+
+    private sealed class NoBlockingPrintReservationRepository :
+        IPrintReservationRepository
+    {
+        public Task<PrintReservationResult?> FindByReserveCommandAsync(
+            Guid printSourceId,
+            Guid reserveCommandId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PrintReservationResult?> FindByPrintJobAsync(
+            Guid printSourceId,
+            string jobUuid,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<Money> GetBlockingAmountAsync(
+            Guid creditAccountId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Money.Zero);
+
+        public Task AddAsync(
+            PrintReservation reservation,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

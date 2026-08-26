@@ -645,7 +645,9 @@ public sealed class FinancialCommandIdempotencyPersistenceTests :
                                     (IApplicationTransaction)
                                         ActivatorUtilities.CreateInstance(
                                             serviceProvider,
-                                            implementationType)));
+                                            implementationType),
+                                    serviceProvider
+                                        .GetRequiredService<FuaPayDbContext>()));
                     }));
     }
 
@@ -865,6 +867,24 @@ public sealed class FinancialCommandIdempotencyPersistenceTests :
                 cancellationToken);
         }
 
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken)
+        {
+            return _inner.FindByOwnerIdForUpdateAsync(
+                ownerId,
+                cancellationToken);
+        }
+
+        public Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken)
+        {
+            return _inner.LockOwnerForAccountCreationAsync(
+                ownerId,
+                cancellationToken);
+        }
+
         public async Task AddAsync(
             CreditAccount account,
             CancellationToken cancellationToken)
@@ -903,20 +923,34 @@ public sealed class FinancialCommandIdempotencyPersistenceTests :
             "Injected timeout after transaction commit.";
 
         private readonly IApplicationTransaction _inner;
+        private readonly FuaPayDbContext _dbContext;
 
         public ThrowAfterCommitApplicationTransaction(
-            IApplicationTransaction inner)
+            IApplicationTransaction inner,
+            FuaPayDbContext dbContext)
         {
+            ArgumentNullException.ThrowIfNull(inner);
+            ArgumentNullException.ThrowIfNull(dbContext);
+
             _inner = inner;
+            _dbContext = dbContext;
         }
 
         public async Task<T> ExecuteAsync<T>(
             Func<CancellationToken, Task<T>> operation,
             CancellationToken cancellationToken = default)
         {
-            await _inner.ExecuteAsync(
+            var ownsCommitBoundary =
+                _dbContext.Database.CurrentTransaction is null;
+
+            var result = await _inner.ExecuteAsync(
                 operation,
                 cancellationToken);
+
+            if (!ownsCommitBoundary)
+            {
+                return result;
+            }
 
             throw new TimeoutException(
                 FailureMessage);

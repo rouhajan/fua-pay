@@ -4,6 +4,7 @@ using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
 
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -252,6 +253,256 @@ public sealed class CreditPersistenceTests :
     }
 
     [Fact]
+    public async Task ConcurrentCredits_OnExistingAccount_AreSerialized()
+    {
+        var ownerId = Guid.NewGuid();
+        var firstOperationId = Guid.NewGuid();
+        var secondOperationId = Guid.NewGuid();
+
+        try
+        {
+            await SeedCreditAsync(
+                ownerId,
+                Guid.NewGuid(),
+                new Money(10_000),
+                "Initial credit");
+
+            var results = await RunCoordinatedMutationsAsync(
+                ownerId,
+                CreditLockKind.AccountRow,
+                service => service.CreditAsync(
+                    ownerId,
+                    firstOperationId,
+                    new Money(2_000),
+                    "First concurrent credit"),
+                service => service.CreditAsync(
+                    ownerId,
+                    secondOperationId,
+                    new Money(3_000),
+                    "Second concurrent credit"));
+
+            Assert.Null(results.FirstException);
+            Assert.Null(results.SecondException);
+
+            var account = await FindAccountAsync(ownerId);
+
+            Assert.Equal(new Money(15_000), account.Balance);
+            Assert.Equal(3, account.Movements.Count);
+            Assert.Contains(
+                account.Movements,
+                movement => movement.OperationId == firstOperationId);
+            Assert.Contains(
+                account.Movements,
+                movement => movement.OperationId == secondOperationId);
+        }
+        finally
+        {
+            await DeleteAccountsAsync(ownerId);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentCreditAndDebit_OnExistingAccount_AreSerialized()
+    {
+        var ownerId = Guid.NewGuid();
+        var creditOperationId = Guid.NewGuid();
+        var debitOperationId = Guid.NewGuid();
+
+        try
+        {
+            await SeedCreditAsync(
+                ownerId,
+                Guid.NewGuid(),
+                new Money(10_000),
+                "Initial credit");
+
+            var results = await RunCoordinatedMutationsAsync(
+                ownerId,
+                CreditLockKind.AccountRow,
+                service => service.CreditAsync(
+                    ownerId,
+                    creditOperationId,
+                    new Money(2_000),
+                    "Concurrent credit"),
+                service => service.DebitAsync(
+                    ownerId,
+                    debitOperationId,
+                    new Money(4_000),
+                    "Concurrent debit"));
+
+            Assert.Null(results.FirstException);
+            Assert.Null(results.SecondException);
+
+            var account = await FindAccountAsync(ownerId);
+
+            Assert.Equal(new Money(8_000), account.Balance);
+            Assert.Equal(3, account.Movements.Count);
+            Assert.Contains(
+                account.Movements,
+                movement => movement.OperationId == creditOperationId);
+            Assert.Contains(
+                account.Movements,
+                movement => movement.OperationId == debitOperationId);
+        }
+        finally
+        {
+            await DeleteAccountsAsync(ownerId);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentDebits_WithSufficientBalance_AreSerialized()
+    {
+        var ownerId = Guid.NewGuid();
+        var firstOperationId = Guid.NewGuid();
+        var secondOperationId = Guid.NewGuid();
+
+        try
+        {
+            await SeedCreditAsync(
+                ownerId,
+                Guid.NewGuid(),
+                new Money(10_000),
+                "Initial credit");
+
+            var results = await RunCoordinatedMutationsAsync(
+                ownerId,
+                CreditLockKind.AccountRow,
+                service => service.DebitAsync(
+                    ownerId,
+                    firstOperationId,
+                    new Money(3_000),
+                    "First concurrent debit"),
+                service => service.DebitAsync(
+                    ownerId,
+                    secondOperationId,
+                    new Money(4_000),
+                    "Second concurrent debit"));
+
+            Assert.Null(results.FirstException);
+            Assert.Null(results.SecondException);
+
+            var account = await FindAccountAsync(ownerId);
+
+            Assert.Equal(new Money(3_000), account.Balance);
+            Assert.Equal(3, account.Movements.Count);
+            Assert.Contains(
+                account.Movements,
+                movement => movement.OperationId == firstOperationId);
+            Assert.Contains(
+                account.Movements,
+                movement => movement.OperationId == secondOperationId);
+        }
+        finally
+        {
+            await DeleteAccountsAsync(ownerId);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentCredits_OnMissingAccount_CreateOneAccount()
+    {
+        var ownerId = Guid.NewGuid();
+        var firstOperationId = Guid.NewGuid();
+        var secondOperationId = Guid.NewGuid();
+
+        try
+        {
+            var results = await RunCoordinatedMutationsAsync(
+                ownerId,
+                CreditLockKind.OwnerCreation,
+                service => service.CreditAsync(
+                    ownerId,
+                    firstOperationId,
+                    new Money(2_500),
+                    "First concurrent account creation"),
+                service => service.CreditAsync(
+                    ownerId,
+                    secondOperationId,
+                    new Money(3_500),
+                    "Second concurrent account creation"));
+
+            Assert.Null(results.FirstException);
+            Assert.Null(results.SecondException);
+
+            var account = await FindAccountAsync(ownerId);
+
+            Assert.Equal(new Money(6_000), account.Balance);
+            Assert.Equal(2, account.Movements.Count);
+            Assert.Contains(
+                account.Movements,
+                movement => movement.OperationId == firstOperationId);
+            Assert.Contains(
+                account.Movements,
+                movement => movement.OperationId == secondOperationId);
+
+            using var scope = _factory.Services.CreateScope();
+            var dbContext = scope.ServiceProvider
+                .GetRequiredService<FuaPayDbContext>();
+            var accountCount = await dbContext.Database
+                .SqlQuery<long>(
+                    $"SELECT COUNT(*) AS \"Value\" FROM credits.accounts WHERE owner_id = {ownerId}")
+                .SingleAsync();
+
+            Assert.Equal(1, accountCount);
+        }
+        finally
+        {
+            await DeleteAccountsAsync(ownerId);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentDebits_WhenOnlyOneCanSucceed_DoNotOverdraw()
+    {
+        var ownerId = Guid.NewGuid();
+        var firstOperationId = Guid.NewGuid();
+        var secondOperationId = Guid.NewGuid();
+
+        try
+        {
+            await SeedCreditAsync(
+                ownerId,
+                Guid.NewGuid(),
+                new Money(10_000),
+                "Initial credit");
+
+            var results = await RunCoordinatedMutationsAsync(
+                ownerId,
+                CreditLockKind.AccountRow,
+                service => service.DebitAsync(
+                    ownerId,
+                    firstOperationId,
+                    new Money(7_000),
+                    "First concurrent debit"),
+                service => service.DebitAsync(
+                    ownerId,
+                    secondOperationId,
+                    new Money(7_000),
+                    "Second concurrent debit"));
+
+            Assert.Null(results.FirstException);
+            Assert.IsType<InsufficientCreditException>(
+                results.SecondException);
+
+            var account = await FindAccountAsync(ownerId);
+
+            Assert.Equal(new Money(3_000), account.Balance);
+            Assert.Equal(2, account.Movements.Count);
+            Assert.Contains(
+                account.Movements,
+                movement => movement.OperationId == firstOperationId);
+            Assert.DoesNotContain(
+                account.Movements,
+                movement => movement.OperationId == secondOperationId);
+        }
+        finally
+        {
+            await DeleteAccountsAsync(ownerId);
+        }
+    }
+
+    [Fact]
     public async Task SaveAsync_WhenAccountWasChangedAfterLoad_ThrowsAndDoesNotPersistStaleMovement()
     {
         var ownerId = Guid.NewGuid();
@@ -490,6 +741,115 @@ public sealed class CreditPersistenceTests :
             description);
     }
 
+    private async Task<CreditAccount> FindAccountAsync(Guid ownerId)
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        return Assert.IsType<CreditAccount>(
+            await scope.ServiceProvider
+                .GetRequiredService<ICreditAccountRepository>()
+                .FindByOwnerIdAsync(
+                    ownerId,
+                    CancellationToken.None));
+    }
+
+    private async Task<MutationResults> RunCoordinatedMutationsAsync(
+        Guid ownerId,
+        CreditLockKind lockKind,
+        Func<CreditService, Task<CreditMovement>> firstMutation,
+        Func<CreditService, Task<CreditMovement>> secondMutation)
+    {
+        var gate = new CreditLockGate();
+        using var factory = CreateCoordinatedFactory(
+            ownerId,
+            lockKind,
+            gate);
+
+        try
+        {
+            using var firstScope = factory.Services.CreateScope();
+            var firstService = firstScope.ServiceProvider
+                .GetRequiredService<CreditService>();
+            var firstTask = Record.ExceptionAsync(
+                async () =>
+                    _ = await firstMutation(firstService));
+
+            await gate.FirstLockAcquired.WaitAsync(
+                TimeSpan.FromSeconds(30));
+
+            using var secondScope = factory.Services.CreateScope();
+            var secondService = secondScope.ServiceProvider
+                .GetRequiredService<CreditService>();
+            var secondTask = Record.ExceptionAsync(
+                async () =>
+                    _ = await secondMutation(secondService));
+
+            await gate.SecondLockAttempted.WaitAsync(
+                TimeSpan.FromSeconds(30));
+
+            gate.ReleaseFirstLock();
+
+            return new MutationResults(
+                await firstTask,
+                await secondTask);
+        }
+        finally
+        {
+            gate.ReleaseFirstLock();
+        }
+    }
+
+    private WebApplicationFactory<Program> CreateCoordinatedFactory(
+        Guid ownerId,
+        CreditLockKind lockKind,
+        CreditLockGate gate)
+    {
+        return _factory.WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(
+                services =>
+                {
+                    var descriptor = Assert.Single(
+                        services,
+                        item => item.ServiceType ==
+                            typeof(ICreditAccountRepository));
+
+                    services.Remove(descriptor);
+                    services.AddScoped<ICreditAccountRepository>(
+                        provider =>
+                            new CoordinatingCreditAccountRepository(
+                                CreateOriginalRepository(
+                                    provider,
+                                    descriptor),
+                                ownerId,
+                                lockKind,
+                                gate));
+                }));
+    }
+
+    private static ICreditAccountRepository CreateOriginalRepository(
+        IServiceProvider provider,
+        ServiceDescriptor descriptor)
+    {
+        if (descriptor.ImplementationInstance is
+            ICreditAccountRepository instance)
+        {
+            return instance;
+        }
+
+        if (descriptor.ImplementationFactory is not null)
+        {
+            return (ICreditAccountRepository)
+                descriptor.ImplementationFactory(provider);
+        }
+
+        return (ICreditAccountRepository)
+            ActivatorUtilities.CreateInstance(
+                provider,
+                descriptor.ImplementationType
+                    ?? throw new InvalidOperationException(
+                        "The original credit repository has no implementation."));
+    }
+
     private async Task DeleteAccountsAsync(
         params Guid[] ownerIds)
     {
@@ -526,5 +886,140 @@ public sealed class CreditPersistenceTests :
         }
 
         await transaction.CommitAsync();
+    }
+
+    private enum CreditLockKind
+    {
+        AccountRow,
+        OwnerCreation
+    }
+
+    private sealed record MutationResults(
+        Exception? FirstException,
+        Exception? SecondException);
+
+    private sealed class CreditLockGate
+    {
+        private readonly TaskCompletionSource _firstLockAcquired =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondLockAttempted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseFirstLock =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _attemptCount;
+
+        public Task FirstLockAcquired => _firstLockAcquired.Task;
+
+        public Task SecondLockAttempted => _secondLockAttempted.Task;
+
+        public int NextAttempt() =>
+            Interlocked.Increment(ref _attemptCount);
+
+        public void FirstAcquired() =>
+            _firstLockAcquired.TrySetResult();
+
+        public void SecondAttempted() =>
+            _secondLockAttempted.TrySetResult();
+
+        public Task WaitForFirstReleaseAsync() =>
+            _releaseFirstLock.Task;
+
+        public void ReleaseFirstLock() =>
+            _releaseFirstLock.TrySetResult();
+    }
+
+    private sealed class CoordinatingCreditAccountRepository :
+        ICreditAccountRepository
+    {
+        private readonly ICreditAccountRepository _inner;
+        private readonly Guid _ownerId;
+        private readonly CreditLockKind _lockKind;
+        private readonly CreditLockGate _gate;
+
+        public CoordinatingCreditAccountRepository(
+            ICreditAccountRepository inner,
+            Guid ownerId,
+            CreditLockKind lockKind,
+            CreditLockGate gate)
+        {
+            _inner = inner;
+            _ownerId = ownerId;
+            _lockKind = lockKind;
+            _gate = gate;
+        }
+
+        public Task<CreditAccount?> FindByOwnerIdAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            _inner.FindByOwnerIdAsync(ownerId, cancellationToken);
+
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            _lockKind == CreditLockKind.AccountRow &&
+            ownerId == _ownerId
+                ? CoordinateAsync(
+                    () => _inner.FindByOwnerIdForUpdateAsync(
+                        ownerId,
+                        cancellationToken))
+                : _inner.FindByOwnerIdForUpdateAsync(
+                    ownerId,
+                    cancellationToken);
+
+        public async Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken)
+        {
+            if (
+                _lockKind == CreditLockKind.OwnerCreation &&
+                ownerId == _ownerId)
+            {
+                _ = await CoordinateAsync(
+                    async () =>
+                    {
+                        await _inner.LockOwnerForAccountCreationAsync(
+                            ownerId,
+                            cancellationToken);
+                        return true;
+                    });
+
+                return;
+            }
+
+            await _inner.LockOwnerForAccountCreationAsync(
+                ownerId,
+                cancellationToken);
+        }
+
+        public Task AddAsync(
+            CreditAccount account,
+            CancellationToken cancellationToken) =>
+            _inner.AddAsync(account, cancellationToken);
+
+        public Task SaveAsync(
+            CreditAccount account,
+            CancellationToken cancellationToken) =>
+            _inner.SaveAsync(account, cancellationToken);
+
+        private async Task<T> CoordinateAsync<T>(
+            Func<Task<T>> acquireLock)
+        {
+            var attempt = _gate.NextAttempt();
+
+            if (attempt == 2)
+            {
+                _gate.SecondAttempted();
+            }
+
+            var result = await acquireLock();
+
+            if (attempt == 1)
+            {
+                _gate.FirstAcquired();
+                await _gate.WaitForFirstReleaseAsync();
+            }
+
+            return result;
+        }
     }
 }

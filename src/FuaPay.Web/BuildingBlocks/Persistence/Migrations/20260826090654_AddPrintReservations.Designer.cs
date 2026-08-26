@@ -3,6 +3,7 @@ using System;
 using FuaPay.Web.BuildingBlocks.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
 {
     [DbContext(typeof(FuaPayDbContext))]
-    partial class FuaPayDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260826090654_AddPrintReservations")]
+    partial class AddPrintReservations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -526,7 +529,7 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_credits_print_reservations_source_not_empty", "print_source_id <> '00000000-0000-0000-0000-000000000000'::uuid");
 
-                            t.HasCheckConstraint("ck_credits_print_reservations_state_consistent", "(\n    status = 1\n    AND resolution_command_id IS NULL\n    AND terminal_command_id IS NULL\n    AND debit_operation_id IS NULL\n)\nOR\n(\n    status = 2\n    AND resolution_command_id IS NOT NULL\n    AND terminal_command_id IS NULL\n    AND debit_operation_id IS NULL\n)\nOR\n(\n    status = 3\n    AND terminal_command_id IS NOT NULL\n    AND debit_operation_id IS NOT NULL\n)\nOR\n(\n    status = 4\n    AND terminal_command_id IS NOT NULL\n    AND debit_operation_id IS NULL\n)");
+                            t.HasCheckConstraint("ck_credits_print_reservations_state_consistent", "(\n    status = 1\n    AND resolution_command_id IS NULL\n    AND terminal_command_id IS NULL\n    AND debit_operation_id IS NULL\n)\nOR\n(\n    status = 2\n    AND debit_operation_id IS NULL\n)\nOR\n(\n    status = 3\n    AND terminal_command_id IS NOT NULL\n    AND debit_operation_id IS NOT NULL\n)\nOR\n(\n    status = 4\n    AND terminal_command_id IS NOT NULL\n    AND debit_operation_id IS NULL\n)");
 
                             t.HasCheckConstraint("ck_credits_print_reservations_status_valid", "status IN (1, 2, 3, 4)");
 
