@@ -1,6 +1,6 @@
 # Demo / staging deployment
 
-Status: 2026-08-25
+Status: 2026-08-26
 
 ## Deployment
 
@@ -21,8 +21,8 @@ Status: 2026-08-25
 - Nginx Basic Authentication: enabled
 
 Production Entra authentication, production ČSOB integration and production
-database workload are not active. PDF receipt code is deployed; receipts
-remain disabled without explicit receipt configuration.
+database workload are not active. PDF receipt code is deployed. Preview
+receipts are enabled in staging through `/etc/fuapay/staging.env`.
 
 ## Verification
 
@@ -50,6 +50,24 @@ on form pages such as `/Development/SignIn` is intentionally rejected.
 
 No EF migration changed from the previous staging revision.
 `Database__ApplyMigrationsOnStart=false`.
+
+### PDF receipt preview verification — 2026-08-26
+
+Preview receipts were enabled without deploying a new application release:
+
+- `Receipts__Enabled=true`;
+- `Receipts__PreviewMode=true`;
+- regular font: `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`;
+- bold font: `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`;
+- `fuapay.service` restarted successfully and remained active;
+- `/health/live`: HTTP 200;
+- `/health/ready`: HTTP 200;
+- authenticated Customer opened an already-paid job and the
+  `Potvrzení o úhradě` action was available;
+- the PDF receipt was successfully generated and opened/downloaded.
+
+The active application release remained `/opt/fuapay/releases/69853d416931`;
+this was a staging runtime-configuration change, not a new deployment.
 
 ## Runtime baseline
 
