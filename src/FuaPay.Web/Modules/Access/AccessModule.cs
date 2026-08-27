@@ -18,6 +18,7 @@ public static class AccessModule
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<AccessIdentityService>();
+        services.AddScoped<LinkedIdentityResolver>();
         services.AddScoped<AccessUserAdministrationService>();
         services.AddScoped<ExternalIdentityAdministrationService>();
         services.AddScoped<AccessSessionSynchronizer>();
