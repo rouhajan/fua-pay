@@ -4,6 +4,7 @@ Aktuální dokumentace je záměrně malá:
 
 - [architektura a produktové hranice](architecture.md);
 - [Microsoft Entra ID](integrations/entra-id.md);
+- [FUA Print Payments API](integrations/fuaprint-payments-api.md);
 - [ČSOB eAPI](integrations/csob.md);
 - [PDF potvrzení o úhradě](features/payment-receipts.md);
 - [PostgreSQL, EF migrace a testy](development/database.md);
@@ -15,5 +16,6 @@ Aktuální dokumentace je záměrně malá:
 - [bezpečnostní ověření 2026-08-21](testing/security-verification-2026-08-21.md);
 - [ověření serializace kreditního účtu 2026-08-25](testing/credit-account-locking-verification-2026-08-25.md);
 - [ověření lifecycle rezervací tisku 2026-08-26](testing/print-reservation-lifecycle-verification-2026-08-26.md);
+- [ověření FUA Print Payments API 2026-08-27](testing/fuaprint-payments-api-verification-2026-08-27.md);
 - [bezpečnost](../SECURITY.md);
 - [vendored frontendové závislosti](development/third-party-frontend-inventory.md).

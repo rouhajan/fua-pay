@@ -102,7 +102,8 @@ public sealed class PrintReservationServiceTests
                 "command-read",
                 "job-read",
                 "blocking-sum",
-                "reservation-add"
+                "reservation-add",
+                "reservation-read"
             ],
             calls);
         Assert.Equal(1, transaction.ExecutionCount);
@@ -290,6 +291,44 @@ public sealed class PrintReservationServiceTests
             () => service.ReserveAsync(command));
 
         Assert.Equal(0, repository.AddCount);
+    }
+
+    [Fact]
+    public async Task FindByPrintJobAsync_IsNormalizedAndSourceScoped()
+    {
+        var ownerId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var calls = new List<string>();
+        var account = CreateAccount(ownerId, balanceMinorUnits: 1_000);
+        var repository = new FakePrintReservationRepository(calls);
+        var expected = CreateResult(
+            account.Id,
+            new ReservePrintCreditCommand(
+                ownerId,
+                sourceId,
+                $"urn:uuid:{jobId:D}",
+                new Money(400),
+                Guid.NewGuid()),
+            PrintReservationStatus.Reserved);
+        repository.Reservations.Add(expected);
+        repository.Reservations.Add(
+            expected with
+            {
+                Id = Guid.NewGuid(),
+                PrintSourceId = Guid.NewGuid()
+            });
+        var service = CreateService(
+            new FakeCreditAccountRepository(account, calls),
+            repository,
+            new ImmediateTransaction());
+
+        var result = await service.FindByPrintJobAsync(
+            sourceId,
+            $"URN:UUID:{jobId:D}".ToUpperInvariant());
+
+        Assert.Same(expected, result);
+        Assert.Equal(["job-read"], calls);
     }
 
     [Fact]

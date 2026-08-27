@@ -8,6 +8,8 @@ using FuaPay.Web.Modules.Access.Infrastructure.Entra;
 using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Audit;
 using FuaPay.Web.Modules.Credits;
+using FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
+using FuaPay.Web.Modules.Credits.Web.PrintPayments;
 using FuaPay.Web.Modules.Jobs;
 using FuaPay.Web.Modules.Notifications;
 using FuaPay.Web.Modules.Payments;
@@ -63,6 +65,8 @@ var csobReconciliationConfiguration =
     CsobReconciliationConfiguration.Resolve(
         builder.Configuration,
         csobGatewayConfiguration);
+var printPaymentsConfiguration =
+    PrintPaymentsConfiguration.Resolve(builder.Configuration);
 
 var receiptConfiguration =
     ReceiptConfiguration.Resolve(
@@ -141,7 +145,9 @@ builder.Services
         })
     .AddEntraAuthentication(
         entraAuthenticationConfiguration,
-        applicationRoot);
+        applicationRoot)
+    .AddFuaPrintAuthentication(
+        printPaymentsConfiguration);
 
 builder.Services.AddAuthorization(
     options =>
@@ -150,6 +156,7 @@ builder.Services.AddAuthorization(
             new AuthorizationPolicyBuilder()
                 .RequireAuthenticatedUser()
                 .Build();
+        options.AddFuaPrintPolicy();
     });
 
 builder.Services.AddAntiforgery(
@@ -451,6 +458,8 @@ if (csobGatewayConfiguration.Enabled)
 {
     app.MapCsobPaymentReturn();
 }
+
+app.MapPrintPaymentsApi();
 
 app.MapStaticAssets()
     .AllowAnonymous();
