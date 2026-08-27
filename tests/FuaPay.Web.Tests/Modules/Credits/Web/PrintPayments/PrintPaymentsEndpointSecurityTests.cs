@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -111,6 +112,88 @@ public sealed class PrintPaymentsEndpointSecurityTests
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("invalid_request", await ReadCodeAsync(response));
+    }
+
+    [Theory]
+    [InlineData("job", "invalid_job_uuid")]
+    [InlineData("amount", "invalid_amount")]
+    [InlineData("currency", "unsupported_currency")]
+    [InlineData("identity", "invalid_identity")]
+    public async Task Reserve_InvalidBusinessInputReturnsStableProblem(
+        string invalidField,
+        string expectedCode)
+    {
+        using var factory = CreateEnabledFactory();
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+        var request = new
+        {
+            reserveCommandId = Guid.NewGuid(),
+            jobUuid = invalidField == "job"
+                ? "not-an-ipp-job-uuid"
+                : $"urn:uuid:{Guid.NewGuid():D}",
+            userIdentity = new
+            {
+                provider = invalidField == "identity"
+                    ? "MICROSOFT-ENTRA"
+                    : "microsoft-entra",
+                tenantId = Guid.NewGuid().ToString("D"),
+                objectId = Guid.NewGuid().ToString("D")
+            },
+            amountMinorUnits = invalidField == "amount" ? 0 : 400,
+            currency = invalidField == "currency" ? "EUR" : "CZK"
+        };
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/print-payments/reservations",
+            request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(expectedCode, await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task Reserve_MalformedJsonReturnsStableInvalidRequest()
+    {
+        using var factory = CreateEnabledFactory();
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+        using var content = new StringContent(
+            "{\"reserveCommandId\":",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(
+            "/api/print-payments/reservations",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_request", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task Endpoint_OversizedAuthorizationHeaderFailsWithoutEcho()
+    {
+        using var factory = CreateEnabledFactory();
+        using var client = CreateClient(factory);
+        var oversizedCredential = new string('A', 500);
+        Assert.True(
+            client.DefaultRequestHeaders.TryAddWithoutValidation(
+                "Authorization",
+                $"Bearer {oversizedCredential}"));
+
+        using var response = await client.GetAsync(
+            "/api/print-payments/reservations?jobUuid=" +
+            $"urn:uuid:{Guid.NewGuid():D}");
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.DoesNotContain(
+            oversizedCredential,
+            responseBody,
+            StringComparison.Ordinal);
     }
 
     private static ConfiguredWebApplicationFactory CreateEnabledFactory()
