@@ -9,6 +9,7 @@ using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Audit;
 using FuaPay.Web.Modules.Credits;
 using FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
+using FuaPay.Web.Modules.Credits.Web.PrintPayments;
 using FuaPay.Web.Modules.Jobs;
 using FuaPay.Web.Modules.Notifications;
 using FuaPay.Web.Modules.Payments;
@@ -457,6 +458,8 @@ if (csobGatewayConfiguration.Enabled)
 {
     app.MapCsobPaymentReturn();
 }
+
+app.MapPrintPaymentsApi();
 
 app.MapStaticAssets()
     .AllowAnonymous();

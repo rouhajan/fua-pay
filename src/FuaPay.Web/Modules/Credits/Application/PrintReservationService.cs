@@ -64,6 +64,21 @@ public sealed class PrintReservationService
         }
     }
 
+    public Task<PrintReservationResult?> FindByPrintJobAsync(
+        Guid printSourceId,
+        string jobUuid,
+        CancellationToken cancellationToken = default)
+    {
+        PrintReservationCommandValidation.ValidateId(
+            printSourceId,
+            nameof(printSourceId));
+
+        return _reservationRepository.FindByPrintJobAsync(
+            printSourceId,
+            IppJobUuid.Normalize(jobUuid),
+            cancellationToken);
+    }
+
     public async Task<PrintReservationResult> RequireResolutionAsync(
         RequirePrintReservationResolutionCommand command,
         CancellationToken cancellationToken = default)
@@ -478,7 +493,9 @@ public sealed class PrintReservationService
             reservation,
             cancellationToken);
 
-        return ToResult(reservation);
+        return await ReadPersistedResultAsync(
+            reservation.Id,
+            cancellationToken);
     }
 
     private async Task<PrintReservationResult>
