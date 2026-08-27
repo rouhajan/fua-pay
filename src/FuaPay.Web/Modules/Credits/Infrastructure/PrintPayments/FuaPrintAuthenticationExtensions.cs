@@ -25,8 +25,9 @@ public static class FuaPrintAuthenticationExtensions
                     StatusCodes.Status429TooManyRequests;
                 options.AddPolicy(
                     FuaPrintAuthenticationDefaults.RateLimitPolicy,
-                    _ => RateLimitPartition.GetFixedWindowLimiter(
-                        "fua-print-service",
+                    context => RateLimitPartition.GetFixedWindowLimiter(
+                        context.Connection.RemoteIpAddress?.ToString()
+                            ?? "unknown",
                         _ => new FixedWindowRateLimiterOptions
                         {
                             PermitLimit = 120,

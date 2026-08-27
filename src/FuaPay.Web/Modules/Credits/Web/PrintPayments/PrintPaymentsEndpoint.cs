@@ -80,8 +80,7 @@ public static class PrintPaymentsEndpoint
         {
             jobUuid = IppJobUuid.Normalize(request.JobUuid!);
         }
-        catch (Exception exception)
-            when (exception is ArgumentException)
+        catch (ArgumentException)
         {
             return Problem(
                 StatusCodes.Status400BadRequest,
@@ -181,6 +180,13 @@ public static class PrintPaymentsEndpoint
         PrintReservationService reservationService)
     {
         var values = context.Request.Query["jobUuid"];
+
+        if (context.Request.Query.Count != 1)
+        {
+            return Problem(
+                StatusCodes.Status400BadRequest,
+                "invalid_request");
+        }
 
         if (values.Count != 1)
         {
@@ -438,9 +444,31 @@ public static class PrintPaymentsEndpoint
 
         try
         {
-            var value = await context.Request.ReadFromJsonAsync<T>(
-                RequestJsonOptions,
-                context.RequestAborted);
+            var buffer = new byte[MaximumRequestBodyBytes + 1];
+            var bytesRead = 0;
+
+            while (bytesRead < buffer.Length)
+            {
+                var read = await context.Request.Body.ReadAsync(
+                    buffer.AsMemory(bytesRead),
+                    context.RequestAborted);
+
+                if (read == 0)
+                {
+                    break;
+                }
+
+                bytesRead += read;
+            }
+
+            if (bytesRead > MaximumRequestBodyBytes)
+            {
+                return new BodyReadResult<T>(false, null);
+            }
+
+            var value = JsonSerializer.Deserialize<T>(
+                buffer.AsSpan(0, bytesRead),
+                RequestJsonOptions);
 
             return new BodyReadResult<T>(value is not null, value);
         }

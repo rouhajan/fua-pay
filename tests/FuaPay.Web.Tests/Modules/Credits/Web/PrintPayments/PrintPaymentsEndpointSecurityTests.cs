@@ -196,6 +196,60 @@ public sealed class PrintPaymentsEndpointSecurityTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Reserve_ChunkedBodyOverLimitIsRejectedBeforeIdentityLookup()
+    {
+        using var factory = CreateEnabledFactory();
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+        var body = $$"""
+            {
+              "reserveCommandId": "{{Guid.NewGuid():D}}",
+              "jobUuid": "urn:uuid:{{Guid.NewGuid():D}}",
+              "userIdentity": {
+                "provider": "microsoft-entra",
+                "tenantId": "{{Guid.NewGuid():D}}",
+                "objectId": "{{Guid.NewGuid():D}}"
+              },
+              "amountMinorUnits": 400,
+              "currency": "CZK"
+            }
+            """ + new string(' ', 9_000);
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/api/print-payments/reservations")
+        {
+            Content = new StringContent(
+                body,
+                Encoding.UTF8,
+                "application/json")
+        };
+        request.Content.Headers.ContentLength = null;
+        request.Headers.TransferEncodingChunked = true;
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_request", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task Lookup_ClientSuppliedPrintSourceQueryIsRejected()
+    {
+        using var factory = CreateEnabledFactory();
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+
+        using var response = await client.GetAsync(
+            "/api/print-payments/reservations?jobUuid=" +
+            $"urn:uuid:{Guid.NewGuid():D}&printSourceId={Guid.NewGuid():D}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_request", await ReadCodeAsync(response));
+    }
+
     private static ConfiguredWebApplicationFactory CreateEnabledFactory()
     {
         var digest = Convert.ToHexString(
