@@ -14,12 +14,22 @@ public sealed class CsobGatewaySignature :
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
-        _merchantPrivateKey = ImportKey(
+        var merchantPrivateKey = ImportKey(
             configuration.PrivateKeyPath,
             requirePrivateKey: true);
-        _gatewayPublicKey = ImportKey(
-            configuration.GatewayPublicKeyPath,
-            requirePrivateKey: false);
+
+        try
+        {
+            _gatewayPublicKey = ImportKey(
+                configuration.GatewayPublicKeyPath,
+                requirePrivateKey: false);
+            _merchantPrivateKey = merchantPrivateKey;
+        }
+        catch
+        {
+            merchantPrivateKey.Dispose();
+            throw;
+        }
     }
 
     public string Sign(string textToSign)
@@ -104,8 +114,7 @@ public sealed class CsobGatewaySignature :
             throw new InvalidOperationException(
                 requirePrivateKey
                     ? "Privátní klíč ČSOB nelze načíst jako platný RSA PEM klíč."
-                    : "Veřejný klíč brány ČSOB nelze načíst jako platný RSA PEM klíč.",
-                exception);
+                    : "Veřejný klíč brány ČSOB nelze načíst jako platný RSA PEM klíč.");
         }
     }
 }
