@@ -143,7 +143,12 @@ public sealed record JobListItem(
     JobPaymentStatus PaymentStatus,
     DateTimeOffset CreatedAt,
     DateTimeOffset? PublishedAt,
-    DateTimeOffset? SettledAt);
+    DateTimeOffset? SettledAt)
+{
+    public Guid? SettlementReturnId { get; init; }
+
+    public DateTimeOffset? ReturnedAt { get; init; }
+}
 
 public sealed record JobDetail(
     Guid Id,
@@ -166,7 +171,12 @@ public sealed record JobDetail(
     DateTimeOffset? ReadyForPickupAt,
     DateTimeOffset? CompletedAt,
     DateTimeOffset? CancelledAt,
-    long Version);
+    long Version)
+{
+    public Guid? SettlementReturnId { get; init; }
+
+    public DateTimeOffset? ReturnedAt { get; init; }
+}
 
 public sealed record CustomerJobSummary
 {

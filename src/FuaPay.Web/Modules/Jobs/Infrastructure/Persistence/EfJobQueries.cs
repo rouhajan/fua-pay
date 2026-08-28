@@ -1,6 +1,8 @@
 using FuaPay.Web.BuildingBlocks.Persistence;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
+using FuaPay.Web.Modules.Payments.Domain;
+using FuaPay.Web.Modules.Payments.Infrastructure.Persistence;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -260,7 +262,7 @@ internal sealed class EfJobQueries : IJobQueries
         return query;
     }
 
-    private static async Task<JobPage<JobListItem>> CreatePageAsync(
+    private async Task<JobPage<JobListItem>> CreatePageAsync(
         IQueryable<JobEntity> query,
         JobPageRequest page,
         CancellationToken cancellationToken)
@@ -286,9 +288,11 @@ internal sealed class EfJobQueries : IJobQueries
             totalCount);
     }
 
-    private static IQueryable<JobListItem> ProjectListItem(
+    private IQueryable<JobListItem> ProjectListItem(
         IQueryable<JobEntity> query)
     {
+        var completedJobReturns = CompletedJobReturns();
+
         return query.Select(
             job => new JobListItem(
                 job.Id,
@@ -303,12 +307,24 @@ internal sealed class EfJobQueries : IJobQueries
                 (JobPaymentStatus)job.PaymentStatus,
                 job.CreatedAt,
                 job.PublishedAt,
-                job.SettledAt));
+                job.SettledAt)
+            {
+                SettlementReturnId = completedJobReturns
+                    .Where(item => item.JobId == job.Id)
+                    .Select(item => (Guid?)item.Id)
+                    .SingleOrDefault(),
+                ReturnedAt = completedJobReturns
+                    .Where(item => item.JobId == job.Id)
+                    .Select(item => item.CompletedAt)
+                    .SingleOrDefault()
+            });
     }
 
-    private static IQueryable<JobDetail> ProjectDetail(
+    private IQueryable<JobDetail> ProjectDetail(
         IQueryable<JobEntity> query)
     {
+        var completedJobReturns = CompletedJobReturns();
+
         return query.Select(
             job => new JobDetail(
                 job.Id,
@@ -333,7 +349,31 @@ internal sealed class EfJobQueries : IJobQueries
                 job.ReadyForPickupAt,
                 job.CompletedAt,
                 job.CancelledAt,
-                job.Version));
+                job.Version)
+            {
+                SettlementReturnId = completedJobReturns
+                    .Where(item => item.JobId == job.Id)
+                    .Select(item => (Guid?)item.Id)
+                    .SingleOrDefault(),
+                ReturnedAt = completedJobReturns
+                    .Where(item => item.JobId == job.Id)
+                    .Select(item => item.CompletedAt)
+                    .SingleOrDefault()
+            });
+    }
+
+    private IQueryable<SettlementReturnEntity> CompletedJobReturns()
+    {
+        return _dbContext.SettlementReturns
+            .AsNoTracking()
+            .Where(
+                item =>
+                    item.State ==
+                        (int)SettlementReturnState.Completed &&
+                    (item.Kind ==
+                        (int)SettlementReturnKind.CardJob ||
+                     item.Kind ==
+                        (int)SettlementReturnKind.CreditJob));
     }
 
     private static void ValidateId(
