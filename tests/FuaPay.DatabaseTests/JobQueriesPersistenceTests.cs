@@ -750,7 +750,7 @@ public sealed class JobQueriesPersistenceTests :
                 customerUserId,
                 requesterUserId,
                 serviceUnitId,
-                "VrĂˇcenĂˇ kreditnĂ­",
+                "Vrácená kreditní",
                 JobSettlementType.Credit,
                 Guid.NewGuid(),
                 TestTime.AddMinutes(20));
@@ -767,7 +767,7 @@ public sealed class JobQueriesPersistenceTests :
                 customerUserId,
                 requesterUserId,
                 serviceUnitId,
-                "VrĂˇcenĂˇ kartou",
+                "Vrácená kartou",
                 JobSettlementType.DirectPayment,
                 cardPaymentId,
                 TestTime.AddMinutes(40));
@@ -776,7 +776,7 @@ public sealed class JobQueriesPersistenceTests :
                 customerUserId,
                 requesterUserId,
                 serviceUnitId,
-                "PoĹľadovanĂˇ vratka",
+                "Požadovaná vratka",
                 JobSettlementType.Credit,
                 Guid.NewGuid(),
                 TestTime.AddMinutes(60));
@@ -785,7 +785,7 @@ public sealed class JobQueriesPersistenceTests :
                 customerUserId,
                 requesterUserId,
                 serviceUnitId,
-                "ZpracovĂˇvanĂˇ vratka",
+                "Zpracovávaná vratka",
                 JobSettlementType.Credit,
                 Guid.NewGuid(),
                 TestTime.AddMinutes(80));
@@ -794,7 +794,7 @@ public sealed class JobQueriesPersistenceTests :
                 customerUserId,
                 requesterUserId,
                 serviceUnitId,
-                "Vratka vyĹľaduje kontrolu",
+                "Vratka vyžaduje kontrolu",
                 JobSettlementType.Credit,
                 Guid.NewGuid(),
                 TestTime.AddMinutes(100));
@@ -803,7 +803,7 @@ public sealed class JobQueriesPersistenceTests :
                 customerUserId,
                 requesterUserId,
                 serviceUnitId,
-                "ZamĂ­tnutĂˇ vratka",
+                "Zamítnutá vratka",
                 JobSettlementType.Credit,
                 Guid.NewGuid(),
                 TestTime.AddMinutes(120));
