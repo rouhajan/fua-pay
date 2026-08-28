@@ -40,6 +40,7 @@ public static class PaymentsModule
         services.AddScoped<PaymentInitiationService>();
         services.AddScoped<PaymentSettlementService>();
         services.AddScoped<SettlementReturnRegistrationService>();
+        services.AddScoped<CreditJobSettlementReturnService>();
         services.AddScoped<IPaymentSettlementService>(
             provider => provider.GetRequiredService<
                 PaymentSettlementService>());
