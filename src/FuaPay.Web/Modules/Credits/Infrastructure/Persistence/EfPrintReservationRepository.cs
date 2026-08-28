@@ -12,12 +12,6 @@ namespace FuaPay.Web.Modules.Credits.Infrastructure.Persistence;
 internal sealed class EfPrintReservationRepository :
     IPrintReservationRepository
 {
-    private static readonly int[] BlockingStatusValues =
-    [
-        (int)PrintReservationStatus.Reserved,
-        (int)PrintReservationStatus.ResolutionRequired
-    ];
-
     private readonly FuaPayDbContext _dbContext;
 
     private readonly Dictionary<Guid, long> _loadedReservations = [];
@@ -141,25 +135,6 @@ internal sealed class EfPrintReservationRepository :
                 cancellationToken);
 
         return entity is null ? null : ToResult(entity);
-    }
-
-    public async Task<Money> GetBlockingAmountAsync(
-        Guid creditAccountId,
-        CancellationToken cancellationToken)
-    {
-        ValidateId(creditAccountId, nameof(creditAccountId));
-
-        var amount = await _dbContext.PrintReservations
-            .AsNoTracking()
-            .Where(
-                reservation =>
-                    reservation.CreditAccountId == creditAccountId &&
-                    BlockingStatusValues.Contains(reservation.Status))
-            .SumAsync(
-                reservation => reservation.AmountMinorUnits,
-                cancellationToken);
-
-        return new Money(amount);
     }
 
     public async Task AddAsync(

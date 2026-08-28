@@ -684,7 +684,7 @@ public sealed class CreditJobSettlementReturnPersistenceTests :
             services.GetRequiredService<ISettlementReturnRepository>();
         var creditService = new CreditService(
             services.GetRequiredService<ICreditAccountRepository>(),
-            services.GetRequiredService<IPrintReservationRepository>(),
+            services.GetRequiredService<CreditAvailabilityService>(),
             transaction,
             timeProvider);
 
@@ -719,7 +719,7 @@ public sealed class CreditJobSettlementReturnPersistenceTests :
 
         var fundingService = new CreditService(
             creditRepository,
-            reservationRepository,
+            services.GetRequiredService<CreditAvailabilityService>(),
             transaction,
             new FixedTimeProvider(TestTime));
 
@@ -736,7 +736,7 @@ public sealed class CreditJobSettlementReturnPersistenceTests :
 
         var paymentCreditService = new CreditService(
             creditRepository,
-            reservationRepository,
+            services.GetRequiredService<CreditAvailabilityService>(),
             transaction,
             new FixedTimeProvider(TestTime.AddMinutes(3)));
         var paymentService = new CreditJobPaymentService(

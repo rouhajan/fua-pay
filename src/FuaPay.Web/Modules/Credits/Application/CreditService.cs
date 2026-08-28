@@ -7,23 +7,23 @@ namespace FuaPay.Web.Modules.Credits.Application;
 public sealed class CreditService
 {
     private readonly ICreditAccountRepository _repository;
-    private readonly IPrintReservationRepository _reservationRepository;
+    private readonly CreditAvailabilityService _availabilityService;
     private readonly IApplicationTransaction _transaction;
     private readonly TimeProvider _timeProvider;
 
     public CreditService(
         ICreditAccountRepository repository,
-        IPrintReservationRepository reservationRepository,
+        CreditAvailabilityService availabilityService,
         IApplicationTransaction transaction,
         TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(repository);
-        ArgumentNullException.ThrowIfNull(reservationRepository);
+        ArgumentNullException.ThrowIfNull(availabilityService);
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _repository = repository;
-        _reservationRepository = reservationRepository;
+        _availabilityService = availabilityService;
         _transaction = transaction;
         _timeProvider = timeProvider;
     }
@@ -130,11 +130,9 @@ public sealed class CreditService
             throw new CreditAccountNotFoundException(ownerId);
         }
 
-        var blockingAmount =
-            await _reservationRepository.GetBlockingAmountAsync(
-                account.Id,
-                cancellationToken);
-        var available = account.Balance.Subtract(blockingAmount);
+        var available = await _availabilityService.GetAvailableAsync(
+            account,
+            cancellationToken);
 
         var movement = account.Debit(
             operationId,

@@ -3,6 +3,7 @@ using System;
 using FuaPay.Web.BuildingBlocks.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
 {
     [DbContext(typeof(FuaPayDbContext))]
-    partial class FuaPayDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260828155222_AddCreditReturnHolds")]
+    partial class AddCreditReturnHolds
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

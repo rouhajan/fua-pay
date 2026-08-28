@@ -37,10 +37,6 @@ public interface IPrintReservationRepository
         CancellationToken cancellationToken) =>
         throw new NotSupportedException();
 
-    Task<Money> GetBlockingAmountAsync(
-        Guid creditAccountId,
-        CancellationToken cancellationToken);
-
     Task AddAsync(
         PrintReservation reservation,
         CancellationToken cancellationToken);

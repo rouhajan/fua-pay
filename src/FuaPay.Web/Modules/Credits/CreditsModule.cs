@@ -14,9 +14,11 @@ public static class CreditsModule
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<CreditAvailabilityService>();
         services.AddScoped<CreditService>();
         services.AddScoped<CreditAdministrationService>();
         services.AddScoped<PrintReservationService>();
+        services.AddScoped<CreditReturnHoldService>();
         services.AddScoped<
             ICreditQueries,
             EfCreditQueries>();
@@ -29,6 +31,12 @@ public static class CreditsModule
         services.AddScoped<
             IPrintReservationRepository,
             EfPrintReservationRepository>();
+        services.AddScoped<
+            ICreditAvailabilityRepository,
+            EfCreditAvailabilityRepository>();
+        services.AddScoped<
+            ICreditReturnHoldRepository,
+            EfCreditReturnHoldRepository>();
 
         return services;
     }

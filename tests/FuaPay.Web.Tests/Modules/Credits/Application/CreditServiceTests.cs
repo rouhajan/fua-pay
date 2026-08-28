@@ -261,12 +261,13 @@ public sealed class CreditServiceTests
 
     private static CreditService CreateService(
         ICreditAccountRepository repository,
-        IPrintReservationRepository? reservationRepository = null)
+        ICreditAvailabilityRepository? availabilityRepository = null)
     {
         return new CreditService(
             repository,
-            reservationRepository ??
-                new FakePrintReservationRepository(),
+            new CreditAvailabilityService(
+                availabilityRepository ??
+                    new FakePrintReservationRepository()),
             new ImmediateTransaction(),
             new FixedTimeProvider(CurrentTime));
     }
@@ -376,25 +377,13 @@ public sealed class CreditServiceTests
     }
 
     private sealed class FakePrintReservationRepository :
-        IPrintReservationRepository
+        ICreditAvailabilityRepository
     {
         public Money BlockingAmount { get; set; } = Money.Zero;
 
         public int BlockingAmountCalls { get; private set; }
 
-        public Task<PrintReservationResult?> FindByReserveCommandAsync(
-            Guid printSourceId,
-            Guid reserveCommandId,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public Task<PrintReservationResult?> FindByPrintJobAsync(
-            Guid printSourceId,
-            string jobUuid,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public Task<Money> GetBlockingAmountAsync(
+        public Task<Money> GetTotalBlockingAmountAsync(
             Guid creditAccountId,
             CancellationToken cancellationToken)
         {
@@ -403,9 +392,5 @@ public sealed class CreditServiceTests
             return Task.FromResult(BlockingAmount);
         }
 
-        public Task AddAsync(
-            PrintReservation reservation,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
     }
 }

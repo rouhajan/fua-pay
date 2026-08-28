@@ -22,12 +22,25 @@ Důvod, administrátorský aktér, zákazník a časové údaje jsou trvale ulo�
 Stav `Completed` u tohoto lokálního toku znamená, že kompenzační kredit je
 dokončený a při opakování také ověřený proti kreditnímu ledgeru.
 
+## Blokování kreditu pro budoucí vratky
+
+Modul Credits ukládá trvalý `CreditReturnHold` navázaný jedna ku jedné na
+`SettlementReturn`. Aktivní hold snižuje disponibilní kredit, zatímco stavy
+`Consumed` a `Released` jsou terminální a kredit neblokují. Zůstatek ledgeru se
+při vytvoření holdu nemění.
+
+Disponibilní kredit počítá jedna sdílená autoritativní služba jako zůstatek
+ledgeru po odečtení aktivních FUA Print rezervací a aktivních return holdů.
+Debit, vytvoření print rezervace i capture používají tento výpočet. Všechny
+závody mezi blokováním a čerpáním se serializují zámkem kreditního účtu jako
+prvním zámkem.
+
 ## Zatím nepodporované
 
 - reverse/refund volání ČSOB ani jiného karetního poskytovatele;
 - providerová vratka karetní úhrady zakázky;
 - vratka karetního dobití kreditu;
-- return hold a blokování disponibilního top-up zůstatku;
+- providerová orchestrace nejistého výsledku a následné recovery;
 - administrační UI pro vratky;
 - PDF nebo potvrzení o vratce;
 - částečné vratky.

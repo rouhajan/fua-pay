@@ -630,6 +630,9 @@ public sealed class PrintReservationServiceTests
         return new PrintReservationService(
             accountRepository,
             reservationRepository,
+            new CreditAvailabilityService(
+                new FakeCreditAvailabilityRepository(
+                    (FakePrintReservationRepository)reservationRepository)),
             transaction,
             auditTrail ?? NullAuditTrail.Instance,
             new FixedTimeProvider(TestTime));
@@ -980,6 +983,25 @@ public sealed class PrintReservationServiceTests
 
             return reservation;
         }
+    }
+
+    private sealed class FakeCreditAvailabilityRepository :
+        ICreditAvailabilityRepository
+    {
+        private readonly FakePrintReservationRepository _reservations;
+
+        public FakeCreditAvailabilityRepository(
+            FakePrintReservationRepository reservations)
+        {
+            _reservations = reservations;
+        }
+
+        public Task<Money> GetTotalBlockingAmountAsync(
+            Guid creditAccountId,
+            CancellationToken cancellationToken) =>
+            _reservations.GetBlockingAmountAsync(
+                creditAccountId,
+                cancellationToken);
     }
 
     private sealed class ImmediateTransaction : IApplicationTransaction

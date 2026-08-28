@@ -74,7 +74,8 @@ public sealed class CreditAdministrationServiceTests
             Service = new CreditAdministrationService(
                 new CreditService(
                     Accounts,
-                    new NoBlockingPrintReservationRepository(),
+                    new CreditAvailabilityService(
+                        new NoBlockingPrintReservationRepository()),
                     transaction,
                     new FixedTimeProvider(CurrentTime)),
                 Commands,
@@ -224,7 +225,7 @@ public sealed class CreditAdministrationServiceTests
     }
 
     private sealed class NoBlockingPrintReservationRepository :
-        IPrintReservationRepository
+        ICreditAvailabilityRepository
     {
         public Task<PrintReservationResult?> FindByReserveCommandAsync(
             Guid printSourceId,
@@ -238,7 +239,7 @@ public sealed class CreditAdministrationServiceTests
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task<Money> GetBlockingAmountAsync(
+        public Task<Money> GetTotalBlockingAmountAsync(
             Guid creditAccountId,
             CancellationToken cancellationToken) =>
             Task.FromResult(Money.Zero);

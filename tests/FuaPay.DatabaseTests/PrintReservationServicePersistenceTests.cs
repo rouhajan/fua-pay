@@ -117,6 +117,7 @@ public sealed class PrintReservationServicePersistenceTests :
                 var service = new PrintReservationService(
                     services.GetRequiredService<ICreditAccountRepository>(),
                     services.GetRequiredService<IPrintReservationRepository>(),
+                    services.GetRequiredService<CreditAvailabilityService>(),
                     services.GetRequiredService<IApplicationTransaction>(),
                     new DuplicateAuditTrail(
                         services.GetRequiredService<IAuditTrail>(),
@@ -167,6 +168,7 @@ public sealed class PrintReservationServicePersistenceTests :
                     new ThrowingCreditSaveRepository(
                         services.GetRequiredService<ICreditAccountRepository>()),
                     services.GetRequiredService<IPrintReservationRepository>(),
+                    services.GetRequiredService<CreditAvailabilityService>(),
                     services.GetRequiredService<IApplicationTransaction>(),
                     services.GetRequiredService<IAuditTrail>(),
                     services.GetRequiredService<TimeProvider>());
@@ -210,6 +212,7 @@ public sealed class PrintReservationServicePersistenceTests :
                     services.GetRequiredService<ICreditAccountRepository>(),
                     new ThrowingReservationSaveRepository(
                         services.GetRequiredService<IPrintReservationRepository>()),
+                    services.GetRequiredService<CreditAvailabilityService>(),
                     services.GetRequiredService<IApplicationTransaction>(),
                     services.GetRequiredService<IAuditTrail>(),
                     services.GetRequiredService<TimeProvider>());
@@ -255,6 +258,7 @@ public sealed class PrintReservationServicePersistenceTests :
                 var service = new PrintReservationService(
                     services.GetRequiredService<ICreditAccountRepository>(),
                     services.GetRequiredService<IPrintReservationRepository>(),
+                    services.GetRequiredService<CreditAvailabilityService>(),
                     services.GetRequiredService<IApplicationTransaction>(),
                     new DuplicateAuditTrail(
                         services.GetRequiredService<IAuditTrail>(),
@@ -1369,6 +1373,7 @@ public sealed class PrintReservationServicePersistenceTests :
             new AddBarrierRepository(
                 services.GetRequiredService<IPrintReservationRepository>(),
                 barrier),
+            services.GetRequiredService<CreditAvailabilityService>(),
             services.GetRequiredService<IApplicationTransaction>(),
             services.GetRequiredService<IAuditTrail>(),
             services.GetRequiredService<TimeProvider>());
@@ -2090,13 +2095,6 @@ public sealed class PrintReservationServicePersistenceTests :
                 terminalCommandId,
                 cancellationToken);
 
-        public Task<Money> GetBlockingAmountAsync(
-            Guid creditAccountId,
-            CancellationToken cancellationToken) =>
-            _inner.GetBlockingAmountAsync(
-                creditAccountId,
-                cancellationToken);
-
         public Task AddAsync(
             PrintReservation reservation,
             CancellationToken cancellationToken) =>
@@ -2192,13 +2190,6 @@ public sealed class PrintReservationServicePersistenceTests :
             _inner.FindByTerminalCommandAsync(
                 printSourceId,
                 terminalCommandId,
-                cancellationToken);
-
-        public Task<Money> GetBlockingAmountAsync(
-            Guid creditAccountId,
-            CancellationToken cancellationToken) =>
-            _inner.GetBlockingAmountAsync(
-                creditAccountId,
                 cancellationToken);
 
         public async Task AddAsync(
