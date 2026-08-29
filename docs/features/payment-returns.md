@@ -35,6 +35,28 @@ Debit, vytvoření print rezervace i capture používají tento výpočet. Všec
 závody mezi blokováním a čerpáním se serializují zámkem kreditního účtu jako
 prvním zámkem.
 
+## Durabilní základ providerové vratky
+
+Pro budoucí karetní vratky ukládá Payments oddělené provider-neutral pokusy
+`SettlementReturnProviderAttempt`. Každý pokus má neměnný druh `Reverse` nebo
+`Refund`, provider a provider reference odvozené z autoritativní původní
+platby. Technický lifecycle rozlišuje připravený, zahájený, potvrzený,
+zamítnutý a nejasný pokus. Omezená diagnostika neobsahuje raw HTTP zprávy,
+podpisy ani kartová data.
+
+Starší pokusy zůstávají zachované, takže po definitivně zamítnutém reverse
+může vzniknout nový refund pokus bez přepsání historie. Pro jednu
+`SettlementReturn` smí být současně aktivní nejvýše jeden připravený,
+zahájený nebo nejasný pokus. Nejasný pokus dál blokuje nový externí pokus a po
+restartu se sám nevrací do stavu připraveného k odeslání. Potvrzený pokus
+sekvenci uzavírá; další pokus lze založit jen po předchozích definitivně
+zamítnutých nebo neprovedených pokusech.
+
+Tato persistence zatím neprovádí žádné síťové volání a nemění business stav
+`SettlementReturn`. ČSOB `payment/reverse` ani `payment/refund`, automatický
+retry nejasného refundu, polling a CardJob/CardTopUp orchestrace ještě nejsou
+implementované.
+
 ## Zatím nepodporované
 
 - reverse/refund volání ČSOB ani jiného karetního poskytovatele;

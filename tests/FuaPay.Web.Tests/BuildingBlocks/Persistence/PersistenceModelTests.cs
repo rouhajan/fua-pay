@@ -400,6 +400,58 @@ public sealed class PersistenceModelTests
     }
 
     [Fact]
+    public void SettlementReturnProviderAttempts_HaveProtectedHistoryAndSingleActiveAttempt()
+    {
+        using var context = CreateContext();
+
+        var entityType = context.Model
+            .GetEntityTypes()
+            .Single(
+                type =>
+                    type.GetSchema() == "payments" &&
+                    type.GetTableName() ==
+                        "settlement_return_provider_attempts");
+
+        Assert.True(
+            entityType.FindProperty("Version")!
+                .IsConcurrencyToken);
+        Assert.Equal(
+            160,
+            entityType.FindProperty("ProviderReference")!
+                .GetMaxLength());
+        Assert.Equal(
+            500,
+            entityType.FindProperty("Diagnostic")!
+                .GetMaxLength());
+
+        Assert.Contains(
+            entityType.GetIndexes(),
+            index =>
+                index.IsUnique &&
+                index.GetDatabaseName() ==
+                    "uq_payments_return_provider_attempts_sequence" &&
+                index.GetFilter() == "state IN (1, 2, 3, 5)" &&
+                index.Properties
+                    .Select(property => property.Name)
+                    .SequenceEqual(["SettlementReturnId"]));
+
+        Assert.Contains(
+            entityType.GetIndexes(),
+            index =>
+                !index.IsUnique &&
+                index.GetDatabaseName() ==
+                    "ix_payments_return_provider_attempts_history" &&
+                index.Properties
+                    .Select(property => property.Name)
+                    .SequenceEqual(
+                        ["SettlementReturnId", "CreatedAt", "Id"]));
+
+        var foreignKey = Assert.Single(entityType.GetForeignKeys());
+
+        Assert.Equal(DeleteBehavior.Restrict, foreignKey.DeleteBehavior);
+    }
+
+    [Fact]
     public void CreditAdjustmentCommands_HaveCommandPrimaryKeyAndPayload()
     {
         using var context = CreateContext();

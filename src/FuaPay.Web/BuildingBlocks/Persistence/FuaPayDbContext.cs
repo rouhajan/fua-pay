@@ -58,6 +58,10 @@ public sealed class FuaPayDbContext : DbContext
     internal DbSet<SettlementReturnEntity> SettlementReturns =>
         Set<SettlementReturnEntity>();
 
+    internal DbSet<SettlementReturnProviderAttemptEntity>
+        SettlementReturnProviderAttempts =>
+            Set<SettlementReturnProviderAttemptEntity>();
+
     internal DbSet<PaymentInitiationEntity> PaymentInitiations =>
         Set<PaymentInitiationEntity>();
 
