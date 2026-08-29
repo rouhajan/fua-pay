@@ -6,6 +6,7 @@ Aktuální dokumentace je záměrně malá:
 - [Microsoft Entra ID](integrations/entra-id.md);
 - [FUA Print Payments API](integrations/fuaprint-payments-api.md);
 - [ČSOB eAPI](integrations/csob.md);
+- [vrácení finančního vypořádání](features/payment-returns.md);
 - [PDF potvrzení o úhradě](features/payment-receipts.md);
 - [PostgreSQL, EF migrace a testy](development/database.md);
 - [produkční konfigurace a provoz](deployment/production-configuration.md);

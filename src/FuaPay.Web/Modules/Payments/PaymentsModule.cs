@@ -39,6 +39,9 @@ public static class PaymentsModule
         services.AddScoped<PaymentCreationService>();
         services.AddScoped<PaymentInitiationService>();
         services.AddScoped<PaymentSettlementService>();
+        services.AddScoped<SettlementReturnRegistrationService>();
+        services.AddScoped<SettlementReturnProviderAttemptService>();
+        services.AddScoped<CreditJobSettlementReturnService>();
         services.AddScoped<IPaymentSettlementService>(
             provider => provider.GetRequiredService<
                 PaymentSettlementService>());
@@ -60,6 +63,12 @@ public static class PaymentsModule
                     DevelopmentPaymentProviderInitiator>());
         }
         services.AddScoped<IPaymentRepository, EfPaymentRepository>();
+        services.AddScoped<
+            ISettlementReturnRepository,
+            EfSettlementReturnRepository>();
+        services.AddScoped<
+            ISettlementReturnProviderAttemptRepository,
+            EfSettlementReturnProviderAttemptRepository>();
         services.AddScoped<
             IJobPaymentCoordination,
             EfJobPaymentCoordination>();

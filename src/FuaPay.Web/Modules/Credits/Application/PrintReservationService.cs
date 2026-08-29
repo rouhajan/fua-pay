@@ -12,6 +12,7 @@ public sealed class PrintReservationService
 
     private readonly ICreditAccountRepository _creditAccountRepository;
     private readonly IPrintReservationRepository _reservationRepository;
+    private readonly CreditAvailabilityService _availabilityService;
     private readonly IApplicationTransaction _transaction;
     private readonly IAuditTrail _auditTrail;
     private readonly TimeProvider _timeProvider;
@@ -19,18 +20,21 @@ public sealed class PrintReservationService
     public PrintReservationService(
         ICreditAccountRepository creditAccountRepository,
         IPrintReservationRepository reservationRepository,
+        CreditAvailabilityService availabilityService,
         IApplicationTransaction transaction,
         IAuditTrail auditTrail,
         TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(creditAccountRepository);
         ArgumentNullException.ThrowIfNull(reservationRepository);
+        ArgumentNullException.ThrowIfNull(availabilityService);
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(auditTrail);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _creditAccountRepository = creditAccountRepository;
         _reservationRepository = reservationRepository;
+        _availabilityService = availabilityService;
         _transaction = transaction;
         _auditTrail = auditTrail;
         _timeProvider = timeProvider;
@@ -216,22 +220,11 @@ public sealed class PrintReservationService
             return replay;
         }
 
-        var blockingAmount =
-            await _reservationRepository.GetBlockingAmountAsync(
-                locked.Account.Id,
+        var spendableBalance = await _availabilityService
+            .GetAvailableExcludingAsync(
+                locked.Account,
+                locked.Reservation.Amount,
                 cancellationToken);
-        var otherBlockingMinorUnits = checked(
-            blockingAmount.MinorUnits -
-            locked.Reservation.Amount.MinorUnits);
-
-        if (otherBlockingMinorUnits < 0)
-        {
-            throw new InvalidDataException(
-                $"Print reservation '{locked.Reservation.Id}' is not included in its account blocking balance.");
-        }
-
-        var spendableBalance = locked.Account.Balance.Subtract(
-            new Money(otherBlockingMinorUnits));
         var debitOperationId = Guid.NewGuid();
         var changedAt = _timeProvider.GetUtcNow();
 
@@ -465,11 +458,9 @@ public sealed class PrintReservationService
                 command.JobUuid);
         }
 
-        var blockingAmount =
-            await _reservationRepository.GetBlockingAmountAsync(
-                account.Id,
-                cancellationToken);
-        var available = account.Balance.Subtract(blockingAmount);
+        var available = await _availabilityService.GetAvailableAsync(
+            account,
+            cancellationToken);
 
         if (command.Amount.MinorUnits > available.MinorUnits)
         {

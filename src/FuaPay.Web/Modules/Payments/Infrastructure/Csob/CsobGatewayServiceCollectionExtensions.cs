@@ -115,6 +115,13 @@ public static class CsobGatewayServiceCollectionExtensions
         }
 
         services.AddSingleton<ICsobGatewaySignature, CsobGatewaySignature>();
+
+        if (activateProviderInitiator)
+        {
+            services.AddHostedService<
+                CsobCryptographicMaterialStartupValidator>();
+        }
+
         services.AddHttpClient<ICsobGatewayClient, CsobGatewayClient>(
             client =>
             {

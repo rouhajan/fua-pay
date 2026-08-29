@@ -341,6 +341,117 @@ public sealed class PersistenceModelTests
     }
 
     [Fact]
+    public void SettlementReturns_HaveExpectedUniquenessAndRestrictivePaymentLink()
+    {
+        using var context = CreateContext();
+
+        var entityType = context.Model
+            .GetEntityTypes()
+            .Single(
+                type =>
+                    type.GetSchema() == "payments" &&
+                    type.GetTableName() == "settlement_returns");
+
+        Assert.True(
+            entityType.FindProperty("Version")!
+                .IsConcurrencyToken);
+        Assert.Equal(
+            3,
+            entityType.FindProperty("Currency")!
+                .GetMaxLength());
+        Assert.Equal(
+            300,
+            entityType.FindProperty("Reason")!
+                .GetMaxLength());
+
+        (string Name, string[] Properties, string? Filter)[]
+            expectedUniqueIndexes =
+            [
+                (
+                    "uq_payments_settlement_returns_request",
+                    ["RequestId"],
+                    null),
+                (
+                    "uq_payments_settlement_returns_original_payment",
+                    ["OriginalPaymentId"],
+                    "original_payment_id IS NOT NULL"),
+                (
+                    "uq_payments_settlement_returns_job",
+                    ["JobId"],
+                    "job_id IS NOT NULL")
+            ];
+
+        foreach (var expected in expectedUniqueIndexes)
+        {
+            Assert.Contains(
+                entityType.GetIndexes(),
+                index =>
+                    index.IsUnique &&
+                    index.GetDatabaseName() == expected.Name &&
+                    index.GetFilter() == expected.Filter &&
+                    index.Properties
+                        .Select(property => property.Name)
+                        .SequenceEqual(expected.Properties));
+        }
+
+        var foreignKey = Assert.Single(entityType.GetForeignKeys());
+
+        Assert.Equal(DeleteBehavior.Restrict, foreignKey.DeleteBehavior);
+    }
+
+    [Fact]
+    public void SettlementReturnProviderAttempts_HaveProtectedHistoryAndSingleActiveAttempt()
+    {
+        using var context = CreateContext();
+
+        var entityType = context.Model
+            .GetEntityTypes()
+            .Single(
+                type =>
+                    type.GetSchema() == "payments" &&
+                    type.GetTableName() ==
+                        "settlement_return_provider_attempts");
+
+        Assert.True(
+            entityType.FindProperty("Version")!
+                .IsConcurrencyToken);
+        Assert.Equal(
+            160,
+            entityType.FindProperty("ProviderReference")!
+                .GetMaxLength());
+        Assert.Equal(
+            500,
+            entityType.FindProperty("Diagnostic")!
+                .GetMaxLength());
+
+        Assert.Contains(
+            entityType.GetIndexes(),
+            index =>
+                index.IsUnique &&
+                index.GetDatabaseName() ==
+                    "uq_payments_return_provider_attempts_sequence" &&
+                index.GetFilter() == "state IN (1, 2, 3, 5)" &&
+                index.Properties
+                    .Select(property => property.Name)
+                    .SequenceEqual(["SettlementReturnId"]));
+
+        Assert.Contains(
+            entityType.GetIndexes(),
+            index =>
+                !index.IsUnique &&
+                index.GetDatabaseName() ==
+                    "ix_payments_return_provider_attempts_history" &&
+                index.Properties
+                    .Select(property => property.Name)
+                    .SequenceEqual(
+                        ["SettlementReturnId", "CreatedAt", "Id"]));
+
+        var foreignKey = Assert.Single(entityType.GetForeignKeys());
+
+        Assert.Equal(DeleteBehavior.Restrict, foreignKey.DeleteBehavior);
+    }
+
+    [Fact]
     public void CreditAdjustmentCommands_HaveCommandPrimaryKeyAndPayload()
     {
         using var context = CreateContext();

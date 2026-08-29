@@ -422,6 +422,59 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("FuaPay.Web.Modules.Credits.Infrastructure.Persistence.CreditReturnHoldEntity", b =>
+                {
+                    b.Property<Guid>("SettlementReturnId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("settlement_return_id");
+
+                    b.Property<long>("AmountMinorUnits")
+                        .HasColumnType("bigint")
+                        .HasColumnName("amount_minor_units");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreditAccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("credit_account_id");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer")
+                        .HasColumnName("state");
+
+                    b.Property<DateTimeOffset>("StateChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("state_changed_at");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("SettlementReturnId")
+                        .HasName("pk_credits_return_holds");
+
+                    b.HasIndex("CreditAccountId", "State")
+                        .HasDatabaseName("ix_credits_return_holds_account_state");
+
+                    b.ToTable("return_holds", "credits", t =>
+                        {
+                            t.HasCheckConstraint("ck_credits_return_holds_account_not_empty", "credit_account_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_credits_return_holds_amount_positive", "amount_minor_units > 0");
+
+                            t.HasCheckConstraint("ck_credits_return_holds_return_not_empty", "settlement_return_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_credits_return_holds_state_valid", "state IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("ck_credits_return_holds_timestamps_ordered", "state_changed_at >= created_at");
+
+                            t.HasCheckConstraint("ck_credits_return_holds_version_positive", "version > 0");
+                        });
+                });
+
             modelBuilder.Entity("FuaPay.Web.Modules.Credits.Infrastructure.Persistence.PrintReservationEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1123,6 +1176,217 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("FuaPay.Web.Modules.Payments.Infrastructure.Persistence.SettlementReturnEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AdministratorUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("administrator_user_id");
+
+                    b.Property<long>("AmountMinorUnits")
+                        .HasColumnType("bigint")
+                        .HasColumnName("amount_minor_units");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<Guid>("CustomerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("customer_user_id");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("job_id");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid?>("OriginalPaymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("original_payment_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("reason");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer")
+                        .HasColumnName("state");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_payments_settlement_returns");
+
+                    b.HasIndex("JobId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_payments_settlement_returns_job")
+                        .HasFilter("job_id IS NOT NULL");
+
+                    b.HasIndex("OriginalPaymentId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_payments_settlement_returns_original_payment")
+                        .HasFilter("original_payment_id IS NOT NULL");
+
+                    b.HasIndex("RequestId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_payments_settlement_returns_request");
+
+                    b.ToTable("settlement_returns", "payments", t =>
+                        {
+                            t.HasCheckConstraint("ck_payments_settlement_returns_admin_not_empty", "administrator_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_amount_positive", "amount_minor_units > 0");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_currency_supported", "currency = 'CZK'");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_customer_not_empty", "customer_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_id_not_empty", "id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_job_not_empty", "job_id IS NULL OR job_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_kind_valid", "kind IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_original_not_empty", "original_payment_id IS NULL OR original_payment_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_reason_not_blank", "length(btrim(reason)) > 0");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_request_not_empty", "request_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_source_consistent", "(kind = 1 AND original_payment_id IS NOT NULL AND job_id IS NOT NULL) OR (kind = 2 AND original_payment_id IS NULL AND job_id IS NOT NULL) OR (kind = 3 AND original_payment_id IS NOT NULL AND job_id IS NULL)");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_state_consistent", "(state = 1 AND started_at IS NULL AND completed_at IS NULL) OR (state = 2 AND started_at IS NOT NULL AND completed_at IS NULL) OR (state IN (3, 4) AND started_at IS NOT NULL AND completed_at IS NOT NULL) OR (state = 5 AND started_at IS NOT NULL AND completed_at IS NULL)");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_state_valid", "state IN (1, 2, 3, 4, 5)");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_timestamps_ordered", "updated_at >= requested_at AND (started_at IS NULL OR (started_at >= requested_at AND updated_at >= started_at)) AND (completed_at IS NULL OR (started_at IS NOT NULL AND completed_at >= started_at AND updated_at >= completed_at))");
+
+                            t.HasCheckConstraint("ck_payments_settlement_returns_version_positive", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("FuaPay.Web.Modules.Payments.Infrastructure.Persistence.SettlementReturnProviderAttemptEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Diagnostic")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("diagnostic");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<int>("Operation")
+                        .HasColumnType("integer")
+                        .HasColumnName("operation");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("integer")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ProviderReference")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)")
+                        .HasColumnName("provider_reference");
+
+                    b.Property<Guid>("SettlementReturnId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("settlement_return_id");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer")
+                        .HasColumnName("state");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_payments_return_provider_attempts");
+
+                    b.HasIndex("SettlementReturnId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_payments_return_provider_attempts_sequence")
+                        .HasFilter("state IN (1, 2, 3, 5)");
+
+                    b.HasIndex("SettlementReturnId", "CreatedAt", "Id")
+                        .HasDatabaseName("ix_payments_return_provider_attempts_history");
+
+                    b.ToTable("settlement_return_provider_attempts", "payments", t =>
+                        {
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_diagnostic_consistent", "(state IN (4, 5) AND diagnostic IS NOT NULL AND length(btrim(diagnostic)) > 0) OR (state IN (1, 2) AND diagnostic IS NULL) OR state = 3");
+
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_id_not_empty", "id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_operation_valid", "operation IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_provider_valid", "provider IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_reference_not_blank", "length(btrim(provider_reference)) > 0");
+
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_return_not_empty", "settlement_return_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_state_consistent", "(state = 1 AND started_at IS NULL AND finished_at IS NULL AND updated_at = created_at) OR (state = 2 AND started_at IS NOT NULL AND finished_at IS NULL AND updated_at = started_at) OR (state = 3 AND started_at IS NOT NULL AND finished_at IS NOT NULL AND updated_at = finished_at) OR (state = 4 AND finished_at IS NOT NULL AND updated_at = finished_at) OR (state = 5 AND started_at IS NOT NULL AND finished_at IS NULL AND updated_at >= started_at)");
+
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_state_valid", "state IN (1, 2, 3, 4, 5)");
+
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_timestamps_ordered", "updated_at >= created_at AND (started_at IS NULL OR (started_at >= created_at AND updated_at >= started_at)) AND (finished_at IS NULL OR (finished_at >= created_at AND updated_at >= finished_at AND (started_at IS NULL OR finished_at >= started_at)))");
+
+                            t.HasCheckConstraint("ck_payments_return_provider_attempts_version_positive", "version > 0");
+                        });
+                });
+
             modelBuilder.Entity("FuaPay.Web.Modules.ServiceUnits.Infrastructure.Persistence.RequesterServiceUnitAssignmentEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1345,6 +1609,23 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                     b.Navigation("Account");
                 });
 
+            modelBuilder.Entity("FuaPay.Web.Modules.Credits.Infrastructure.Persistence.CreditReturnHoldEntity", b =>
+                {
+                    b.HasOne("FuaPay.Web.Modules.Credits.Infrastructure.Persistence.CreditAccountEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CreditAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_credits_return_holds_account");
+
+                    b.HasOne("FuaPay.Web.Modules.Payments.Infrastructure.Persistence.SettlementReturnEntity", null)
+                        .WithOne()
+                        .HasForeignKey("FuaPay.Web.Modules.Credits.Infrastructure.Persistence.CreditReturnHoldEntity", "SettlementReturnId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_credits_return_holds_settlement_return");
+                });
+
             modelBuilder.Entity("FuaPay.Web.Modules.Credits.Infrastructure.Persistence.PrintReservationEntity", b =>
                 {
                     b.HasOne("FuaPay.Web.Modules.Credits.Infrastructure.Persistence.CreditAccountEntity", null)
@@ -1373,6 +1654,25 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_payments_initiations_payment");
+                });
+
+            modelBuilder.Entity("FuaPay.Web.Modules.Payments.Infrastructure.Persistence.SettlementReturnEntity", b =>
+                {
+                    b.HasOne("FuaPay.Web.Modules.Payments.Infrastructure.Persistence.PaymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalPaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_payments_settlement_returns_original_payment");
+                });
+
+            modelBuilder.Entity("FuaPay.Web.Modules.Payments.Infrastructure.Persistence.SettlementReturnProviderAttemptEntity", b =>
+                {
+                    b.HasOne("FuaPay.Web.Modules.Payments.Infrastructure.Persistence.SettlementReturnEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SettlementReturnId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_payments_return_provider_attempts_settlement_return");
                 });
 
             modelBuilder.Entity("FuaPay.Web.Modules.ServiceUnits.Infrastructure.Persistence.RequesterServiceUnitAssignmentEntity", b =>

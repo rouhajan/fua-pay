@@ -126,6 +126,10 @@ commandy zachovávají existující idempotenci: stejný command se stejným pay
 vrátí uložený stav bez další rezervace, debitu nebo auditu; odlišný význam téhož
 command ID je konflikt.
 
+FUA Print používá sdílený autoritativní výpočet disponibilního kreditu. Vedle
+aktivních print rezervací proto respektuje také aktivní finanční return holdy;
+HTTP kontrakt se tím nemění.
+
 ## Chybové odpovědi
 
 Business a validační chyby jsou `application/problem+json` se stabilním polem

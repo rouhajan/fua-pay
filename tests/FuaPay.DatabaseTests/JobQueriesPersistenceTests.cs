@@ -2,6 +2,8 @@ using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.BuildingBlocks.Persistence;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
+using FuaPay.Web.Modules.Payments.Application;
+using FuaPay.Web.Modules.Payments.Domain;
 
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -699,6 +701,351 @@ public sealed class JobQueriesPersistenceTests :
     }
 
     [Fact]
+    public async Task JobQueries_ProjectOnlyCompletedJobReturns()
+    {
+        using var scope =
+            _factory.Services.CreateScope();
+
+        var dbContext =
+            scope.ServiceProvider
+                .GetRequiredService<FuaPayDbContext>();
+
+        var jobRepository =
+            scope.ServiceProvider
+                .GetRequiredService<IJobRepository>();
+
+        var returnRepository =
+            scope.ServiceProvider
+                .GetRequiredService<ISettlementReturnRepository>();
+
+        var paymentRepository =
+            scope.ServiceProvider
+                .GetRequiredService<IPaymentRepository>();
+
+        var queries =
+            scope.ServiceProvider
+                .GetRequiredService<IJobQueries>();
+
+        await using var transaction =
+            await dbContext.Database
+                .BeginTransactionAsync();
+
+        try
+        {
+            var customerUserId = Guid.NewGuid();
+            var requesterUserId = Guid.NewGuid();
+            var administratorUserId = Guid.NewGuid();
+            var serviceUnitId = Guid.NewGuid();
+
+            var withoutReturn = CreatePaidJob(
+                customerUserId,
+                requesterUserId,
+                serviceUnitId,
+                "Bez vratky",
+                JobSettlementType.Credit,
+                Guid.NewGuid(),
+                TestTime);
+
+            var completedCredit = CreatePaidJob(
+                customerUserId,
+                requesterUserId,
+                serviceUnitId,
+                "Vrácená kreditní",
+                JobSettlementType.Credit,
+                Guid.NewGuid(),
+                TestTime.AddMinutes(20));
+
+            completedCredit.StartProduction(
+                TestTime.AddMinutes(23));
+            completedCredit.MarkReadyForPickup(
+                TestTime.AddMinutes(24));
+            completedCredit.Complete(
+                TestTime.AddMinutes(25));
+
+            var cardPaymentId = Guid.NewGuid();
+            var completedCard = CreatePaidJob(
+                customerUserId,
+                requesterUserId,
+                serviceUnitId,
+                "Vrácená kartou",
+                JobSettlementType.DirectPayment,
+                cardPaymentId,
+                TestTime.AddMinutes(40));
+
+            var requested = CreatePaidJob(
+                customerUserId,
+                requesterUserId,
+                serviceUnitId,
+                "Požadovaná vratka",
+                JobSettlementType.Credit,
+                Guid.NewGuid(),
+                TestTime.AddMinutes(60));
+
+            var inProgress = CreatePaidJob(
+                customerUserId,
+                requesterUserId,
+                serviceUnitId,
+                "Zpracovávaná vratka",
+                JobSettlementType.Credit,
+                Guid.NewGuid(),
+                TestTime.AddMinutes(80));
+
+            var requiresAttention = CreatePaidJob(
+                customerUserId,
+                requesterUserId,
+                serviceUnitId,
+                "Vratka vyžaduje kontrolu",
+                JobSettlementType.Credit,
+                Guid.NewGuid(),
+                TestTime.AddMinutes(100));
+
+            var rejected = CreatePaidJob(
+                customerUserId,
+                requesterUserId,
+                serviceUnitId,
+                "Zamítnutá vratka",
+                JobSettlementType.Credit,
+                Guid.NewGuid(),
+                TestTime.AddMinutes(120));
+
+            await AddJobsAsync(
+                jobRepository,
+                withoutReturn,
+                completedCredit,
+                completedCard,
+                requested,
+                inProgress,
+                requiresAttention,
+                rejected);
+
+            var cardPayment = CreateSucceededPayment(
+                cardPaymentId,
+                customerUserId,
+                PaymentPurposeType.Job,
+                completedCard.Id,
+                TestTime.AddMinutes(40));
+
+            var topUpPayment = CreateSucceededPayment(
+                Guid.NewGuid(),
+                customerUserId,
+                PaymentPurposeType.CreditTopUp,
+                jobId: null,
+                TestTime.AddMinutes(140));
+
+            await paymentRepository.AddAsync(
+                cardPayment,
+                CancellationToken.None);
+            await paymentRepository.AddAsync(
+                topUpPayment,
+                CancellationToken.None);
+
+            var completedCreditReturn = CreateSettlementReturn(
+                SettlementReturnKind.CreditJob,
+                completedCredit.Id,
+                originalPaymentId: null,
+                customerUserId,
+                administratorUserId,
+                SettlementReturnState.Completed,
+                TestTime.AddMinutes(26));
+
+            var completedCardReturn = CreateSettlementReturn(
+                SettlementReturnKind.CardJob,
+                completedCard.Id,
+                cardPaymentId,
+                customerUserId,
+                administratorUserId,
+                SettlementReturnState.Completed,
+                TestTime.AddMinutes(46));
+
+            var requestedReturn = CreateSettlementReturn(
+                SettlementReturnKind.CreditJob,
+                requested.Id,
+                originalPaymentId: null,
+                customerUserId,
+                administratorUserId,
+                SettlementReturnState.Requested,
+                TestTime.AddMinutes(66));
+
+            var inProgressReturn = CreateSettlementReturn(
+                SettlementReturnKind.CreditJob,
+                inProgress.Id,
+                originalPaymentId: null,
+                customerUserId,
+                administratorUserId,
+                SettlementReturnState.InProgress,
+                TestTime.AddMinutes(86));
+
+            var attentionReturn = CreateSettlementReturn(
+                SettlementReturnKind.CreditJob,
+                requiresAttention.Id,
+                originalPaymentId: null,
+                customerUserId,
+                administratorUserId,
+                SettlementReturnState.RequiresAttention,
+                TestTime.AddMinutes(106));
+
+            var rejectedReturn = CreateSettlementReturn(
+                SettlementReturnKind.CreditJob,
+                rejected.Id,
+                originalPaymentId: null,
+                customerUserId,
+                administratorUserId,
+                SettlementReturnState.Rejected,
+                TestTime.AddMinutes(126));
+
+            var topUpReturn = CreateSettlementReturn(
+                SettlementReturnKind.CardTopUp,
+                jobId: null,
+                topUpPayment.Id,
+                customerUserId,
+                administratorUserId,
+                SettlementReturnState.Completed,
+                TestTime.AddMinutes(146));
+
+            foreach (var settlementReturn in new[]
+                     {
+                         completedCreditReturn,
+                         completedCardReturn,
+                         requestedReturn,
+                         inProgressReturn,
+                         attentionReturn,
+                         rejectedReturn,
+                         topUpReturn
+                     })
+            {
+                await returnRepository.AddAsync(
+                    settlementReturn,
+                    CancellationToken.None);
+            }
+
+            var customerPage = await queries.ListForCustomerAsync(
+                customerUserId,
+                new JobListFilter(
+                    paymentStatus: JobPaymentStatus.Paid),
+                new JobPageRequest(limit: 20));
+
+            Assert.Equal(7L, customerPage.TotalCount);
+            Assert.All(
+                customerPage.Items,
+                item => Assert.Equal(
+                    JobPaymentStatus.Paid,
+                    item.PaymentStatus));
+
+            var items = customerPage.Items.ToDictionary(item => item.Id);
+
+            Assert.Null(items[withoutReturn.Id].SettlementReturnId);
+            Assert.Null(items[withoutReturn.Id].ReturnedAt);
+            Assert.Equal(
+                completedCreditReturn.Id,
+                items[completedCredit.Id].SettlementReturnId);
+            Assert.Equal(
+                completedCreditReturn.CompletedAt,
+                items[completedCredit.Id].ReturnedAt);
+            Assert.Equal(
+                completedCardReturn.Id,
+                items[completedCard.Id].SettlementReturnId);
+            Assert.Equal(
+                completedCardReturn.CompletedAt,
+                items[completedCard.Id].ReturnedAt);
+            Assert.Null(items[requested.Id].SettlementReturnId);
+            Assert.Null(items[inProgress.Id].SettlementReturnId);
+            Assert.Null(items[requiresAttention.Id].SettlementReturnId);
+            Assert.Null(items[rejected.Id].SettlementReturnId);
+
+            var creditDetail =
+                Assert.IsType<JobDetail>(
+                    await queries.FindForCustomerAsync(
+                        customerUserId,
+                        completedCredit.Id));
+
+            Assert.Equal(
+                JobPaymentStatus.Paid,
+                creditDetail.PaymentStatus);
+            Assert.Equal<JobSettlementType?>(
+                JobSettlementType.Credit,
+                creditDetail.SettlementType);
+            Assert.Equal<Guid?>(
+                completedCredit.SettlementReferenceId,
+                creditDetail.SettlementReferenceId);
+            Assert.Equal<DateTimeOffset?>(
+                completedCredit.SettledAt,
+                creditDetail.SettledAt);
+            Assert.Equal(
+                JobProductionStatus.Completed,
+                creditDetail.ProductionStatus);
+            Assert.Equal<DateTimeOffset?>(
+                completedCredit.ProductionStartedAt,
+                creditDetail.ProductionStartedAt);
+            Assert.Equal<DateTimeOffset?>(
+                completedCredit.ReadyForPickupAt,
+                creditDetail.ReadyForPickupAt);
+            Assert.Equal<DateTimeOffset?>(
+                completedCredit.CompletedAt,
+                creditDetail.CompletedAt);
+            Assert.Equal(
+                completedCreditReturn.Id,
+                creditDetail.SettlementReturnId);
+            Assert.Equal(
+                completedCreditReturn.CompletedAt,
+                creditDetail.ReturnedAt);
+
+            var cardDetail =
+                Assert.IsType<JobDetail>(
+                    await queries.FindForManagementAsync(
+                        new JobManagementActor(
+                            requesterUserId,
+                            new[] { serviceUnitId }),
+                        completedCard.Id));
+
+            Assert.Equal<JobSettlementType?>(
+                JobSettlementType.DirectPayment,
+                cardDetail.SettlementType);
+            Assert.Equal<Guid?>(
+                cardPaymentId,
+                cardDetail.SettlementReferenceId);
+            Assert.Equal(
+                completedCardReturn.Id,
+                cardDetail.SettlementReturnId);
+
+            var managementPage =
+                await queries.ListForManagementAsync(
+                    new JobManagementActor(
+                        requesterUserId,
+                        new[] { serviceUnitId }),
+                    new JobListFilter(
+                        paymentStatus: JobPaymentStatus.Paid),
+                    new JobPageRequest(limit: 20));
+
+            Assert.Equal(7L, managementPage.TotalCount);
+
+            var outsideScope =
+                await queries.ListForManagementAsync(
+                    new JobManagementActor(
+                        requesterUserId,
+                        new[] { Guid.NewGuid() }),
+                    new JobListFilter(),
+                    new JobPageRequest());
+
+            Assert.Equal(0L, outsideScope.TotalCount);
+            Assert.Null(
+                await queries.FindForCustomerAsync(
+                    Guid.NewGuid(),
+                    completedCredit.Id));
+
+            var customerSummary =
+                await queries.GetCustomerSummaryAsync(
+                    customerUserId);
+
+            Assert.Equal(7L, customerSummary.TotalCount);
+            Assert.Equal(0L, customerSummary.AwaitingPaymentCount);
+        }
+        finally
+        {
+            await transaction.RollbackAsync();
+        }
+    }
+
+    [Fact]
     public async Task FindForManagementAsync_RespectsOwnAndAllScopes()
     {
         using var scope =
@@ -781,6 +1128,109 @@ public sealed class JobQueriesPersistenceTests :
             $"Popis: {title}",
             new Money(10_000),
             createdAt);
+    }
+
+    private static Job CreatePaidJob(
+        Guid customerUserId,
+        Guid requesterUserId,
+        Guid serviceUnitId,
+        string title,
+        JobSettlementType settlementType,
+        Guid settlementReferenceId,
+        DateTimeOffset createdAt)
+    {
+        var job = CreateJob(
+            customerUserId,
+            requesterUserId,
+            title,
+            createdAt,
+            serviceUnitId);
+
+        job.Publish(createdAt.AddMinutes(1));
+        job.ConfirmSettlement(
+            settlementType,
+            settlementReferenceId,
+            createdAt.AddMinutes(2));
+
+        return job;
+    }
+
+    private static SettlementReturn CreateSettlementReturn(
+        SettlementReturnKind kind,
+        Guid? jobId,
+        Guid? originalPaymentId,
+        Guid customerUserId,
+        Guid administratorUserId,
+        SettlementReturnState state,
+        DateTimeOffset requestedAt)
+    {
+        var settlementReturn = new SettlementReturn(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            kind,
+            originalPaymentId,
+            jobId,
+            customerUserId,
+            administratorUserId,
+            new Money(10_000),
+            "Test projekce vratky",
+            requestedAt);
+
+        if (state != SettlementReturnState.Requested)
+        {
+            settlementReturn.Begin(requestedAt.AddMinutes(1));
+        }
+
+        switch (state)
+        {
+            case SettlementReturnState.Requested:
+            case SettlementReturnState.InProgress:
+                break;
+            case SettlementReturnState.Completed:
+                settlementReturn.Complete(
+                    requestedAt.AddMinutes(2));
+                break;
+            case SettlementReturnState.Rejected:
+                settlementReturn.Reject(
+                    requestedAt.AddMinutes(2));
+                break;
+            case SettlementReturnState.RequiresAttention:
+                settlementReturn.RequireAttention(
+                    requestedAt.AddMinutes(2));
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(state));
+        }
+
+        return settlementReturn;
+    }
+
+    private static Payment CreateSucceededPayment(
+        Guid paymentId,
+        Guid customerUserId,
+        PaymentPurposeType purposeType,
+        Guid? jobId,
+        DateTimeOffset createdAt)
+    {
+        var payment = new Payment(
+            paymentId,
+            customerUserId,
+            purposeType,
+            jobId,
+            new Money(10_000),
+            PaymentProvider.Development,
+            createdAt,
+            purposeType == PaymentPurposeType.CreditTopUp
+                ? Guid.NewGuid()
+                : null);
+
+        payment.MarkPending(
+            $"DEV-JOB-RETURN-{Guid.NewGuid():N}",
+            createdAt.AddMinutes(1));
+        payment.Complete(createdAt.AddMinutes(2));
+
+        return payment;
     }
 
     private static async Task AddJobsAsync(

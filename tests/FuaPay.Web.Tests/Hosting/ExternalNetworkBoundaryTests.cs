@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 using FuaPay.Web.Modules.Access.Infrastructure.Entra;
@@ -57,8 +58,7 @@ public sealed class ExternalNetworkBoundaryTests
         var publicKeyPath = Path.Combine(
             externalFiles.Path,
             "gateway.pub");
-        File.WriteAllText(privateKeyPath, "test-only");
-        File.WriteAllText(publicKeyPath, "test-only");
+        WriteTestCsobKeys(privateKeyPath, publicKeyPath);
 
         var counter = new OutboundRequestCounter();
         using var productionFactory =
@@ -111,8 +111,7 @@ public sealed class ExternalNetworkBoundaryTests
         var publicKeyPath = Path.Combine(
             externalFiles.Path,
             "gateway.pub");
-        File.WriteAllText(privateKeyPath, "test-only");
-        File.WriteAllText(publicKeyPath, "test-only");
+        WriteTestCsobKeys(privateKeyPath, publicKeyPath);
 
         var health = new CsobPaymentReconciliationHealth();
         health.RecordFailedCycle(
@@ -208,6 +207,21 @@ public sealed class ExternalNetworkBoundaryTests
             ["Csob:ReturnUrl"] =
                 "https://fuapay.example.test/payments/csob/return"
         };
+    }
+
+    private static void WriteTestCsobKeys(
+        string privateKeyPath,
+        string publicKeyPath)
+    {
+        using var merchant = RSA.Create(2048);
+        using var gateway = RSA.Create(2048);
+
+        File.WriteAllText(
+            privateKeyPath,
+            merchant.ExportPkcs8PrivateKeyPem());
+        File.WriteAllText(
+            publicKeyPath,
+            gateway.ExportSubjectPublicKeyInfoPem());
     }
 
     private sealed class OutboundRequestCounter
