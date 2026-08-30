@@ -1,14 +1,14 @@
 # Demo / staging deployment
 
-Status: 2026-08-29
+Status: 2026-08-30
 
 ## Deployment
 
 - URL: `https://fuapay.tul.cz`
 - Alternate URL: `https://fuapay.fa.tul.cz` redirects to the canonical URL.
-- Revision: `45b86e3f2d1e217140e2422b185dd8f616fe4856`
-- Active release: `/opt/fuapay/releases/45b86e3f2d1e`
-- Rollback release: `/opt/fuapay/releases/87ef21877809`
+- Revision: `c0dba8bfb3eec6bc04d69271ff293c023098b409`
+- Active release: `/opt/fuapay/releases/c0dba8bfb3ee`
+- Rollback release: `/opt/fuapay/releases/45b86e3f2d1e`
 - Service account: `fuapay:fuapay`
 - Kestrel: `127.0.0.1:5080`
 - Reverse proxy: Nginx
@@ -27,13 +27,116 @@ Status: 2026-08-29
 Production Entra authentication, production ČSOB integration and production
 database workload are not active.
 
-The settlement-return revision deployed on 2026-08-29 provides the durable
-domain and persistence foundation for full settlement returns. It does not
-enable actual ČSOB `payment/reverse` or `payment/refund` provider calls,
-automatic financial retries after ambiguity, or production financial traffic.
+The settlement-return foundation remains the currently deployed application
+behavior. The 2026-08-30 redeployment aligned the active release with repository
+`main` after deployment-artifact hardening; there were no intervening
+`src/FuaPay.Web` changes or EF schema changes relative to the previously active
+application revision.
+
+Actual ČSOB `payment/reverse` and `payment/refund` provider calls, automatic
+financial retries after ambiguity and production financial traffic remain
+disabled/not implemented as documented for the settlement-return foundation.
 
 `Database__ApplyMigrationsOnStart=false`; database migration remains a
 controlled deployment step.
+
+## 2026-08-30 main-alignment redeployment
+
+### Scope
+
+The staging runtime was redeployed from repository revision
+`c0dba8bfb3eec6bc04d69271ff293c023098b409` so that the active release matches
+current `main` and exercises the hardened canonical release-artifact workflow.
+
+The Git comparison from the previously active application revision
+`45b86e3f2d1e217140e2422b185dd8f616fe4856` to the new revision contained only
+CI, solution metadata, documentation, deployment tooling and deployment-tooling
+tests. It contained no `src/FuaPay.Web` change. The local release verification
+also confirmed that the EF model still matches the existing migrations.
+
+No migration SQL was generated or applied and the staging database remained at
+17 migrations. No application configuration, Nginx configuration or database
+content was intentionally changed by this redeployment.
+
+### Release artifact
+
+Before packaging, the canonical verification passed with 773/773 web/application
+tests and a clean EF-model check. Locked `linux-x64` restore and self-contained
+Release publish completed successfully with warnings treated as errors.
+
+The repository deployment-artifact tool created and independently re-verified
+the archive with the canonical profile:
+
+- directories: 12 entries, mode `0770`;
+- ordinary files: 400 entries, mode `0660`;
+- `FuaPay.Web`: mode `0750`;
+- `appsettings.Development.json`: absent.
+
+Release archive:
+
+`fuapay-staging-c0dba8bfb3eec6bc04d69271ff293c023098b409-linux-x64.tar.gz`
+
+SHA-256:
+
+`d36efcc523764c33d83eb228645e0658c48587edfeda2722b086e9b56c4e15e0`
+
+Size:
+
+`122837835` bytes
+
+The transferred server-side archive matched both the expected SHA-256 and byte
+size before extraction. `gzip -t` and a full tar listing completed successfully
+before installation.
+
+### Installation and activation
+
+The new release was installed beside the active release at:
+
+`/opt/fuapay/releases/c0dba8bfb3ee`
+
+Before activation, recursive checks confirmed:
+
+- all files/directories owned by `fuapay:fuapay`;
+- every directory mode `0770`;
+- every ordinary file except the host executable mode `0660`;
+- `FuaPay.Web` mode `0750`;
+- `FuaPay.Web` executable by the `fuapay` service account;
+- 401 files in total, matching the 400 ordinary archive files plus the host
+  executable.
+
+`/opt/fuapay/current` was then switched atomically to the new release and
+`fuapay.service` was restarted. The running process executable resolved to:
+
+`/opt/fuapay/releases/c0dba8bfb3ee/FuaPay.Web`
+
+### Post-deployment verification
+
+Verified after restart:
+
+- `/opt/fuapay/current` resolves to
+  `/opt/fuapay/releases/c0dba8bfb3ee`;
+- `fuapay.service` is active;
+- `/health/live`: HTTP 200 with status `Healthy`;
+- `/health/ready`: HTTP 200 with status `Healthy`;
+- `https://fuapay.tul.cz/`: HTTP 200;
+- `http://fuapay.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
+- `https://fuapay.fa.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
+- no warning-or-higher `fuapay.service` journal entries were observed in the
+  post-restart verification window.
+
+Direct Kestrel health checks included both `Host: fuapay.tul.cz` and
+`X-Forwarded-Proto: https`, matching the configured forwarded-header and host
+validation boundary.
+
+The prior release `/opt/fuapay/releases/45b86e3f2d1e` remains present and its
+`FuaPay.Web` executable was verified as a ready rollback target.
+
+### Deployment cleanup
+
+After successful verification, the transferred release archive was removed from
+the deployment user's home directory. The locally created, hash-verified archive
+was retained as release evidence on the deployment workstation. No temporary
+activation symlink remains.
 
 ## 2026-08-29 settlement-return deployment
 
