@@ -64,17 +64,26 @@ nespustí.
 
 ## Čerstvé schéma a deployment migrace
 
-Před release se na nové prázdné izolované databázi spustí `dotnet ef database
-update`, následně PostgreSQL testy a `has-pending-model-changes`. Pro řízené
-nasazení lze předem vygenerovat a zkontrolovat idempotentní SQL:
+Před release se na nové prázdné izolované databázi aplikuje připravený
+execution artefakt popsaný níže, následně se spustí PostgreSQL testy a
+`has-pending-model-changes`. Pro řízené nasazení se předem vygeneruje a
+zkontroluje idempotentní SQL:
 
 ```bash
 dotnet ef migrations script --idempotent \
   --project src/FuaPay.Web/FuaPay.Web.csproj \
   --startup-project src/FuaPay.Web/FuaPay.Web.csproj \
   --context FuaPayDbContext \
+  --configuration Release \
+  --no-build \
   --output /secure/release/fuapay-migrations.sql
 ```
+
+Původní soubor se neupravuje. Oddělený execution artefakt s bezpečným
+odstraněním pouze vedoucího UTF-8 BOM a deterministickým `SET ROLE` připravuje
+a přesně proti originálu ověřuje repozitářový nástroj. Následný explicitně
+zacílený `psql` krok používá `ON_ERROR_STOP=1`. Kompletní kanonický postup je v
+[Release a databázové artefakty](../deployment/release-artifacts.md).
 
 Skutečnou produkční databázi ani její kopii se skutečnými osobními údaji
 nepoužívejte pro automatizované testy.

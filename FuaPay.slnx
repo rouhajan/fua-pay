@@ -7,4 +7,7 @@
     <Project Path="tests/FuaPay.DatabaseTests/FuaPay.DatabaseTests.csproj" />
     <Project Path="tests/FuaPay.CsobSandboxTests/FuaPay.CsobSandboxTests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/FuaPay.DeploymentArtifacts/FuaPay.DeploymentArtifacts.csproj" />
+  </Folder>
 </Solution>
