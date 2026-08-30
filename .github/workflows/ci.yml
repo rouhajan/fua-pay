@@ -364,6 +364,7 @@ jobs:
             --file="$archive" \
             --directory="$extracted"
           sudo chown --recursive fuapay:fuapay "$extracted"
+          set -x
 
           unexpected_owner="$(
             sudo find "$extracted" \
