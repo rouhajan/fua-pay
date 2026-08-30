@@ -86,11 +86,13 @@ se promítnou do Entra/ČSOB registrací.
 Doporučený řízený postup:
 
 1. Spustit `scripts/verify.ps1` a PostgreSQL testy nad izolovanou databází.
-2. Publikovat jednou ověřený Release artefakt; `appsettings.Development.json`
+2. Publikovat a zabalit jednou ověřený Release artefakt výhradně podle
+   [kanonického postupu](release-artifacts.md); `appsettings.Development.json`
    se do publish výstupu nekopíruje.
 3. Zálohovat databázi a ověřit, že je dostupný odpovídající restore postup.
-4. Vygenerovat/zkontrolovat EF migration SQL a aplikovat jej jako samostatný
-   oprávněný databázový krok.
+4. Vygenerovat, zkontrolovat a BOM-aware připravit EF migration SQL podle
+   stejného kanonického postupu; execution artefakt aplikovat jako samostatný
+   oprávněný databázový krok s `ON_ERROR_STOP=1`.
 5. Nasadit artefakt s výše uvedenou chráněnou konfigurací a zachovat
    Data Protection key ring.
 6. Ověřit `/health/live` a `/health/ready`, OIDC login/logout, role a jednu

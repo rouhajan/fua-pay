@@ -531,6 +531,9 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "fuapay.deploymentartifacts": {
+        "type": "Project"
+      },
       "fuapay.web": {
         "type": "Project",
         "dependencies": {

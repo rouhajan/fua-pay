@@ -60,6 +60,7 @@ záměrně opt-in přes `-RunDatabaseTests`; živý ČSOB `echo` přes
 - [PDF potvrzení o úhradě](docs/features/payment-receipts.md)
 - [Databáze a testy](docs/development/database.md)
 - [Produkční konfigurace a provoz](docs/deployment/production-configuration.md)
+- [Release a databázové artefakty](docs/deployment/release-artifacts.md)
 - [Bezpečnostní hranice](SECURITY.md)
 
 ## Licence a branding

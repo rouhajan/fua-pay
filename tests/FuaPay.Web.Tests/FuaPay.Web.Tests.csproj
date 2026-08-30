@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\FuaPay.Web\FuaPay.Web.csproj" />
+    <ProjectReference Include="..\..\tools\FuaPay.DeploymentArtifacts\FuaPay.DeploymentArtifacts.csproj" />
   </ItemGroup>
 
 </Project>

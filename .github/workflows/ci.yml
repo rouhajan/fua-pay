@@ -58,38 +58,162 @@ jobs:
             --username=postgres \
             --dbname=postgres \
             --set=ON_ERROR_STOP=1 \
-            --command="CREATE ROLE fuapay_app LOGIN PASSWORD 'ci-app-not-secret' NOSUPERUSER NOCREATEDB NOCREATEROLE;"
+            --command="CREATE ROLE fuapay_migrator NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE; CREATE ROLE fuapay_deployer LOGIN PASSWORD 'ci-deployer-not-secret' NOSUPERUSER NOCREATEDB NOCREATEROLE; GRANT fuapay_migrator TO fuapay_deployer;"
 
           docker exec "$POSTGRES_CONTAINER" \
             psql \
             --username=postgres \
             --dbname=postgres \
             --set=ON_ERROR_STOP=1 \
-            --command="CREATE DATABASE fuapay_test_ci OWNER fuapay_app;"
+            --command="CREATE DATABASE fuapay_test_ci OWNER fuapay_migrator;"
 
       - name: Verify application
         shell: pwsh
         run: ./scripts/verify.ps1
 
-      - name: Apply EF Core migrations to isolated database
-        shell: bash
+      - name: Package EF Core migration SQL
+        shell: pwsh
         env:
-          ConnectionStrings__FuaPay: "Host=127.0.0.1;Port=5432;Database=fuapay_test_ci;Username=fuapay_app;Password=ci-app-not-secret;Pooling=false"
+          ConnectionStrings__FuaPay: "Host=127.0.0.1;Port=5432;Database=fuapay_test_ci;Username=fuapay_deployer;Password=ci-deployer-not-secret;Pooling=false"
         run: |
-          set -euo pipefail
+          $ErrorActionPreference = "Stop"
 
-          dotnet ef database update \
-            --project src/FuaPay.Web/FuaPay.Web.csproj \
-            --startup-project src/FuaPay.Web/FuaPay.Web.csproj \
-            --context FuaPayDbContext \
-            --configuration Release \
-            --no-build
+          $migrationDirectory =
+              Join-Path $env:RUNNER_TEMP "fuapay-migrations"
+          $originalSql =
+              Join-Path $migrationDirectory "fuapay-migrations.sql"
+          $executionSql =
+              Join-Path $migrationDirectory "fuapay-migrations.execution.sql"
+
+          New-Item `
+              -ItemType Directory `
+              -Path $migrationDirectory `
+              -ErrorAction Stop | Out-Null
+
+          & dotnet ef migrations script `
+              --idempotent `
+              --project src/FuaPay.Web/FuaPay.Web.csproj `
+              --startup-project src/FuaPay.Web/FuaPay.Web.csproj `
+              --context FuaPayDbContext `
+              --configuration Release `
+              --no-build `
+              --output $originalSql
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "EF migration SQL generation failed."
+          }
+
+          & dotnet run `
+              --project tools/FuaPay.DeploymentArtifacts/FuaPay.DeploymentArtifacts.csproj `
+              --configuration Release `
+              --no-build `
+              -- `
+              migrations prepare `
+              --input $originalSql `
+              --output $executionSql `
+              --role fuapay_migrator
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Migration SQL packaging failed."
+          }
+
+          & dotnet run `
+              --project tools/FuaPay.DeploymentArtifacts/FuaPay.DeploymentArtifacts.csproj `
+              --configuration Release `
+              --no-build `
+              -- `
+              migrations verify `
+              --original $originalSql `
+              --execution $executionSql `
+              --role fuapay_migrator
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Migration SQL exact-byte verification failed."
+          }
+
+      - name: Apply packaged migrations to isolated database
+        shell: pwsh
+        env:
+          PGPASSWORD: "ci-deployer-not-secret"
+          PGSSLMODE: "disable"
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $databaseHost = "127.0.0.1"
+          $databasePort = "5432"
+          $databaseName = "fuapay_test_ci"
+          $databaseLogin = "fuapay_deployer"
+          $executionSql = Join-Path `
+              $env:RUNNER_TEMP `
+              "fuapay-migrations/fuapay-migrations.execution.sql"
+          $targetArguments = @(
+              "--host=$databaseHost"
+              "--port=$databasePort"
+              "--dbname=$databaseName"
+              "--username=$databaseLogin"
+          )
+
+          $identityOutput = (
+              & psql `
+                  @targetArguments `
+                  --no-psqlrc `
+                  --set=ON_ERROR_STOP=1 `
+                  --tuples-only `
+                  --no-align `
+                  "--field-separator=|" `
+                  --command="SELECT current_database(), current_user, COALESCE(inet_server_addr()::text, 'local-socket'), inet_server_port();"
+          ) -join "`n"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "PostgreSQL target identity preflight failed."
+          }
+
+          $identity = $identityOutput.Trim().Split("|")
+
+          if ($identity.Count -ne 4 -or
+              $identity[0] -ne $databaseName -or
+              $identity[1] -ne $databaseLogin -or
+              [string]::IsNullOrWhiteSpace($identity[2]) -or
+              $identity[3] -ne $databasePort) {
+            throw "PostgreSQL target identity did not match the explicit target."
+          }
+
+          Write-Host (
+              "Verified PostgreSQL target: " +
+              "database=$($identity[0]), user=$($identity[1]), " +
+              "server=$($identity[2]):$($identity[3])"
+          )
+
+          & psql `
+              @targetArguments `
+              --no-psqlrc `
+              --set=ON_ERROR_STOP=1 `
+              "--file=$executionSql"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged migration SQL execution failed."
+          }
+
+          $historyOwner = (
+              & psql `
+                  @targetArguments `
+                  --no-psqlrc `
+                  --set=ON_ERROR_STOP=1 `
+                  --tuples-only `
+                  --no-align `
+                  --command="SELECT pg_get_userbyid(c.relowner) FROM pg_class AS c JOIN pg_namespace AS n ON n.oid = c.relnamespace WHERE n.nspname = 'app' AND c.relname = '__ef_migrations_history';"
+          ) -join "`n"
+
+          if ($LASTEXITCODE -ne 0 -or
+              $historyOwner.Trim() -ne "fuapay_migrator") {
+            throw "Migration objects were not created under fuapay_migrator."
+          }
 
       - name: Run PostgreSQL integration tests
         shell: bash
         env:
           FUA_PAY_DATABASE_TESTS_ALLOWED: "1"
-          ConnectionStrings__FuaPay: "Host=127.0.0.1;Port=5432;Database=fuapay_test_ci;Username=fuapay_app;Password=ci-app-not-secret;Pooling=false"
+          ConnectionStrings__FuaPay: "Host=127.0.0.1;Port=5432;Database=fuapay_test_ci;Username=fuapay_deployer;Password=ci-deployer-not-secret;Pooling=false"
         run: |
           set -euo pipefail
 
@@ -176,6 +300,96 @@ jobs:
           test -f "$RUNNER_TEMP/fuapay-linux-x64/FuaPay.Web.dll"
           test -f "$RUNNER_TEMP/fuapay-linux-x64/FuaPay.Web.deps.json"
           test -f "$RUNNER_TEMP/fuapay-linux-x64/FuaPay.Web.runtimeconfig.json"
+
+      - name: Package and verify deterministic release archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $publishDirectory =
+              Join-Path $env:RUNNER_TEMP "fuapay-linux-x64"
+          $archivePath =
+              Join-Path $env:RUNNER_TEMP "fuapay-linux-x64.tar.gz"
+
+          & dotnet run `
+              --project tools/FuaPay.DeploymentArtifacts/FuaPay.DeploymentArtifacts.csproj `
+              --configuration Release `
+              --no-build `
+              -- `
+              release create `
+              --source $publishDirectory `
+              --archive $archivePath
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release archive packaging failed."
+          }
+
+          & dotnet run `
+              --project tools/FuaPay.DeploymentArtifacts/FuaPay.DeploymentArtifacts.csproj `
+              --configuration Release `
+              --no-build `
+              -- `
+              release verify `
+              --archive $archivePath
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release archive verification failed."
+          }
+
+      - name: Verify extracted release modes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="$RUNNER_TEMP/fuapay-linux-x64.tar.gz"
+          extracted="$RUNNER_TEMP/fuapay-linux-x64-extracted"
+          sudo groupadd --system fuapay
+          sudo useradd \
+            --system \
+            --gid fuapay \
+            --no-create-home \
+            --shell /usr/sbin/nologin \
+            fuapay
+          sudo install \
+            --directory \
+            --owner=root \
+            --group=root \
+            --mode=0700 \
+            "$extracted"
+          sudo tar \
+            --extract \
+            --gzip \
+            --preserve-permissions \
+            --no-same-owner \
+            --file="$archive" \
+            --directory="$extracted"
+          sudo chown --recursive fuapay:fuapay "$extracted"
+
+          unexpected_owner="$(
+            sudo find "$extracted" \
+              \( ! -user fuapay -o ! -group fuapay \) \
+              -print \
+              -quit
+          )"
+          test -z "$unexpected_owner"
+
+          while IFS= read -r -d '' directory; do
+            mode="$(sudo stat --format='%a' "$directory")"
+            test "$mode" = "770"
+          done < <(sudo find "$extracted" -type d -print0)
+
+          while IFS= read -r -d '' file; do
+            mode="$(sudo stat --format='%a' "$file")"
+            test "$mode" = "660"
+          done < <(
+            sudo find "$extracted" \
+              -type f \
+              ! -path "$extracted/FuaPay.Web" \
+              -print0
+          )
+
+          test "$(sudo stat --format='%a' "$extracted/FuaPay.Web")" = "750"
+          sudo --user=fuapay test -x "$extracted/FuaPay.Web"
 
       - name: Verify repository stayed clean
         shell: bash
