@@ -70,6 +70,7 @@ Institucionální názvy, loga a další prvky vizuální identity TUL/FUA nejso
 licencí poskytovány; podrobnosti jsou v [BRANDING.md](BRANDING.md). Licence
 třetích stran zůstávají zachované u příslušných komponent.
 
-Kód je připravený pro doplnění skutečných Entra a ČSOB hodnot. Integrace
-nejsou bez těchto údajů živě externě ověřené a repozitář sám není produkčním
-nasazením na `fuapay.tul.cz`.
+Microsoft Entra přihlášení je na `fuapay.tul.cz` živě nasazené a používané.
+ČSOB integrační/produkční provoz naproti tomu stále vyžaduje skutečné merchant
+údaje, klíče a předepsané externí ověření; simulovaný staging provider není
+živá finanční integrace.
