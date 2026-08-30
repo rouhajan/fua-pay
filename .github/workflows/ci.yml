@@ -342,7 +342,8 @@ jobs:
           set -euo pipefail
 
           archive="$RUNNER_TEMP/fuapay-linux-x64.tar.gz"
-          extracted="$RUNNER_TEMP/fuapay-linux-x64-extracted"
+          extracted="$(mktemp --directory /tmp/fuapay-linux-x64-extracted.XXXXXX)"
+          trap 'sudo rm --recursive --force "$extracted"' EXIT
           sudo groupadd --system fuapay
           sudo useradd \
             --system \
@@ -350,12 +351,8 @@ jobs:
             --no-create-home \
             --shell /usr/sbin/nologin \
             fuapay
-          sudo install \
-            --directory \
-            --owner=root \
-            --group=root \
-            --mode=0770 \
-            "$extracted"
+          sudo chown root:root "$extracted"
+          sudo chmod 0770 "$extracted"
           sudo tar \
             --extract \
             --gzip \
@@ -364,7 +361,6 @@ jobs:
             --file="$archive" \
             --directory="$extracted"
           sudo chown --recursive fuapay:fuapay "$extracted"
-          set -x
 
           unexpected_owner="$(
             sudo find "$extracted" \
