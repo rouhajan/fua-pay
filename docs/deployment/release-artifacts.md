@@ -98,7 +98,7 @@ next_link="/opt/fuapay/.current-${revision}.partial"
 test ! -e "$release_dir"
 test ! -e "$next_link"
 test ! -L "$next_link"
-install --directory --owner=root --group=root --mode=0700 "$release_dir"
+install --directory --owner=root --group=root --mode=0770 "$release_dir"
 tar \
   --extract \
   --gzip \

@@ -354,7 +354,7 @@ jobs:
             --directory \
             --owner=root \
             --group=root \
-            --mode=0700 \
+            --mode=0770 \
             "$extracted"
           sudo tar \
             --extract \
