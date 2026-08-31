@@ -1,14 +1,14 @@
 # Demo / staging deployment
 
-Status: 2026-08-30
+Status: 2026-08-31
 
 ## Deployment
 
 - URL: `https://fuapay.tul.cz`
 - Alternate URL: `https://fuapay.fa.tul.cz` redirects to the canonical URL.
-- Revision: `c0dba8bfb3eec6bc04d69271ff293c023098b409`
-- Active release: `/opt/fuapay/releases/c0dba8bfb3ee`
-- Rollback release: `/opt/fuapay/releases/45b86e3f2d1e`
+- Revision: `39293d85445bac0654b35bb2984617e273122481`
+- Active release: `/opt/fuapay/releases/39293d85445b`
+- Rollback release: `/opt/fuapay/releases/7cb9b1374970`
 - Service account: `fuapay:fuapay`
 - Kestrel: `127.0.0.1:5080`
 - Reverse proxy: Nginx
@@ -25,25 +25,162 @@ Status: 2026-08-30
 - Receipt preview mode: enabled
 - Nginx Basic Authentication: not configured; the staging front door is intentionally public.
 
-Microsoft Entra authentication is already live on the staging deployment.
+Microsoft Entra authentication is live on the staging deployment.
 Production ČSOB integration and production database workload are not active.
 
-Searchable customer selection is already implemented and deployed; it was
-merged in PR #15 (`8f6cc4ae2a78280931127ed0e709949a02ca7b90`) before the current
-runtime revision.
+Searchable customer selection is implemented and accepted on both desktop and a
+real phone. PR #31 initially changed primary touch devices to the native platform
+`<select>`, but real Android/Chrome staging smoke rejected that UX. PR #32
+restored the same searchable picker on touch devices while skipping only the
+desktop `pointerdown.preventDefault()` behavior for primary touch/coarse-pointer
+devices. The final deployed revision was verified on a real phone with filtering
+and tap selection working normally.
 
-The settlement-return foundation remains the currently deployed application
-behavior. The 2026-08-30 redeployment aligned the active release with repository
-`main` after deployment-artifact hardening; there were no intervening
-`src/FuaPay.Web` changes or EF schema changes relative to the previously active
-application revision.
-
-Actual ČSOB `payment/reverse` and `payment/refund` provider calls, automatic
-financial retries after ambiguity and production financial traffic remain
-disabled/not implemented as documented for the settlement-return foundation.
+The settlement-return foundation remains deployed. Actual ČSOB
+`payment/reverse` and `payment/refund` provider calls, automatic financial retries
+after ambiguity and production financial traffic remain disabled/not implemented
+as documented for the settlement-return foundation.
 
 `Database__ApplyMigrationsOnStart=false`; database migration remains a
 controlled deployment step.
+
+## 2026-08-31 C-01 + C-02 staging release
+
+### Scope
+
+The staging application was first advanced from
+`c0dba8bfb3eec6bc04d69271ff293c023098b409` to
+`7cb9b1374970b12af32b7d57895df620c83fac3f`, containing:
+
+- C-01: customer job-payment UI uses authoritative available/spendable credit;
+- C-02 first pass: mobile customer selection used the native platform select.
+
+The first deployment was technically healthy, but real-phone acceptance showed
+that Android/Chrome rendered the native customer select as an undesirable
+radio-style picker. PR #32 supplied the minimal follow-up and produced the final
+runtime revision:
+
+`39293d85445bac0654b35bb2984617e273122481`
+
+PR #32 changes only `wwwroot/js/customer-select-filter.js`: desktop searchable
+selection remains unchanged and primary touch/coarse-pointer devices use the same
+searchable picker while omitting the desktop pointerdown prevention that could
+interfere with touch selection.
+
+No EF model or schema change was introduced by C-01, C-02 or the PR #32
+follow-up. No migration SQL was generated or applied and `fuapay_demo` remains at
+17 applied migrations.
+
+### Verification
+
+The final `main` release gate passed:
+
+- Release build: PASS;
+- formatting: PASS;
+- `FuaPay.Web.Tests`: 775/775 PASS;
+- EF pending-model check: no model changes since the last migration;
+- PR #32 CI #131: PASS;
+- PR #32 CodeQL #133: PASS.
+
+The release was published self-contained for `linux-x64` after locked restore.
+`appsettings.Development.json` was absent from the publish output.
+
+Final release archive:
+
+`fuapay-staging-39293d85445bac0654b35bb2984617e273122481-linux-x64.tar.gz`
+
+SHA-256:
+
+`2a3ad32ae7291ea58e51406fd267543b514eeda9ddf95cdb65b6b312032ba46d`
+
+Size:
+
+`122839371` bytes
+
+The canonical deployment-artifact verifier reported:
+
+- directories: 12 entries, mode `0770`;
+- ordinary files: 400 entries, mode `0660`;
+- `FuaPay.Web`: mode `0750`.
+
+After transfer, the server-side archive matched both the expected SHA-256 and
+byte size. `gzip -t` and a full tar listing completed successfully before
+installation.
+
+### Installation and activation
+
+The final release was installed beside the active release at:
+
+`/opt/fuapay/releases/39293d85445b`
+
+Before activation, recursive verification confirmed:
+
+- all release content owned by `fuapay:fuapay`;
+- every directory mode `0770`;
+- every ordinary file except the host executable mode `0660`;
+- `FuaPay.Web` mode `0750` and executable by the `fuapay` service account;
+- `appsettings.Development.json` absent;
+- 401 files total and 12 directories.
+
+`/opt/fuapay/current` was switched atomically from
+`/opt/fuapay/releases/7cb9b1374970` to
+`/opt/fuapay/releases/39293d85445b`, then `fuapay.service` was restarted.
+The running process executable resolved to:
+
+`/opt/fuapay/releases/39293d85445b/FuaPay.Web`
+
+The first direct readiness connection immediately after restart could occur
+before Kestrel had bound to `127.0.0.1:5080`; the bounded retry then returned
+`{"status":"Healthy"}` as designed.
+
+### Post-deployment and functional verification
+
+Verified after restart:
+
+- `/opt/fuapay/current` resolves to
+  `/opt/fuapay/releases/39293d85445b`;
+- `fuapay.service` is active;
+- direct `/health/ready`: status `Healthy`;
+- `https://fuapay.tul.cz/`: HTTP 200;
+- `http://fuapay.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
+- `https://fuapay.fa.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
+- no warning-or-higher `fuapay.service` journal entries were observed in the
+  deployment verification window;
+- `systemctl --failed` reported no failed units.
+
+Direct Kestrel health checks include both `Host: fuapay.tul.cz` and
+`X-Forwarded-Proto: https`, matching the configured forwarded-header and host
+validation boundary.
+
+Functional staging acceptance confirmed:
+
+- the desktop Management job-create customer selector remains searchable and
+  behaves as before;
+- on a real phone, the customer selector presents the same searchable UI,
+  filters normally and completes selection by tap;
+- Microsoft Entra authentication remains live and usable.
+
+C-01's authoritative available-credit behavior is covered by the focused
+regression test in the 775-test gate; no artificial blocking-credit state was
+created solely for staging smoke.
+
+The prior release `/opt/fuapay/releases/7cb9b1374970` remains present as the
+immediate rollback target.
+
+### Deployment cleanup
+
+After successful technical and real-device verification:
+
+- the transferred final release archive was removed from the deployment user's
+  home directory;
+- the transferred previous `7cb9...` release archive was also absent/removed;
+- no temporary activation symlink remains;
+- `/opt/fuapay/current` still resolves to
+  `/opt/fuapay/releases/39293d85445b`;
+- `fuapay.service` remains active.
+
+The locally created hash-verified release archive is retained as release
+evidence on the deployment workstation.
 
 ## 2026-08-30 main-alignment redeployment
 
