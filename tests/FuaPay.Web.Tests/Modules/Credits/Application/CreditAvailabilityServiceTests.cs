@@ -18,6 +18,21 @@ public sealed class CreditAvailabilityServiceTests
     }
 
     [Fact]
+    public async Task GetAvailableAsync_FromSummary_SubtractsAllBlockingCredit()
+    {
+        var account = new CreditAccountSummary(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            BalanceMinorUnits: 1_000,
+            Version: 1);
+        var service = CreateService(blocking: 450);
+
+        var available = await service.GetAvailableAsync(account);
+
+        Assert.Equal(new Money(550), available);
+    }
+
+    [Fact]
     public async Task GetAvailableExcludingAsync_SubtractsOnlyOtherBlockingCredit()
     {
         var account = CreateAccount(balance: 1_000);

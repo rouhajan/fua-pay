@@ -18,6 +18,7 @@ public sealed class DetailsModel : PageModel
 {
     private readonly IJobQueries _jobQueries;
     private readonly ICreditQueries _creditQueries;
+    private readonly CreditAvailabilityService _creditAvailabilityService;
     private readonly CreditJobPaymentService _creditJobPaymentService;
     private readonly JobPresentationComposer _composer;
     private readonly PaymentCreationService _paymentCreationService;
@@ -26,6 +27,7 @@ public sealed class DetailsModel : PageModel
     public DetailsModel(
         IJobQueries jobQueries,
         ICreditQueries creditQueries,
+        CreditAvailabilityService creditAvailabilityService,
         CreditJobPaymentService creditJobPaymentService,
         JobPresentationComposer composer,
         PaymentCreationService paymentCreationService,
@@ -33,6 +35,7 @@ public sealed class DetailsModel : PageModel
     {
         ArgumentNullException.ThrowIfNull(jobQueries);
         ArgumentNullException.ThrowIfNull(creditQueries);
+        ArgumentNullException.ThrowIfNull(creditAvailabilityService);
         ArgumentNullException.ThrowIfNull(creditJobPaymentService);
         ArgumentNullException.ThrowIfNull(composer);
         ArgumentNullException.ThrowIfNull(paymentCreationService);
@@ -40,6 +43,7 @@ public sealed class DetailsModel : PageModel
 
         _jobQueries = jobQueries;
         _creditQueries = creditQueries;
+        _creditAvailabilityService = creditAvailabilityService;
         _creditJobPaymentService = creditJobPaymentService;
         _composer = composer;
         _paymentCreationService = paymentCreationService;
@@ -163,9 +167,21 @@ public sealed class DetailsModel : PageModel
                     job.CustomerUserId,
                     cancellationToken);
 
+            var availableCreditMinorUnits = 0L;
+
+            if (account is not null)
+            {
+                var availableCredit =
+                    await _creditAvailabilityService.GetAvailableAsync(
+                        account,
+                        cancellationToken);
+
+                availableCreditMinorUnits = availableCredit.MinorUnits;
+            }
+
             PaymentOptions = new CustomerJobPaymentOptions(
                 job.PriceMinorUnits,
-                account?.BalanceMinorUnits ?? 0);
+                availableCreditMinorUnits);
         }
 
         return true;
