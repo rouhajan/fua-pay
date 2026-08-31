@@ -1,12 +1,8 @@
 (() => {
-    const useNativeSelect =
+    const useTouchSelection =
         window.matchMedia(
             "(hover: none) and (pointer: coarse)"
         ).matches;
-
-    if (useNativeSelect) {
-        return;
-    }
 
     const normalize = (value) =>
         value
@@ -191,11 +187,13 @@
                         option.textContent =
                             customer.text;
 
-                        option.addEventListener(
-                            "pointerdown",
-                            (event) => {
-                                event.preventDefault();
-                            });
+                        if (!useTouchSelection) {
+                            option.addEventListener(
+                                "pointerdown",
+                                (event) => {
+                                    event.preventDefault();
+                                });
+                        }
 
                         option.addEventListener(
                             "click",
