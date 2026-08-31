@@ -17,15 +17,20 @@ Status: 2026-08-30
 - EF Core migrations: 17
 - Payment provider: Development
 - Staging test mode: enabled
-- Interactive staging sign-in: disabled
+- Interactive development/test sign-in: disabled
+- Microsoft Entra login: enabled, live and used on `fuapay.tul.cz`
 - Staging seed data: enabled
 - Simulated payments: enabled
 - Receipts: enabled
 - Receipt preview mode: enabled
 - Nginx Basic Authentication: not configured; the staging front door is intentionally public.
 
-Production Entra authentication, production ČSOB integration and production
-database workload are not active.
+Microsoft Entra authentication is already live on the staging deployment.
+Production ČSOB integration and production database workload are not active.
+
+Searchable customer selection is already implemented and deployed; it was
+merged in PR #15 (`8f6cc4ae2a78280931127ed0e709949a02ca7b90`) before the current
+runtime revision.
 
 The settlement-return foundation remains the currently deployed application
 behavior. The 2026-08-30 redeployment aligned the active release with repository

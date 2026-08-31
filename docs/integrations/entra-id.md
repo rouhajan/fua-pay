@@ -48,10 +48,6 @@ Propojení nemění interní `UserId`, kredit, zakázky, platby ani role. Jméno
 e-mail nejsou párovací klíče. SafeQ import ani automatické slučování nejsou
 implementované, protože zdrojová data a schválená pravidla nebyla dodána.
 
-Před prvním produkčním přepnutím musí být známé `oid` alespoň jednoho
-existujícího Administratora a jeho vazba musí být bezpečně připravena v rámci
-řízené migrace. Potom lze další existující účty propojovat v administraci.
-
 ## Konfigurace aplikace
 
 Tajemství patří do deployment secret store, ne do `appsettings.json`:
@@ -69,21 +65,21 @@ V Production je Entra povinná. Chybějící/neplatná hodnota zastaví startup.
 Entra a interaktivní vývojové/testovací přihlášení nesmějí být zapnuté
 současně.
 
-## Co musí dodat univerzitní IT
+## Aktuální živý stav
 
-1. Vytvořit single-tenant Web app registration pro `fuapay.tul.cz`.
-2. Dodat Tenant ID a Client ID.
-3. Zaregistrovat přesný web redirect
-   `https://fuapay.tul.cz/signin-oidc` a podle tenant policy logout/front-channel
-   URL `https://fuapay.tul.cz/signout-callback-oidc`.
-4. Bezpečně dodat a provozně rotovat client secret; jeho hodnotu nezapisovat do
-   Gitu. Současná implementace očekává secret, nikoli certifikát.
-5. Povolit standardní OIDC claims `tid`, `oid`, `name` a volitelně `email`.
-   Nepřidělovat Microsoft Graph application permissions ani directory scopes.
-6. Ověřit přesné `oid` počátečního Administratora a provést řízené propojení
-   s existujícím účtem.
-7. Po nasazení otestovat login, blokovaný účet, odhlášení a návratovou URL na
-   skutečném TUL tenantu.
+Microsoft Entra přihlášení je na `https://fuapay.tul.cz` živě nasazené a
+používané. App registration, Tenant ID, Client ID a přihlašovací redirect tedy
+nejsou otevřené onboarding úkoly.
 
-Bez těchto registračních hodnot je kód kompletní a lokálně testovaný, ale
-Entra integrace není živě externě ověřená.
+Provozní pravidla zůstávají:
+
+- client secret patří mimo Git/release a musí se řízeně rotovat;
+- identita se stále váže podle `tid + oid`, ne podle jména nebo e-mailu;
+- Microsoft Graph permissions ani directory scopes nejsou pro FUA Pay potřeba;
+- při změně Entra konfigurace nebo produkčním cutoveru se má pouze znovu
+  ověřit již fungující login/logout a lokální role, nikoli znovu otevírat
+  registraci aplikace jako nedokončenou funkci.
+
+Jednotlivé scénáře, například ruční propojení konkrétního existujícího účtu,
+se mají evidovat jen tehdy, pokud pro ně existuje konkrétní neověřený případ;
+nejsou důkazem, že samotná Entra integrace není živá.
