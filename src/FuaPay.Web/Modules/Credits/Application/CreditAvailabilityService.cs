@@ -18,8 +18,24 @@ public sealed class CreditAvailabilityService
         CreditAccount account,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(account);
+
         return GetAvailableAsync(
-            account,
+            account.Id,
+            account.Balance,
+            Money.Zero,
+            cancellationToken);
+    }
+
+    public Task<Money> GetAvailableAsync(
+        CreditAccountSummary account,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(account);
+
+        return GetAvailableAsync(
+            account.Id,
+            new Money(account.BalanceMinorUnits),
             Money.Zero,
             cancellationToken);
     }
@@ -29,6 +45,8 @@ public sealed class CreditAvailabilityService
         Money existingBlockingAmount,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(account);
+
         if (existingBlockingAmount.MinorUnits <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -37,27 +55,27 @@ public sealed class CreditAvailabilityService
         }
 
         return GetAvailableAsync(
-            account,
+            account.Id,
+            account.Balance,
             existingBlockingAmount,
             cancellationToken);
     }
 
     private async Task<Money> GetAvailableAsync(
-        CreditAccount account,
+        Guid accountId,
+        Money balance,
         Money excludedBlockingAmount,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(account);
-
         var totalBlocking =
             await _repository.GetTotalBlockingAmountAsync(
-                account.Id,
+                accountId,
                 cancellationToken);
 
         if (totalBlocking.MinorUnits < 0)
         {
             throw new InvalidDataException(
-                $"Credit account '{account.Id}' has a negative blocking amount.");
+                $"Credit account '{accountId}' has a negative blocking amount.");
         }
 
         if (
@@ -65,13 +83,13 @@ public sealed class CreditAvailabilityService
             excludedBlockingAmount.MinorUnits)
         {
             throw new InvalidDataException(
-                $"Credit account '{account.Id}' blocking amount does not " +
+                $"Credit account '{accountId}' blocking amount does not " +
                 "contain the excluded existing block.");
         }
 
         var otherBlocking = totalBlocking.Subtract(
             excludedBlockingAmount);
 
-        return account.Balance.Subtract(otherBlocking);
+        return balance.Subtract(otherBlocking);
     }
 }
