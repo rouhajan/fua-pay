@@ -1,4 +1,13 @@
 (() => {
+    const useNativeSelect =
+        window.matchMedia(
+            "(hover: none) and (pointer: coarse)"
+        ).matches;
+
+    if (useNativeSelect) {
+        return;
+    }
+
     const normalize = (value) =>
         value
             .normalize("NFD")
