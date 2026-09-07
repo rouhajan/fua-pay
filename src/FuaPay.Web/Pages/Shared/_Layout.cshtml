@@ -12,19 +12,11 @@
     var currentPage =
         (ViewContext.ActionDescriptor as PageActionDescriptor)?.ViewEnginePath
         ?? string.Empty;
-    var activeNavigationItem = navigationItems
-        .Where(item =>
-            item.Page is not null &&
-            (
-                item.IsOverview
-                    ? string.Equals(currentPage, "/Index", StringComparison.OrdinalIgnoreCase)
-                    : item.SectionPrefix is not null &&
-                      currentPage.StartsWith(
-                          item.SectionPrefix,
-                          StringComparison.OrdinalIgnoreCase)
-            ))
-        .OrderByDescending(item => item.SectionPrefix?.Length ?? 0)
-        .FirstOrDefault();
+    var activeNavigationItem = shellSelection is null
+        ? null
+        : AccessNavigation.FindActive(
+            shellSelection.Active.View,
+            currentPage);
     var accessEmail = User.FindAccessEmail();
 }
 <!DOCTYPE html>

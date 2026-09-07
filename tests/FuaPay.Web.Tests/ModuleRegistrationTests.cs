@@ -335,6 +335,16 @@ public sealed class ModuleRegistrationTests
         Assert.False(
             Assert.IsType<DevelopmentPaymentAvailability>(
                 availability.ImplementationInstance).IsEnabled);
+
+        var paymentCreationAvailability = Assert.Single(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                typeof(PaymentCreationAvailability));
+        Assert.False(
+            Assert.IsType<PaymentCreationAvailability>(
+                paymentCreationAvailability.ImplementationInstance)
+                .IsEnabled);
     }
 
     [Fact]
@@ -472,6 +482,14 @@ public sealed class ModuleRegistrationTests
             .GetRequiredService<IPaymentProviderInitiator>();
 
         Assert.IsType<CsobPaymentProviderInitiator>(initiator);
+        Assert.False(
+            scope.ServiceProvider
+                .GetRequiredService<DevelopmentPaymentAvailability>()
+                .IsEnabled);
+        Assert.True(
+            scope.ServiceProvider
+                .GetRequiredService<PaymentCreationAvailability>()
+                .IsEnabled);
         Assert.Single(
             services,
             descriptor =>

@@ -60,4 +60,20 @@ public sealed class AccessNavigationTests
             },
             items.Select(item => item.Label));
     }
+
+    [Theory]
+    [InlineData("/Customer/Payments/CreateTopUp", "Kredit")]
+    [InlineData("/Customer/Payments/Index", "Platby")]
+    [InlineData("/Customer/Payments/Details", "Platby")]
+    public void FindActive_CustomerPaymentPages_SelectExpectedItem(
+        string currentPage,
+        string expectedLabel)
+    {
+        var active = AccessNavigation.FindActive(
+            AccessView.Customer,
+            currentPage);
+
+        Assert.NotNull(active);
+        Assert.Equal(expectedLabel, active.Label);
+    }
 }

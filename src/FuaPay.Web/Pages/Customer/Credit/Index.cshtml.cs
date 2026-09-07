@@ -13,11 +13,11 @@ public sealed class IndexModel : PageModel
     private const int PageSize = 30;
 
     private readonly ICreditQueries _queries;
-    private readonly DevelopmentPaymentAvailability _paymentAvailability;
+    private readonly PaymentCreationAvailability _paymentAvailability;
 
     public IndexModel(
         ICreditQueries queries,
-        DevelopmentPaymentAvailability paymentAvailability)
+        PaymentCreationAvailability paymentAvailability)
     {
         ArgumentNullException.ThrowIfNull(queries);
         ArgumentNullException.ThrowIfNull(paymentAvailability);

@@ -1,6 +1,6 @@
 # Demo / staging deployment
 
-Status: 2026-08-31
+Status: 2026-09-07
 
 ## Deployment
 
@@ -15,18 +15,25 @@ Status: 2026-08-31
 - Configuration: `/etc/fuapay/staging.env`
 - Database: `fuapay_demo`
 - EF Core migrations: 17
-- Payment provider: Development
+- Payment provider: ČSOB integration
+- ČSOB Merchant ID: `M1EPAY2213`
+- ČSOB reconciliation worker: enabled and healthy
 - Staging test mode: enabled
 - Interactive development/test sign-in: disabled
 - Microsoft Entra login: enabled, live and used on `fuapay.tul.cz`
 - Staging seed data: enabled
-- Simulated payments: enabled
+- Simulated payments: disabled
 - Receipts: enabled
 - Receipt preview mode: enabled
 - Nginx Basic Authentication: not configured; the staging front door is intentionally public.
 
 Microsoft Entra authentication is live on the staging deployment.
-Production ČSOB integration and production database workload are not active.
+ČSOB integration-environment traffic is active for staging. Production ČSOB
+traffic and the production database workload are not active.
+
+The currently deployed application revision remains
+`39293d85445bac0654b35bb2984617e273122481`; the production-readiness patch that
+follows this live verification has not yet been deployed.
 
 Searchable customer selection is implemented and accepted on both desktop and a
 real phone. PR #31 initially changed primary touch devices to the native platform
@@ -43,6 +50,27 @@ as documented for the settlement-return foundation.
 
 `Database__ApplyMigrationsOnStart=false`; database migration remains a
 controlled deployment step.
+
+## 2026-09-07 current ČSOB integration status
+
+The staging runtime uses the ČSOB integration environment with Merchant ID
+`M1EPAY2213`. Simulated payments are disabled and the ČSOB reconciliation worker
+is enabled and healthy.
+
+Verified against the integration environment:
+
+- GET `echo` succeeded;
+- one real 100 CZK credit top-up was successfully authorized;
+- the browser return scheduled server-side reconciliation;
+- server-side reconciliation established the successful result, settlement
+  completed and the credit was credited.
+
+This evidence does not activate or validate production ČSOB traffic. Production
+activation, POST `echo`, the required negative and recovery scenarios including
+duplicate/lost returns and restart/exactly-once behavior, and ČSOB
+`payment/reverse` remain outstanding. The current patch also has to be deployed
+before its return redirect and customer top-up/navigation fixes are present in
+the staging runtime.
 
 ## 2026-08-31 C-01 + C-02 staging release
 

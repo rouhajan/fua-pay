@@ -34,7 +34,7 @@ public sealed class CsobPaymentReturnEndpointTests
         Assert.Equal("pay1234567890", scheduler.PayId);
         Assert.Equal(StatusCodes.Status303SeeOther, context.Response.StatusCode);
         Assert.Equal(
-            $"/fuapay/Customer/Payments/Details?id={paymentId:D}&view=customer",
+            $"/fuapay/Customer/Payments/Details/{paymentId:D}?view=customer",
             context.Response.Headers.Location.ToString());
     }
 
