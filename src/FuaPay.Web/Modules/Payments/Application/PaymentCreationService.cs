@@ -50,7 +50,7 @@ public sealed class PaymentCreationService
         _initiationService = initiationService;
     }
 
-    public async Task<Payment> CreateCreditTopUpAsync(
+    public async Task<PaymentCreationOutcome> CreateCreditTopUpAsync(
         Guid creationRequestId,
         Guid customerUserId,
         Money amount,
@@ -112,7 +112,7 @@ public sealed class PaymentCreationService
         }
     }
 
-    public async Task<Payment> CreateJobPaymentAsync(
+    public async Task<PaymentCreationOutcome> CreateJobPaymentAsync(
         Guid customerUserId,
         Guid jobId,
         CancellationToken cancellationToken = default)
@@ -126,7 +126,7 @@ public sealed class PaymentCreationService
                 nameof(jobId));
         }
 
-        Payment preparedPayment;
+        PreparedJobPayment preparedPayment;
         try
         {
             preparedPayment = await _transaction.ExecuteAsync(
@@ -148,20 +148,25 @@ public sealed class PaymentCreationService
                 concurrentPayment is not null &&
                 concurrentPayment.CustomerUserId == customerUserId)
             {
-                return (await _initiationService.InitializeIfPreparedAsync(
-                    concurrentPayment,
-                    cancellationToken)).Payment;
+                return CreateOutcome(
+                    await _initiationService.InitializeIfPreparedAsync(
+                        concurrentPayment,
+                        cancellationToken),
+                    paymentCreatedByCurrentRequest: false);
             }
 
             throw new BlockingJobPaymentAlreadyExistsException(jobId);
         }
 
-        return (await _initiationService.InitializeIfPreparedAsync(
-            preparedPayment,
-            cancellationToken)).Payment;
+        return CreateOutcome(
+            await _initiationService.InitializeIfPreparedAsync(
+                preparedPayment.Payment,
+                cancellationToken),
+            preparedPayment.CreatedByCurrentRequest);
     }
 
-    private async Task<Payment> PrepareJobPaymentInsideTransactionAsync(
+    private async Task<PreparedJobPayment>
+        PrepareJobPaymentInsideTransactionAsync(
         Guid customerUserId,
         Guid jobId,
         CancellationToken cancellationToken)
@@ -202,19 +207,24 @@ public sealed class PaymentCreationService
                     customerUserId);
             }
 
-            return existing;
+            return new PreparedJobPayment(
+                existing,
+                CreatedByCurrentRequest: false);
         }
 
-        return await AddPreparedPaymentAsync(
-            customerUserId,
-            PaymentPurposeType.Job,
-            job.Id,
-            new Money(job.PriceMinorUnits),
-            creationRequestId: null,
-            cancellationToken);
+        return new PreparedJobPayment(
+            await AddPreparedPaymentAsync(
+                customerUserId,
+                PaymentPurposeType.Job,
+                job.Id,
+                new Money(job.PriceMinorUnits),
+                creationRequestId: null,
+                cancellationToken),
+            CreatedByCurrentRequest: true);
     }
 
-    private async Task<Payment> CreateAndInitializePreparedPaymentAsync(
+    private async Task<PaymentCreationOutcome>
+        CreateAndInitializePreparedPaymentAsync(
         Guid customerUserId,
         PaymentPurposeType purposeType,
         Guid? jobId,
@@ -230,9 +240,11 @@ public sealed class PaymentCreationService
             creationRequestId,
             cancellationToken);
 
-        return (await _initiationService.InitializeAsync(
-            payment.Id,
-            cancellationToken)).Payment;
+        return CreateOutcome(
+            await _initiationService.InitializeAsync(
+                payment.Id,
+                cancellationToken),
+            paymentCreatedByCurrentRequest: true);
     }
 
     private async Task<Payment> AddPreparedPaymentAsync(
@@ -305,7 +317,7 @@ public sealed class PaymentCreationService
         }
     }
 
-    private async Task<Payment> ResolveTopUpReplayAsync(
+    private async Task<PaymentCreationOutcome> ResolveTopUpReplayAsync(
         Guid creationRequestId,
         Guid customerUserId,
         Money amount,
@@ -323,8 +335,35 @@ public sealed class PaymentCreationService
                 creationRequestId);
         }
 
-        return (await _initiationService.InitializeIfPreparedAsync(
-            existing,
-            cancellationToken)).Payment;
+        return CreateOutcome(
+            await _initiationService.InitializeIfPreparedAsync(
+                existing,
+                cancellationToken),
+            paymentCreatedByCurrentRequest: false);
     }
+
+    private PaymentCreationOutcome CreateOutcome(
+        PaymentInitializationOutcome initialization,
+        bool paymentCreatedByCurrentRequest)
+    {
+        var payment = initialization.Payment;
+        var processUri = _providerInitiator.ResolveTrustedProcessUri(
+            payment.Provider,
+            payment.ProviderReference,
+            initialization.ProcessUri?.AbsoluteUri);
+        var disposition = initialization.CompletedByCurrentRequest
+            ? paymentCreatedByCurrentRequest
+                ? PaymentCreationDisposition.FreshInitialization
+                : PaymentCreationDisposition.ResumedInitialization
+            : PaymentCreationDisposition.ExistingPayment;
+
+        return new PaymentCreationOutcome(
+            payment,
+            processUri,
+            disposition);
+    }
+
+    private sealed record PreparedJobPayment(
+        Payment Payment,
+        bool CreatedByCurrentRequest);
 }

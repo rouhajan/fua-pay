@@ -35,14 +35,14 @@ s oficiální eAPI 1.9/activation dokumentací a s existující FUA Pay architek
 poté implementovat jen potvrzené mezery. Neprovádět generický audit celého repa
 ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
 
-- [ ] Async stav po návratu z brány bez reloadu celé stránky.
+- [x] Async stav po návratu z brány bez reloadu celé stránky.
       - detail po returnu smí krátce začít jako `Pending`;
       - klient periodicky načte pouze potřebná data;
       - aktualizuje status badge, relevantní text/akce a kredit v shellu;
       - polling skončí při terminálním stavu nebo po bounded timeoutu;
       - chyba pollingu nesmí změnit finanční stav a ponechá bezpečný refresh
         fallback.
-- [ ] Přímý redirect na ČSOB po úspěšném `payment/init` + okamžitém ověření.
+- [x] Přímý redirect na ČSOB po úspěšném `payment/init` + okamžitém ověření.
       - po zadání částky uživatel nemá zbytečný meziklik;
       - `Details` zůstane recovery cesta pro existující `Pending` platbu a dál
         nabízí `payment/process` odkaz.
@@ -58,13 +58,15 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
       provider-neutral základě nebo jiným minimálním způsobem, který zachová
       idempotenci, audit a bezpečné řešení nejasného timeoutu. Bez throwaway
       bypassu jen pro aktivaci.
-- [ ] Doplnit cílené unit/integration testy pro nové větve lifecycle a UX
-      endpointy.
+- [x] Doplnit cílené unit testy pro Stage 1 lifecycle a Stage 2 UX endpointy;
+      persistence cesty zůstávají pokryté PostgreSQL integračním gate.
 - [ ] `scripts/verify.ps1` + PostgreSQL gate + live GET/POST echo před merge.
 
-Zaškrtnuté Stage 1 položky výše označují implementaci a lokální automatizované
-pokrytí. Živé POST echo a bankovní expired scénář zůstávají samostatně
-nezaškrtnuté v sekci C, dokud skutečně neproběhnou.
+Zaškrtnuté Stage 1 a Stage 2 položky výše označují implementaci a lokální
+automatizované pokrytí. Stage 2 používá owner-scoped read-only status handler a
+bounded polling (2 sekundy, nejvýše 30 pokusů); nejde o živý bankovní test.
+Živé POST echo a bankovní expired scénář zůstávají samostatně nezaškrtnuté v
+sekci C, dokud skutečně neproběhnou.
 
 ### Rozhodnutí, která nejsou automaticky součástí tohoto passu
 

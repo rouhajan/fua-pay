@@ -55,4 +55,10 @@ public sealed class DevelopmentPaymentProviderInitiator :
 
         return Task.CompletedTask;
     }
+
+    public Uri? ResolveTrustedProcessUri(
+        PaymentProvider provider,
+        string? providerReference,
+        string? processUri) =>
+        null;
 }

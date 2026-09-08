@@ -10,15 +10,19 @@ public sealed class CsobPaymentProviderInitiator :
 {
     private readonly ICsobGatewayClient _client;
     private readonly CsobGatewayAvailability _availability;
+    private readonly CsobGatewayConfiguration _configuration;
 
     public CsobPaymentProviderInitiator(
         ICsobGatewayClient client,
-        CsobGatewayAvailability availability)
+        CsobGatewayAvailability availability,
+        CsobGatewayConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(availability);
+        ArgumentNullException.ThrowIfNull(configuration);
         _client = client;
         _availability = availability;
+        _configuration = configuration;
     }
 
     public PaymentProvider Provider => PaymentProvider.Csob;
@@ -99,5 +103,89 @@ public sealed class CsobPaymentProviderInitiator :
                 "pouze konzervativní reconciliation cestou.",
                 status.ResultCode);
         }
+    }
+
+    public Uri? ResolveTrustedProcessUri(
+        PaymentProvider provider,
+        string? providerReference,
+        string? processUri)
+    {
+        if (
+            provider != Provider ||
+            string.IsNullOrWhiteSpace(providerReference) ||
+            string.IsNullOrWhiteSpace(processUri) ||
+            processUri.Length > PaymentInitiation.MaximumProcessUriLength ||
+            !string.Equals(processUri, processUri.Trim(), StringComparison.Ordinal) ||
+            processUri.Contains('\\') ||
+            processUri.Any(char.IsControl))
+        {
+            return null;
+        }
+
+        string payId;
+
+        try
+        {
+            payId = CsobPayId.RequireCanonical(providerReference);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+
+        if (
+            !Uri.TryCreate(processUri, UriKind.Absolute, out var candidate) ||
+            !candidate.IsAbsoluteUri ||
+            candidate.Scheme != Uri.UriSchemeHttps ||
+            candidate.UserInfo.Length != 0 ||
+            candidate.Query.Length != 0 ||
+            candidate.Fragment.Length != 0 ||
+            !string.Equals(
+                processUri,
+                candidate.AbsoluteUri,
+                StringComparison.Ordinal) ||
+            !HasExpectedOrigin(candidate) ||
+            !HasExpectedPath(candidate, payId))
+        {
+            return null;
+        }
+
+        return candidate;
+    }
+
+    private bool HasExpectedOrigin(Uri candidate) =>
+        string.Equals(
+            candidate.Scheme,
+            _configuration.ApiBaseUri.Scheme,
+            StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(
+            candidate.IdnHost,
+            _configuration.ApiBaseUri.IdnHost,
+            StringComparison.OrdinalIgnoreCase) &&
+        candidate.Port == _configuration.ApiBaseUri.Port;
+
+    private bool HasExpectedPath(Uri candidate, string payId)
+    {
+        var segments = candidate.AbsolutePath.Split(
+            '/',
+            StringSplitOptions.None);
+
+        if (
+            segments.Length != 9 ||
+            segments[0].Length != 0 ||
+            segments[1] != "api" ||
+            segments[2] != "v1.9" ||
+            segments[3] != "payment" ||
+            segments[4] != "process" ||
+            segments[5] != Uri.EscapeDataString(_configuration.MerchantId) ||
+            segments[6] != Uri.EscapeDataString(payId) ||
+            segments[7].Length != 14 ||
+            !segments[7].All(char.IsAsciiDigit) ||
+            segments[8].Length == 0)
+        {
+            return false;
+        }
+
+        return true;
     }
 }

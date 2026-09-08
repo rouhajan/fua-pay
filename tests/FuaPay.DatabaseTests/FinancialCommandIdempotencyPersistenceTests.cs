@@ -657,12 +657,14 @@ public sealed class FinancialCommandIdempotencyPersistenceTests :
     {
         using var scope = _factory.Services.CreateScope();
 
-        return await scope.ServiceProvider
+        var outcome = await scope.ServiceProvider
             .GetRequiredService<PaymentCreationService>()
             .CreateCreditTopUpAsync(
                 creationRequestId,
                 customerUserId,
                 new Money(50_000));
+
+        return outcome.Payment;
     }
 
     private async Task<CreditAdjustmentResult> AdjustAsync(

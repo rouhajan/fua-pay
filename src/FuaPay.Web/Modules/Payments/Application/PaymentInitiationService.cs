@@ -57,7 +57,8 @@ public sealed class PaymentInitiationService
         {
             return new PaymentInitializationOutcome(
                 payment,
-                initiation?.ProcessUri);
+                initiation?.ProcessUri,
+                CompletedByCurrentRequest: false);
         }
 
         return await InitializeAsync(
@@ -95,7 +96,8 @@ public sealed class PaymentInitiationService
         {
             return new PaymentInitializationOutcome(
                 payment,
-                initiation.ProcessUri);
+                initiation.ProcessUri,
+                CompletedByCurrentRequest: false);
         }
 
         var startedAt = _timeProvider.GetUtcNow();
@@ -225,7 +227,8 @@ public sealed class PaymentInitiationService
 
                         return new PaymentInitializationOutcome(
                             currentPayment,
-                            currentInitiation.ProcessUri);
+                            currentInitiation.ProcessUri,
+                            CompletedByCurrentRequest: false);
                     }
 
                     if (currentPayment.Status != PaymentStatus.Created)
@@ -288,7 +291,8 @@ public sealed class PaymentInitiationService
 
                     return new PaymentInitializationOutcome(
                         currentPayment,
-                        providerResult.ProcessUri);
+                        providerResult.ProcessUri,
+                        CompletedByCurrentRequest: true);
                 },
                 cancellationToken);
         }
@@ -325,7 +329,8 @@ public sealed class PaymentInitiationService
 
         return new PaymentInitializationOutcome(
             payment,
-            initiation.ProcessUri);
+            initiation.ProcessUri,
+            CompletedByCurrentRequest: false);
     }
 
     private async Task MarkUncertainAsync(

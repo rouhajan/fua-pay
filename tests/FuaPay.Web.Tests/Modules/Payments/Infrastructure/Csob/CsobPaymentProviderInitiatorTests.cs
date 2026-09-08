@@ -15,9 +15,7 @@ public sealed class CsobPaymentProviderInitiatorTests
         string expectedItemName)
     {
         var client = new RecordingClient();
-        var initiator = new CsobPaymentProviderInitiator(
-            client,
-            new CsobGatewayAvailability(true));
+        var initiator = CreateInitiator(client);
         var request = new PaymentProviderInitializationRequest(
             Guid.NewGuid(),
             PaymentProvider.Csob,
@@ -50,9 +48,7 @@ public sealed class CsobPaymentProviderInitiatorTests
     [Fact]
     public async Task InitializeAsync_RejectsDifferentProvider()
     {
-        var initiator = new CsobPaymentProviderInitiator(
-            new RecordingClient(),
-            new CsobGatewayAvailability(true));
+        var initiator = CreateInitiator(new RecordingClient());
         var request = new PaymentProviderInitializationRequest(
             Guid.NewGuid(),
             PaymentProvider.Development,
@@ -71,9 +67,7 @@ public sealed class CsobPaymentProviderInitiatorTests
     {
         var failure = new CsobGatewayException("status unavailable");
         var client = new RecordingClient(failure);
-        var initiator = new CsobPaymentProviderInitiator(
-            client,
-            new CsobGatewayAvailability(true));
+        var initiator = CreateInitiator(client);
         var request = new PaymentProviderInitializationRequest(
             Guid.NewGuid(),
             PaymentProvider.Csob,
@@ -107,9 +101,7 @@ public sealed class CsobPaymentProviderInitiatorTests
                 ResultCode: 110,
                 ResultMessage: "declined")
         };
-        var initiator = new CsobPaymentProviderInitiator(
-            client,
-            new CsobGatewayAvailability(true));
+        var initiator = CreateInitiator(client);
         var request = new PaymentProviderInitializationRequest(
             Guid.NewGuid(),
             PaymentProvider.Csob,
@@ -135,9 +127,7 @@ public sealed class CsobPaymentProviderInitiatorTests
         {
             StatusPaymentStatus = 6
         };
-        var initiator = new CsobPaymentProviderInitiator(
-            client,
-            new CsobGatewayAvailability(true));
+        var initiator = CreateInitiator(client);
         var request = new PaymentProviderInitializationRequest(
             Guid.NewGuid(),
             PaymentProvider.Csob,
@@ -156,6 +146,77 @@ public sealed class CsobPaymentProviderInitiatorTests
             client.Result.PayId,
             candidate.ProviderReference);
     }
+
+    [Fact]
+    public void ResolveTrustedProcessUri_ExactCsobUriIsAccepted()
+    {
+        var initiator = CreateInitiator(new RecordingClient());
+        const string processUri =
+            "https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/" +
+            "M1MIPS0000/ff41e84b7e33%40HA/20260908123045/dGVzdA%3D%3D";
+
+        var resolved = initiator.ResolveTrustedProcessUri(
+            PaymentProvider.Csob,
+            "ff41e84b7e33@HA",
+            processUri);
+
+        Assert.Equal(processUri, resolved?.AbsoluteUri);
+    }
+
+    [Theory]
+    [InlineData("http://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/M1MIPS0000/ff41e84b7e33%40HA/20260908123045/signature")]
+    [InlineData("not a URI")]
+    [InlineData("https://evil.example/api/v1.9/payment/process/M1MIPS0000/ff41e84b7e33%40HA/20260908123045/signature")]
+    [InlineData("https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/refund/M1MIPS0000/ff41e84b7e33%40HA/20260908123045/signature")]
+    [InlineData("https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/M1MIPS0000/differentPayId/20260908123045/signature")]
+    [InlineData("https://user@iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/M1MIPS0000/ff41e84b7e33%40HA/20260908123045/signature")]
+    [InlineData("https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/M1MIPS0000/ff41e84b7e33%40HA/20260908123045/signature?next=https://evil.example")]
+    [InlineData("https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/M1MIPS0000/ff41e84b7e33%40HA/not-a-dttm/signature")]
+    [InlineData("https://iapi.iplatebnibrana.csob.cz/api//v1.9/payment/process/M1MIPS0000/ff41e84b7e33%40HA/20260908123045/signature")]
+    [InlineData("https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/M1MIPS0000/ff41e84b7e33%40HA/20260908123045/signature/")]
+    public void ResolveTrustedProcessUri_UnsafeUriIsRejected(
+        string processUri)
+    {
+        var initiator = CreateInitiator(new RecordingClient());
+
+        var resolved = initiator.ResolveTrustedProcessUri(
+            PaymentProvider.Csob,
+            "ff41e84b7e33@HA",
+            processUri);
+
+        Assert.Null(resolved);
+    }
+
+    [Fact]
+    public void ResolveTrustedProcessUri_DifferentProviderIsRejected()
+    {
+        var initiator = CreateInitiator(new RecordingClient());
+        const string processUri =
+            "https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/" +
+            "M1MIPS0000/ff41e84b7e33%40HA/20260908123045/signature";
+
+        var resolved = initiator.ResolveTrustedProcessUri(
+            PaymentProvider.Development,
+            "ff41e84b7e33@HA",
+            processUri);
+
+        Assert.Null(resolved);
+    }
+
+    private static CsobPaymentProviderInitiator CreateInitiator(
+        ICsobGatewayClient client) =>
+        new(
+            client,
+            new CsobGatewayAvailability(true),
+            new CsobGatewayConfiguration(
+                Enabled: true,
+                CsobGatewayConfiguration.IntegrationApiBaseUri,
+                MerchantId: "M1MIPS0000",
+                PrivateKeyPath: "unused-private-key",
+                GatewayPublicKeyPath: "unused-public-key",
+                ReturnUri: new Uri("https://localhost/csob/return"),
+                PaymentTtlSeconds: 900,
+                RequestTimeout: TimeSpan.FromSeconds(30)));
 
     private sealed class RecordingClient : ICsobGatewayClient
     {

@@ -54,15 +54,14 @@ public sealed class CreateTopUpModel : PageModel
 
         try
         {
-            var payment = await _paymentCreationService.CreateCreditTopUpAsync(
+            var outcome = await _paymentCreationService.CreateCreditTopUpAsync(
                 CreationRequestId,
                 RequireCustomerUserId(),
                 Money.FromCrowns(AmountCrowns),
                 cancellationToken);
 
-            return RedirectToPage(
-                "./Details",
-                new { id = payment.Id, view = "customer" });
+            return CustomerPaymentNavigation.AfterCreation(
+                outcome);
         }
         catch (Exception exception) when (
             PageOperationError.IsExpected(exception))

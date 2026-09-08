@@ -38,9 +38,13 @@ Po vytvoření platby se persistuje interní `Payment`, `PaymentInitiation`,
 podepsanou odpověď, durabilně zachytí `payId`/process URI a bezprostředně provede
 podepsané `payment/status`. Teprve poté se lokální platba přepne do `Pending`.
 
-Zákazník pokračuje přes podepsanou HTTPS `payment/process` URI vytvořenou ze
-známého ČSOB API hostu. FUA Pay nezobrazuje formulář karty a neukládá PAN,
-CVV/CVC, PIN, expiraci ani 3-D Secure údaje.
+Po nové nebo v aktuálním requestu bezpečně dokončené inicializaci přesměruje
+FUA Pay zákazníka přímo na podepsanou HTTPS `payment/process` URI. Před
+redirectem server fail-closed ověří přesný nakonfigurovaný ČSOB origin, tvar
+cesty, merchant ID a shodu `payId` s persistovanou provider reference. Stabilní
+replay již inicializované `Pending` platby a provider bez externí URI vedou na
+lokální detail. FUA Pay nezobrazuje formulář karty a neukládá PAN, CVV/CVC, PIN,
+expiraci ani 3-D Secure údaje.
 
 Return endpoint přijímá GET nebo malý `application/x-www-form-urlencoded` POST.
 Z browseru používá pouze `payId` jako podnět pro persistovanou reconciliation
@@ -66,24 +70,25 @@ zůstává běžné `Failed`; všechny ostatní nenulové kombinace zůstávají
 ### Návrat z brány
 
 Return endpoint pouze naplánuje reconciliation a okamžitě přesměruje browser na
-detail platby. Reconciliation může doběhnout až o několik sekund později. Dne
-2026-09-08 proto detail po návratu krátce zobrazil starý `Pending` stav a nový
-kredit se projevil až po ručním F5.
+detail platby. Reconciliation může doběhnout až o několik sekund později. Detail
+proto při lokálním stavu `Pending` používá owner-scoped GET status handler, který
+čte pouze lokální payment read model a u dobití aktuální lokální kredit. Odpověď
+má `Cache-Control: no-store`; handler nevolá ČSOB, reconciliation ani settlement
+a nic nemění.
 
-To není finanční chyba, ale UX mezera. Cílový návrh je aktualizovat jen relevantní
-data asynchronně bez reloadu celé stránky: stav platby, zobrazený kredit a akce
-na detailu. Polling musí mít omezený čas, po terminálním stavu skončit a při
-nedostupnosti ponechat bezpečný fallback na ruční refresh.
+Self-hosted skript pod stávající CSP načítá stav po dvou sekundách, nejvýše
+30krát. V místě aktualizuje status badge, čas, pending-only akce a případný
+kredit v shellu. Končí při terminálním stavu, chybě, ztrátě přístupu/not-found
+nebo vyčerpání limitu; ruční refresh zůstává dostupný. Jde o lokálně
+implementovaný stav, nikoli důkaz živého ČSOB scénáře.
 
 ### Přechod na platební bránu
 
-Aktuálně po zadání částky vznikne a inicializuje se platba, browser je přesměrován
-na interní detail a teprve tam uživatel kliká na „Pokračovat na zabezpečenou
-platební bránu ČSOB“.
-
-Cílový UX je po úspěšné inicializaci přesměrovat rovnou na `payment/process`.
-Detail platby zůstane zachovaný jako recovery cesta pro již existující `Pending`
-platbu, takže uživatel může pokračovat na bránu i po přerušení toku.
+Po úspěšné nové nebo bezpečně obnovené inicializaci a okamžitém podepsaném
+`payment/status` ověření vede top-up i přímá CardJob cesta rovnou na důvěryhodnou
+`payment/process` URI. Detail platby zůstává recovery cesta pro již existující
+`Pending` platbu a znovu ověřuje persistovanou URI stejnou provider hranicí před
+zobrazením odkazu. Browser/form/query vstup cíl redirectu neurčuje.
 
 Je správně, že lokální `Pending` záznam může existovat ještě před zadáním karty:
 v té chvíli už byla platba skutečně založena u ČSOB a má `payId`. Opuštěné
@@ -95,9 +100,6 @@ expiry lifecycle, ne mazání historie.
 1. `payment/reverse` zatím nemá skutečné ČSOB síťové volání. Existující
    provider-neutral Reverse/Refund persistence je základ, nikoli dokončená ČSOB
    operace.
-2. Po returnu chybí asynchronní dotažení UI do terminálního stavu.
-3. Po úspěšném `payment/init`/ověření chybí přímý redirect na `payment/process`;
-   interní detail vytváří jeden zbytečný klik navíc.
 
 Refund není součástí povinného ČSOB production-activation checklistu. Zda má být
 in-app card refund součást první produkční verze FUA Pay, zůstává samostatné
