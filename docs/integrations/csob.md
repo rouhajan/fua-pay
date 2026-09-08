@@ -91,28 +91,31 @@ Privátní klíč musí být mimo Git/release a čitelný jen účtem služby. N
 konfliktní nebo prostředí neodpovídající konfigurace zastaví startup.
 `Development` provider není produkční fallback.
 
-## Co je potřeba před první skutečnou integrační platbou
+## Stav ověření v integračním prostředí
 
-1. Získat od ČSOB přístup a Merchant ID pro integrační prostředí.
-2. Vygenerovat/registrovat obchodníkův veřejný
-   klíč a bezpečně dodat odpovídající privátní PEM a aktuální veřejný klíč
-   brány.
-3. Zpřístupnit a u ČSOB nastavit veřejnou HTTPS return URL integrační instance.
-4. Nastavit výše uvedené proměnné s integrační API URL a spustit explicitní
-   `echo`:
+První skutečná integrační platba byla úspěšně ověřena. Dobití kreditu 100 Kč
+prošlo přes `payment/init`, `payment/process`, úspěšnou autorizaci, browserový
+return, serverovou reconciliation a settlement až k připsání kreditu.
 
-   ```powershell
-   $env:FUA_PAY_CSOB_SANDBOX_TESTS_ALLOWED = "1"
-   ./scripts/verify.ps1 -RunCsobSandboxTests
-   ```
+Staging používá Merchant ID `M1EPAY2213` v integračním prostředí. GET `echo`
+uspěl a reconciliation worker je zapnutý a zdravý. Produkční ČSOB provoz není
+aktivní.
 
-5. V integrační instanci provést skutečnou testovací top-up i job platbu a
-   ověřit success, zamítnutí/zrušení, duplicitní nebo ztracený return, restart
-   a přesně jeden lokální účinek.
+Před aktivací produkčního prostředí zbývá v integrační instanci ověřit
+POST `echo`, skutečnou platbu zakázky, zamítnutí/zrušení, duplicitní nebo
+ztracený return, restart a přesně jeden lokální účinek.
 
 Teprve úspěšné předepsané integrační scénáře patří mezi podklady pro
 [aktivaci produkčního prostředí](https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environment).
 
+Samostatný opt-in síťový `echo` test lze spustit takto:
+
+```powershell
+$env:FUA_PAY_CSOB_SANDBOX_TESTS_ALLOWED = "1"
+./scripts/verify.ps1 -RunCsobSandboxTests
+```
+
 Automatizované testy používají deterministické fake klienty. Opt-in síťový test
-volá pouze `echo`; nevytváří transakci. Bez skutečných merchant údajů tedy
-ČSOB není živě externě otestovaná.
+volá pouze `echo`; nevytváří transakci. Samostatně provedené skutečné dobití
+kreditu 100 Kč prokázalo úspěšný transakční tok v integračním prostředí, nikoli
+dosud zbývající integrační scénáře ani připravenost k produkční aktivaci.

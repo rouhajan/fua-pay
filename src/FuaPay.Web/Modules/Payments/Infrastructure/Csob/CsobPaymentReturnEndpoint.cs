@@ -141,8 +141,8 @@ public static class CsobPaymentReturnEndpoint
             ? context.Request.PathBase.Value
             : string.Empty;
         var location =
-            $"{pathBase}/Customer/Payments/Details" +
-            $"?id={paymentId:D}&view=customer";
+            $"{pathBase}/Customer/Payments/Details/{paymentId:D}" +
+            "?view=customer";
 
         context.Response.StatusCode = StatusCodes.Status303SeeOther;
         context.Response.Headers.Location = location;

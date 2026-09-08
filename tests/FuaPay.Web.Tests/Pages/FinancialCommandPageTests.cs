@@ -9,11 +9,26 @@ using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Pages.Customer.Payments;
 
 using CreditIndexModel = FuaPay.Web.Pages.Admin.Credit.IndexModel;
+using CustomerCreditIndexModel =
+    FuaPay.Web.Pages.Customer.Credit.IndexModel;
 
 namespace FuaPay.Web.Tests.Pages;
 
 public sealed class FinancialCommandPageTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CustomerCreditIndex_UsesActiveProviderAvailability(
+        bool isAvailable)
+    {
+        var model = new CustomerCreditIndexModel(
+            new EmptyCreditQueries(),
+            new PaymentCreationAvailability(isAvailable));
+
+        Assert.Equal(isAvailable, model.CanCreatePayment);
+    }
+
     [Fact]
     public void TopUpGet_CreatesStableRequestIdForRenderedForm()
     {

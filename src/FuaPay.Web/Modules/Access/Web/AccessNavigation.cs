@@ -8,6 +8,9 @@ public sealed record AccessNavigationItem(
 
 public static class AccessNavigation
 {
+    private const string CustomerTopUpPage =
+        "/Customer/Payments/CreateTopUp";
+
     private static readonly IReadOnlyList<AccessNavigationItem>
         CustomerItems =
         [
@@ -55,5 +58,39 @@ public static class AccessNavigation
                 view,
                 "Pracovní pohled není podporovaný.")
         };
+    }
+
+    public static AccessNavigationItem? FindActive(
+        AccessView view,
+        string currentPage)
+    {
+        ArgumentNullException.ThrowIfNull(currentPage);
+
+        var effectivePage =
+            view == AccessView.Customer &&
+            string.Equals(
+                currentPage,
+                CustomerTopUpPage,
+                StringComparison.OrdinalIgnoreCase)
+                ? "/Customer/Credit/Index"
+                : currentPage;
+
+        return For(view)
+            .Where(item =>
+                item.Page is not null &&
+                (
+                    item.IsOverview
+                        ? string.Equals(
+                            effectivePage,
+                            "/Index",
+                            StringComparison.OrdinalIgnoreCase)
+                        : item.SectionPrefix is not null &&
+                          effectivePage.StartsWith(
+                              item.SectionPrefix,
+                              StringComparison.OrdinalIgnoreCase)
+                ))
+            .OrderByDescending(
+                item => item.SectionPrefix?.Length ?? 0)
+            .FirstOrDefault();
     }
 }

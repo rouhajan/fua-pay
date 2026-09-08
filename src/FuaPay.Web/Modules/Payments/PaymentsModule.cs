@@ -36,6 +36,15 @@ public static class PaymentsModule
         services.TryAddSingleton(
             new DevelopmentPaymentAvailability(
                 developmentPaymentUiEnabled));
+        services.TryAddSingleton(
+            new PaymentCreationAvailability(
+                activeProvider switch
+                {
+                    PaymentProvider.Development =>
+                        developmentPaymentUiEnabled,
+                    PaymentProvider.Csob => true,
+                    _ => false
+                }));
         services.AddScoped<PaymentCreationService>();
         services.AddScoped<PaymentInitiationService>();
         services.AddScoped<PaymentSettlementService>();
