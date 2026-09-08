@@ -1,452 +1,184 @@
 # Demo / staging deployment
 
-Status: 2026-09-07
+Status: 2026-09-08
 
-## Deployment
+Tento soubor popisuje pouze aktuální staging runtime a poslední deployment
+evidence. Kanonické vytváření/installace release artefaktu je v
+[`release-artifacts.md`](release-artifacts.md). Aktuální ČSOB postup až do
+production readiness je v
+[`../integrations/csob-production-readiness.md`](../integrations/csob-production-readiness.md).
+
+## Aktuální runtime
 
 - URL: `https://fuapay.tul.cz`
-- Alternate URL: `https://fuapay.fa.tul.cz` redirects to the canonical URL.
-- Revision: `39293d85445bac0654b35bb2984617e273122481`
-- Active release: `/opt/fuapay/releases/39293d85445b`
-- Rollback release: `/opt/fuapay/releases/7cb9b1374970`
-- Service account: `fuapay:fuapay`
-- Kestrel: `127.0.0.1:5080`
-- Reverse proxy: Nginx
-- Configuration: `/etc/fuapay/staging.env`
-- Database: `fuapay_demo`
-- EF Core migrations: 17
-- Payment provider: ČSOB integration
-- ČSOB Merchant ID: `M1EPAY2213`
-- ČSOB reconciliation worker: enabled and healthy
-- Staging test mode: enabled
-- Interactive development/test sign-in: disabled
-- Microsoft Entra login: enabled, live and used on `fuapay.tul.cz`
-- Staging seed data: enabled
-- Simulated payments: disabled
-- Receipts: enabled
-- Receipt preview mode: enabled
-- Nginx Basic Authentication: not configured; the staging front door is intentionally public.
+- Alternate URL: `https://fuapay.fa.tul.cz` -> canonical URL.
+- Revision: `a638cad732b210a2f949f12c05ecdf84a2bce7a8`.
+- Active release: `/opt/fuapay/releases/a638cad732b2`.
+- Immediate rollback release: `/opt/fuapay/releases/39293d85445b`.
+- Service account: `fuapay:fuapay`.
+- Kestrel: `127.0.0.1:5080` behind Nginx.
+- Configuration: `/etc/fuapay/staging.env`.
+- Database: `fuapay_demo`.
+- EF Core migrations: 17.
+- `Database__ApplyMigrationsOnStart=false`.
+- Microsoft Entra login: live and in use.
+- Payment provider: ČSOB integration, Merchant ID `M1EPAY2213`.
+- Simulated payments: disabled.
+- ČSOB reconciliation worker: enabled and healthy.
+- Staging seed data: enabled.
+- Receipt preview mode: enabled.
+- Nginx Basic Authentication: intentionally absent.
+- Production ČSOB traffic and production database workload: not active.
 
-Microsoft Entra authentication is live on the staging deployment.
-ČSOB integration-environment traffic is active for staging. Production ČSOB
-traffic and the production database workload are not active.
+## 2026-09-08 PR #35 deployment
 
-The currently deployed application revision remains
-`39293d85445bac0654b35bb2984617e273122481`; the production-readiness patch that
-follows this live verification has not yet been deployed.
+PR #35 (`fix: complete ČSOB top-up return flow`) was merged as:
 
-Searchable customer selection is implemented and accepted on both desktop and a
-real phone. PR #31 initially changed primary touch devices to the native platform
-`<select>`, but real Android/Chrome staging smoke rejected that UX. PR #32
-restored the same searchable picker on touch devices while skipping only the
-desktop `pointerdown.preventDefault()` behavior for primary touch/coarse-pointer
-devices. The final deployed revision was verified on a real phone with filtering
-and tap selection working normally.
+`a638cad732b210a2f949f12c05ecdf84a2bce7a8`
 
-The settlement-return foundation remains deployed. Actual ČSOB
-`payment/reverse` and `payment/refund` provider calls, automatic financial retries
-after ambiguity and production financial traffic remain disabled/not implemented
-as documented for the settlement-return foundation.
+Scope relevant to staging:
 
-`Database__ApplyMigrationsOnStart=false`; database migration remains a
-controlled deployment step.
+- customer top-up is available with active ČSOB provider;
+- CreateTopUp highlights `Kredit` while payment index/detail remain `Platby`;
+- ČSOB browser return redirects to routed
+  `/Customer/Payments/Details/{id}?view=customer` instead of the invalid query
+  form that previously produced 404;
+- no EF model/schema change and no migration.
 
-## 2026-09-07 current ČSOB integration status
+### Release gate
 
-The staging runtime uses the ČSOB integration environment with Merchant ID
-`M1EPAY2213`. Simulated payments are disabled and the ČSOB reconciliation worker
-is enabled and healthy.
+Before packaging:
 
-Verified against the integration environment:
-
-- GET `echo` succeeded;
-- one real 100 CZK credit top-up was successfully authorized;
-- the browser return scheduled server-side reconciliation;
-- server-side reconciliation established the successful result, settlement
-  completed and the credit was credited.
-
-This evidence does not activate or validate production ČSOB traffic. Production
-activation, POST `echo`, the required negative and recovery scenarios including
-duplicate/lost returns and restart/exactly-once behavior, and ČSOB
-`payment/reverse` remain outstanding. The current patch also has to be deployed
-before its return redirect and customer top-up/navigation fixes are present in
-the staging runtime.
-
-## 2026-08-31 C-01 + C-02 staging release
-
-### Scope
-
-The staging application was first advanced from
-`c0dba8bfb3eec6bc04d69271ff293c023098b409` to
-`7cb9b1374970b12af32b7d57895df620c83fac3f`, containing:
-
-- C-01: customer job-payment UI uses authoritative available/spendable credit;
-- C-02 first pass: mobile customer selection used the native platform select.
-
-The first deployment was technically healthy, but real-phone acceptance showed
-that Android/Chrome rendered the native customer select as an undesirable
-radio-style picker. PR #32 supplied the minimal follow-up and produced the final
-runtime revision:
-
-`39293d85445bac0654b35bb2984617e273122481`
-
-PR #32 changes only `wwwroot/js/customer-select-filter.js`: desktop searchable
-selection remains unchanged and primary touch/coarse-pointer devices use the same
-searchable picker while omitting the desktop pointerdown prevention that could
-interfere with touch selection.
-
-No EF model or schema change was introduced by C-01, C-02 or the PR #32
-follow-up. No migration SQL was generated or applied and `fuapay_demo` remains at
-17 applied migrations.
-
-### Verification
-
-The final `main` release gate passed:
-
-- Release build: PASS;
+- canonical `scripts/verify.ps1`: PASS;
+- Release build: PASS, 0 warnings/errors;
 - formatting: PASS;
-- `FuaPay.Web.Tests`: 775/775 PASS;
+- `FuaPay.Web.Tests`: 780/780 PASS;
 - EF pending-model check: no model changes since the last migration;
-- PR #32 CI #131: PASS;
-- PR #32 CodeQL #133: PASS.
-
-The release was published self-contained for `linux-x64` after locked restore.
-`appsettings.Development.json` was absent from the publish output.
-
-Final release archive:
-
-`fuapay-staging-39293d85445bac0654b35bb2984617e273122481-linux-x64.tar.gz`
-
-SHA-256:
-
-`2a3ad32ae7291ea58e51406fd267543b514eeda9ddf95cdb65b6b312032ba46d`
-
-Size:
-
-`122839371` bytes
-
-The canonical deployment-artifact verifier reported:
-
-- directories: 12 entries, mode `0770`;
-- ordinary files: 400 entries, mode `0660`;
-- `FuaPay.Web`: mode `0750`.
-
-After transfer, the server-side archive matched both the expected SHA-256 and
-byte size. `gzip -t` and a full tar listing completed successfully before
-installation.
-
-### Installation and activation
-
-The final release was installed beside the active release at:
-
-`/opt/fuapay/releases/39293d85445b`
-
-Before activation, recursive verification confirmed:
-
-- all release content owned by `fuapay:fuapay`;
-- every directory mode `0770`;
-- every ordinary file except the host executable mode `0660`;
-- `FuaPay.Web` mode `0750` and executable by the `fuapay` service account;
-- `appsettings.Development.json` absent;
-- 401 files total and 12 directories.
-
-`/opt/fuapay/current` was switched atomically from
-`/opt/fuapay/releases/7cb9b1374970` to
-`/opt/fuapay/releases/39293d85445b`, then `fuapay.service` was restarted.
-The running process executable resolved to:
-
-`/opt/fuapay/releases/39293d85445b/FuaPay.Web`
-
-The first direct readiness connection immediately after restart could occur
-before Kestrel had bound to `127.0.0.1:5080`; the bounded retry then returned
-`{"status":"Healthy"}` as designed.
-
-### Post-deployment and functional verification
-
-Verified after restart:
-
-- `/opt/fuapay/current` resolves to
-  `/opt/fuapay/releases/39293d85445b`;
-- `fuapay.service` is active;
-- direct `/health/ready`: status `Healthy`;
-- `https://fuapay.tul.cz/`: HTTP 200;
-- `http://fuapay.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
-- `https://fuapay.fa.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
-- no warning-or-higher `fuapay.service` journal entries were observed in the
-  deployment verification window;
-- `systemctl --failed` reported no failed units.
-
-Direct Kestrel health checks include both `Host: fuapay.tul.cz` and
-`X-Forwarded-Proto: https`, matching the configured forwarded-header and host
-validation boundary.
-
-Functional staging acceptance confirmed:
-
-- the desktop Management job-create customer selector remains searchable and
-  behaves as before;
-- on a real phone, the customer selector presents the same searchable UI,
-  filters normally and completes selection by tap;
-- Microsoft Entra authentication remains live and usable.
-
-C-01's authoritative available-credit behavior is covered by the focused
-regression test in the 775-test gate; no artificial blocking-credit state was
-created solely for staging smoke.
-
-The prior release `/opt/fuapay/releases/7cb9b1374970` remains present as the
-immediate rollback target.
-
-### Deployment cleanup
-
-After successful technical and real-device verification:
-
-- the transferred final release archive was removed from the deployment user's
-  home directory;
-- the transferred previous `7cb9...` release archive was also absent/removed;
-- no temporary activation symlink remains;
-- `/opt/fuapay/current` still resolves to
-  `/opt/fuapay/releases/39293d85445b`;
-- `fuapay.service` remains active.
-
-The locally created hash-verified release archive is retained as release
-evidence on the deployment workstation.
-
-## 2026-08-30 main-alignment redeployment
-
-### Scope
-
-The staging runtime was redeployed from repository revision
-`c0dba8bfb3eec6bc04d69271ff293c023098b409` so that the active release matches
-current `main` and exercises the hardened canonical release-artifact workflow.
-
-The Git comparison from the previously active application revision
-`45b86e3f2d1e217140e2422b185dd8f616fe4856` to the new revision contained only
-CI, solution metadata, documentation, deployment tooling and deployment-tooling
-tests. It contained no `src/FuaPay.Web` change. The local release verification
-also confirmed that the EF model still matches the existing migrations.
-
-No migration SQL was generated or applied and the staging database remained at
-17 migrations. No application configuration, Nginx configuration or database
-content was intentionally changed by this redeployment.
-
-### Release artifact
-
-Before packaging, the canonical verification passed with 773/773 web/application
-tests and a clean EF-model check. Locked `linux-x64` restore and self-contained
-Release publish completed successfully with warnings treated as errors.
-
-The repository deployment-artifact tool created and independently re-verified
-the archive with the canonical profile:
-
-- directories: 12 entries, mode `0770`;
-- ordinary files: 400 entries, mode `0660`;
-- `FuaPay.Web`: mode `0750`;
-- `appsettings.Development.json`: absent.
+- PostgreSQL integration gate: 224/224 PASS on isolated `fuapay_test_*` DB;
+- live ČSOB GET echo: PASS.
 
 Release archive:
 
-`fuapay-staging-c0dba8bfb3eec6bc04d69271ff293c023098b409-linux-x64.tar.gz`
+`fuapay-staging-a638cad732b210a2f949f12c05ecdf84a2bce7a8-linux-x64.tar.gz`
 
 SHA-256:
 
-`d36efcc523764c33d83eb228645e0658c48587edfeda2722b086e9b56c4e15e0`
+`379ac60d7ca48f266d5863d28aa398144e6f60fb6825e1dcc349ea24cb8b53f2`
 
 Size:
 
-`122837835` bytes
+`122840907` bytes
 
-The transferred server-side archive matched both the expected SHA-256 and byte
-size before extraction. `gzip -t` and a full tar listing completed successfully
-before installation.
+Canonical archive verification:
+
+- directories: 12, mode `0770`;
+- ordinary files: 400, mode `0660`;
+- `FuaPay.Web`: mode `0750`.
+
+After transfer the server independently matched SHA-256 and byte size;
+`gzip -t` and full tar listing passed before installation.
 
 ### Installation and activation
 
-The new release was installed beside the active release at:
+The release was installed beside the active release at:
 
-`/opt/fuapay/releases/c0dba8bfb3ee`
+`/opt/fuapay/releases/a638cad732b2`
 
-Before activation, recursive checks confirmed:
+Pre-activation checks passed:
 
-- all files/directories owned by `fuapay:fuapay`;
-- every directory mode `0770`;
-- every ordinary file except the host executable mode `0660`;
-- `FuaPay.Web` mode `0750`;
-- `FuaPay.Web` executable by the `fuapay` service account;
-- 401 files in total, matching the 400 ordinary archive files plus the host
-  executable.
+- all release content owned by `fuapay:fuapay`;
+- all directories mode `0770`;
+- all ordinary files except host executable mode `0660`;
+- `FuaPay.Web` mode `0750` and executable by the service account;
+- `appsettings.Development.json` absent.
 
-`/opt/fuapay/current` was then switched atomically to the new release and
-`fuapay.service` was restarted. The running process executable resolved to:
+The first activation was rolled back unnecessarily by an incorrect deployment
+check that treated the ČSOB worker's transient post-start HTTP 503/`NotStarted`
+state as immediate failure. The application readiness itself was already
+`Healthy`. No application or database migration rollback was involved.
 
-`/opt/fuapay/releases/c0dba8bfb3ee/FuaPay.Web`
+The corrected activation used bounded worker warm-up. Final result:
 
-### Post-deployment verification
-
-Verified after restart:
-
-- `/opt/fuapay/current` resolves to
-  `/opt/fuapay/releases/c0dba8bfb3ee`;
-- `fuapay.service` is active;
-- `/health/live`: HTTP 200 with status `Healthy`;
-- `/health/ready`: HTTP 200 with status `Healthy`;
-- `https://fuapay.tul.cz/`: HTTP 200;
-- `http://fuapay.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
-- `https://fuapay.fa.tul.cz/`: HTTP 301 to `https://fuapay.tul.cz/`;
-- no warning-or-higher `fuapay.service` journal entries were observed in the
-  post-restart verification window.
-
-Direct Kestrel health checks included both `Host: fuapay.tul.cz` and
-`X-Forwarded-Proto: https`, matching the configured forwarded-header and host
-validation boundary.
-
-The prior release `/opt/fuapay/releases/45b86e3f2d1e` remains present and its
-`FuaPay.Web` executable was verified as a ready rollback target.
-
-### Deployment cleanup
-
-After successful verification, the transferred release archive was removed from
-the deployment user's home directory. The locally created, hash-verified archive
-was retained as release evidence on the deployment workstation. No temporary
-activation symlink remains.
-
-## 2026-08-29 settlement-return deployment
-
-### Release artifact
-
-Release archive SHA-256:
-
-`31b4d19dd22fdb91ddbe792ac0db2addc3d68d2d2a037109a528ffe4ac51b3d9`
-
-The transferred archive was verified by SHA-256 before extraction.
-
-The release was installed beside the previous release. Its final server-side
-permission profile is:
-
-- directories: mode `0770`;
-- ordinary files: mode `0660`;
-- `FuaPay.Web`: mode `0750`;
-- owner/group: `fuapay:fuapay`.
-
-`appsettings.Development.json` is not present in the release.
-
-### Pre-deployment database backup
-
-Backup:
-
-`/var/backups/fuapay/fuapay_demo-pre-45b86e3f2d1e-20260829T160525Z.dump`
-
-SHA-256:
-
-`fed9d864838d6979c3f4ce0f1fc94eeed235d4382798074b5c2421a4a0c90367`
-
-The custom-format PostgreSQL backup passed a `pg_restore` structure check
-before any migration was applied.
-
-### Database migration
-
-The database started at 14 applied migrations with:
-
-`20260826161935_EnforcePrintReservationLifecycle`
-
-The following three migrations were applied:
-
-1. `20260828105225_AddSettlementReturns`
-2. `20260828155222_AddCreditReturnHolds`
-3. `20260829121234_AddSettlementReturnProviderAttempts`
-
-Verified migration SQL SHA-256:
-
-`4c10f38ef4da8b9fc06cdb9120793a9db14e48fb14b34a6f943a241369a9a197`
-
-The migration was executed under PostgreSQL role `fuapay_migrator`.
-
-The EF-generated SQL file contained a UTF-8 BOM. A temporary BOM-free working
-copy was used for execution and removed after deployment; the original
-hash-verified SQL file was not modified.
-
-Successful migration log:
-
-`/var/backups/fuapay/migration-14-to-17-45b86e3f2d1e-20260829T163012Z.log`
-
-Post-migration verification confirmed:
-
-- 17 applied EF Core migrations;
-- latest migration:
-  `20260829121234_AddSettlementReturnProviderAttempts`;
-- `credits.return_holds` owner: `fuapay_migrator`;
-- `payments.settlement_returns` owner: `fuapay_migrator`;
-- `payments.settlement_return_provider_attempts` owner: `fuapay_migrator`;
-- `fuapay_app` has SELECT, INSERT, UPDATE and DELETE privileges on all three
-  new tables.
-
-### Application switch and verification
-
-The release was activated using the atomic `/opt/fuapay/current` switch.
-
-Verified after restart:
-
-- `/opt/fuapay/current` resolves to
-  `/opt/fuapay/releases/45b86e3f2d1e`;
-- `fuapay.service` is active;
-- `/health/live`: HTTP 200 with status `Healthy`;
-- `/health/ready`: HTTP 200 with status `Healthy`;
-- `/health/workers/csob-reconciliation`: HTTP 200 with status `Disabled`;
-- direct Kestrel smoke requests for `/`, `/Privacy` and `/Terms`: HTTP 200;
-- no warning-or-higher `fuapay.service` journal entries were observed in the
-  deployment verification window;
+- `/opt/fuapay/current` -> `/opt/fuapay/releases/a638cad732b2`;
+- `fuapay.service`: active;
+- running executable:
+  `/opt/fuapay/releases/a638cad732b2/FuaPay.Web`;
+- `/health/ready`: `Healthy`;
+- `/health/workers/csob-reconciliation`: `Healthy`, no failed cycle reported;
 - `https://fuapay.tul.cz/`: HTTP 200;
 - `http://fuapay.tul.cz/`: HTTP 301;
-- `https://fuapay.fa.tul.cz/`: HTTP 301;
-- Nginx Basic Authentication is absent as intended;
-- rollback release `/opt/fuapay/releases/87ef21877809` remains present and
-  executable.
+- `https://fuapay.fa.tul.cz/`: HTTP 301.
 
-Direct Kestrel smoke requests that represent HTTPS include both
-`Host: fuapay.tul.cz` and `X-Forwarded-Proto: https`.
+### Canonical staging post-activation health rule
 
-### Deployment cleanup
+Direct Kestrel requests must include both:
 
-After successful verification:
+```text
+Host: fuapay.tul.cz
+X-Forwarded-Proto: https
+```
 
-- transferred release archive and checksum were removed from the deployment
-  user's home directory;
-- transferred migration SQL and checksum were removed;
-- temporary BOM-free migration SQL was removed;
-- no temporary deployment or rollback symlinks remain;
-- active Nginx configuration was not modified by this deployment;
-- the validated database backup and successful migration log were retained as
-  deployment evidence.
+Startup health is bounded, not instantaneous:
 
-## PDF receipt preview
+1. retry `/health/ready` until `Healthy` or timeout;
+2. then poll `/health/workers/csob-reconciliation`;
+3. worker `NotStarted` immediately after restart is a warm-up state, not a
+   rollback reason;
+4. worker `Healthy` is PASS;
+5. worker `Failed`, `Stale` or bounded timeout is FAIL and may trigger rollback;
+6. verify the running executable resolves to the new release;
+7. finish with canonical/alternate HTTPS smoke.
 
-Receipt preview remains enabled in staging:
+Do not infer a broken `/opt/fuapay/current` target from an unprivileged
+`readlink -f` when the deployment user cannot traverse the release directory;
+use an appropriately privileged read-only check.
 
-- `Receipts__Enabled=true`;
-- `Receipts__PreviewMode=true`;
-- regular font: `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`;
-- bold font: `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`.
+## 2026-09-08 live ČSOB functional acceptance
 
-The PDF receipt had previously been verified through an authenticated Customer
-view of an already-paid job.
+Two customer scenarios were exercised against the real ČSOB integration
+environment after deployment.
 
-## Runtime baseline
+Successful top-up:
 
-The previously verified runtime-security baseline remains outside the scope of
-the 2026-08-29 application deployment:
+- amount: 100 Kč;
+- provider reference: `fcd3c38f6325@LI`;
+- browser returned directly to the routed payment detail without 404;
+- reconciliation settled the payment to `Succeeded` / „Uhrazená“;
+- exactly one additional 100 Kč credit effect was visible; after the two
+  successful 100 Kč integration top-ups the test account displayed 200 Kč.
 
-- `ProtectSystem=strict`;
-- `NoNewPrivileges=yes`;
-- `PrivateTmp=yes`;
-- `PrivateDevices=yes`;
-- `ProtectKernelTunables=yes`;
-- `ProtectKernelModules=yes`;
-- `ProtectControlGroups=yes`;
-- `RestrictSUIDSGID=yes`;
-- Kestrel and PostgreSQL listen only on loopback;
-- UFW default incoming policy is deny; ports 22, 80 and 443 are allowed;
-- SSH root, password and keyboard-interactive login are disabled;
-- Data Protection keyring directory: mode `0700`;
-- Data Protection key: mode `0600`;
-- `fuapay_app` and `fuapay_migrator` are separate non-superuser roles;
-- application schemas and tables are owned by `fuapay_migrator`.
+Customer-cancelled top-up:
 
-This deployment is staging, not production.
+- provider reference: `47ac34a8568f@LI`;
+- the attempt ended locally as `Cancelled` / „Zrušená“;
+- no credit was added.
+
+The successful return exposed one UX gap: the detail page can load before the
+asynchronous reconciliation worker finishes, so it initially remained
+`Pending` and the new credit appeared only after manual F5. The financial model
+is correct because browser return only schedules authoritative server-side
+reconciliation; the UI should be improved with bounded asynchronous status
+refresh instead of requiring a full-page reload.
+
+Current payment UX also inserts an internal detail page between successful
+`payment/init` and `payment/process`. The agreed target is direct redirect to the
+ČSOB process URI while retaining Details as a recovery path for existing
+`Pending` attempts.
+
+These UX/lifecycle items and the remaining production-readiness gaps are tracked
+only in `docs/integrations/csob-production-readiness.md` to avoid duplicated
+stale TODO lists.
+
+## Previous rollback baseline
+
+Before this deployment staging ran:
+
+- revision `39293d85445bac0654b35bb2984617e273122481`;
+- release `/opt/fuapay/releases/39293d85445b`;
+- artifact SHA-256
+  `2a3ad32ae7291ea58e51406fd267543b514eeda9ddf95cdb65b6b312032ba46d`;
+- artifact size `122839371` bytes.
+
+That release remains the immediate rollback target until the current ČSOB
+acceptance work is closed. Older deployment evidence remains available in Git
+history; it is intentionally not duplicated in this current-state document.
