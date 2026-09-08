@@ -147,7 +147,7 @@ public sealed class CsobPaymentRecoveryProcessor
                     claim,
                     attemptedAt,
                     result.GatewayPaymentStatus,
-                    resultCode: 0,
+                    result.GatewayResultCode,
                     "ČSOB platba zatím není v terminálním stavu.",
                     cancellationToken);
             }
@@ -157,7 +157,7 @@ public sealed class CsobPaymentRecoveryProcessor
                     claim,
                     attemptedAt,
                     result.GatewayPaymentStatus,
-                    resultCode: 0,
+                    result.GatewayResultCode,
                     ct),
                 CreateAuditEntry(
                     claim.PaymentId,
@@ -286,7 +286,8 @@ public sealed class CsobPaymentRecoveryProcessor
                 : CsobPaymentRecoveryDisposition.ClaimLost;
         }
 
-        var nextAttemptAt = attemptedAt + CalculateBackoff(nextAttemptNumber);
+        var nextAttemptAt =
+            attemptedAt + _configuration.CalculateBackoff(nextAttemptNumber);
         var transitioned = await TransitionWithAuditAsync(
             ct => _repository.RescheduleAsync(
                 claim,
@@ -332,29 +333,6 @@ public sealed class CsobPaymentRecoveryProcessor
                 "ruční provozní kontrolu; finanční stav nebyl domyšlen.",
                 attemptedAt),
             cancellationToken);
-    }
-
-    private TimeSpan CalculateBackoff(int attemptNumber)
-    {
-        var delay = _configuration.BaseBackoff;
-
-        for (var index = 1; index < attemptNumber; index++)
-        {
-            if (delay >= _configuration.MaximumBackoff)
-            {
-                return _configuration.MaximumBackoff;
-            }
-
-            var doubledTicks = delay.Ticks > long.MaxValue / 2
-                ? long.MaxValue
-                : delay.Ticks * 2;
-            delay = TimeSpan.FromTicks(
-                Math.Min(
-                    doubledTicks,
-                    _configuration.MaximumBackoff.Ticks));
-        }
-
-        return delay;
     }
 
     private async Task<bool> TransitionWithAuditAsync(

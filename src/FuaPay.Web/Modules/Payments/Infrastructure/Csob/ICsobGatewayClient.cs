@@ -5,6 +5,9 @@ public interface ICsobGatewayClient
     Task<CsobEchoResult> EchoAsync(
         CancellationToken cancellationToken = default);
 
+    Task<CsobEchoResult> EchoPostAsync(
+        CancellationToken cancellationToken = default);
+
     Task<CsobPaymentInitResult> InitializeAsync(
         CsobPaymentInit payment,
         CancellationToken cancellationToken = default);

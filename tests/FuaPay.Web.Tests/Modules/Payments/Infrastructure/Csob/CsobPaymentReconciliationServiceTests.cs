@@ -111,9 +111,60 @@ public sealed class CsobPaymentReconciliationServiceTests
 
         Assert.Equal(PaymentStatus.Failed, payment.Status);
         Assert.Equal(PaymentStatus.Failed, result.PaymentStatus);
+        Assert.Equal(0, result.GatewayResultCode);
         Assert.True(result.StateChanged);
         Assert.Equal(1, repository.SaveCalls);
         Assert.Equal("payment.failed", Assert.Single(audit.Entries).Action);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_ExpiredStatus_ExpiresPendingPaymentWithoutSettlement()
+    {
+        var payment = CreatePendingPayment();
+        var repository = new StubPaymentRepository(payment);
+        var settlement = new RecordingSettlementService(changed: true);
+        var audit = new RecordingAuditTrail();
+        var service = CreateService(
+            repository,
+            GatewayStatus(6, resultCode: 130),
+            settlement,
+            audit);
+
+        var result = await service.ReconcileAsync(
+            payment.Id,
+            payment.ProviderReference!);
+
+        Assert.Equal(PaymentStatus.Expired, payment.Status);
+        Assert.Equal(PaymentStatus.Expired, result.PaymentStatus);
+        Assert.Equal(6, result.GatewayPaymentStatus);
+        Assert.Equal(130, result.GatewayResultCode);
+        Assert.True(result.StateChanged);
+        Assert.Equal(1, repository.SaveCalls);
+        Assert.Null(settlement.Confirmation);
+        Assert.Equal("payment.expired", Assert.Single(audit.Entries).Action);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_ReplayedExpiry_IsIdempotent()
+    {
+        var payment = CreatePendingPayment();
+        payment.Expire(ReconciledAt);
+        var repository = new StubPaymentRepository(payment);
+        var settlement = new RecordingSettlementService(changed: true);
+        var service = CreateService(
+            repository,
+            GatewayStatus(6, resultCode: 130),
+            settlement);
+
+        var result = await service.ReconcileAsync(
+            payment.Id,
+            payment.ProviderReference!);
+
+        Assert.Equal(PaymentStatus.Expired, result.PaymentStatus);
+        Assert.Equal(130, result.GatewayResultCode);
+        Assert.False(result.StateChanged);
+        Assert.Equal(0, repository.SaveCalls);
+        Assert.Null(settlement.Confirmation);
     }
 
     [Fact]
@@ -134,6 +185,36 @@ public sealed class CsobPaymentReconciliationServiceTests
                 payment.ProviderReference!));
 
         Assert.Equal(140, exception.ResultCode);
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.Equal(0, repository.SaveCalls);
+        Assert.Null(settlement.Confirmation);
+    }
+
+    [Theory]
+    [InlineData(130, 2)]
+    [InlineData(130, 7)]
+    [InlineData(140, 6)]
+    [InlineData(900, 6)]
+    public async Task ReconcileAsync_UnexpectedNonZeroCombination_FailsClosed(
+        int resultCode,
+        int gatewayPaymentStatus)
+    {
+        var payment = CreatePendingPayment();
+        var repository = new StubPaymentRepository(payment);
+        var settlement = new RecordingSettlementService(changed: true);
+        var service = CreateService(
+            repository,
+            GatewayStatus(gatewayPaymentStatus, resultCode),
+            settlement);
+
+        var exception = await Assert.ThrowsAsync<
+            CsobPaymentRequiresAttentionException>(
+            () => service.ReconcileAsync(
+                payment.Id,
+                payment.ProviderReference!));
+
+        Assert.Equal(resultCode, exception.ResultCode);
+        Assert.Equal(gatewayPaymentStatus, exception.GatewayPaymentStatus);
         Assert.Equal(PaymentStatus.Pending, payment.Status);
         Assert.Equal(0, repository.SaveCalls);
         Assert.Null(settlement.Confirmation);
@@ -191,6 +272,30 @@ public sealed class CsobPaymentReconciliationServiceTests
     }
 
     [Fact]
+    public async Task ReconcileAsync_MismatchedProviderReference_DoesNotCallGateway()
+    {
+        var payment = CreatePendingPayment();
+        var gateway = new StubCsobGatewayClient(
+            GatewayStatus(6, resultCode: 130));
+        var service = new CsobPaymentReconciliationService(
+            gateway,
+            new StubPaymentRepository(payment),
+            new StubPaymentInitiationRepository(initiation: null),
+            new RecordingSettlementService(changed: true),
+            new ImmediateTransaction(),
+            new FixedTimeProvider(ReconciledAt),
+            NullAuditTrail.Instance);
+
+        await Assert.ThrowsAsync<CsobPaymentRequiresAttentionException>(
+            () => service.ReconcileAsync(
+                payment.Id,
+                "other-pay-id"));
+
+        Assert.Equal(0, gateway.StatusCalls);
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+    }
+
+    [Fact]
     public async Task ReconcileAsync_ReplayedCancellation_IsIdempotent()
     {
         var payment = CreatePendingPayment();
@@ -241,6 +346,46 @@ public sealed class CsobPaymentReconciliationServiceTests
         Assert.Equal(
             "payment.provider-initiation.status-verified",
             Assert.Single(audit.Entries).Action);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_UncertainCandidate_AuthoritativeExpiryClosesWithoutSettlement()
+    {
+        var payment = CreateCreatedPayment();
+        var initiation = CreateUncertainInitiation(payment);
+        var paymentRepository = new StubPaymentRepository(payment);
+        var initiationRepository =
+            new StubPaymentInitiationRepository(initiation);
+        var settlement = new RecordingSettlementService(changed: true);
+        var audit = new RecordingAuditTrail();
+        var service = CreateService(
+            paymentRepository,
+            GatewayStatus(6, resultCode: 130),
+            settlement,
+            audit,
+            initiationRepository);
+
+        var result = await service.ReconcileAsync(
+            payment.Id,
+            initiation.ObservedProviderReference!);
+
+        Assert.Equal(PaymentStatus.Expired, payment.Status);
+        Assert.Equal("pay1234567890", payment.ProviderReference);
+        Assert.Equal(
+            PaymentInitiationState.Initialized,
+            initiation.State);
+        Assert.Equal(PaymentStatus.Expired, result.PaymentStatus);
+        Assert.Equal(130, result.GatewayResultCode);
+        Assert.True(result.StateChanged);
+        Assert.Equal(1, paymentRepository.SaveCalls);
+        Assert.Equal(1, initiationRepository.SaveCalls);
+        Assert.Null(settlement.Confirmation);
+        Assert.Equal(
+            [
+                "payment.provider-initiation.expiry-verified",
+                "payment.expired"
+            ],
+            audit.Entries.Select(entry => entry.Action).ToArray());
     }
 
     [Theory]
@@ -366,6 +511,10 @@ public sealed class CsobPaymentReconciliationServiceTests
         public int StatusCalls { get; private set; }
 
         public Task<CsobEchoResult> EchoAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobEchoResult> EchoPostAsync(
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

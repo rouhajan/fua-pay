@@ -33,6 +33,11 @@ public sealed record CsobEchoResult(
     int ResultCode,
     string ResultMessage);
 
+internal sealed record CsobEchoRequest(
+    [property: JsonPropertyName("merchantId")] string MerchantId,
+    [property: JsonPropertyName("dttm")] string Dttm,
+    [property: JsonPropertyName("signature")] string Signature);
+
 internal sealed record CsobPaymentInitRequest(
     [property: JsonPropertyName("merchantId")] string MerchantId,
     [property: JsonPropertyName("orderNo")] string OrderNumber,

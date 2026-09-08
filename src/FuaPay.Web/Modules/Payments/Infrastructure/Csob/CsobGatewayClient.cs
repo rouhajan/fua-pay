@@ -43,8 +43,17 @@ public sealed class CsobGatewayClient : ICsobGatewayClient
         _gatewayTimeZone = ResolveGatewayTimeZone();
     }
 
-    public async Task<CsobEchoResult> EchoAsync(
-        CancellationToken cancellationToken = default)
+    public Task<CsobEchoResult> EchoAsync(
+        CancellationToken cancellationToken = default) =>
+        SendEchoAsync(usePost: false, cancellationToken);
+
+    public Task<CsobEchoResult> EchoPostAsync(
+        CancellationToken cancellationToken = default) =>
+        SendEchoAsync(usePost: true, cancellationToken);
+
+    private async Task<CsobEchoResult> SendEchoAsync(
+        bool usePost,
+        CancellationToken cancellationToken)
     {
         _availability.EnsureEnabled();
         var requestStartedAt = _timeProvider.GetUtcNow();
@@ -53,17 +62,25 @@ public sealed class CsobGatewayClient : ICsobGatewayClient
             CsobTextToSign.Echo(
                 _configuration.MerchantId,
                 dttm));
-        var requestUri = string.Join(
-            "/",
-            $"api/{ApiVersion}/echo",
-            Escape(_configuration.MerchantId),
-            Escape(dttm),
-            Escape(signature));
 
         using var response = await SendAsync(
-            () => _httpClient.GetAsync(
-                requestUri,
-                cancellationToken),
+            () => usePost
+                ? _httpClient.PostAsJsonAsync(
+                    $"api/{ApiVersion}/echo",
+                    new CsobEchoRequest(
+                        _configuration.MerchantId,
+                        dttm,
+                        signature),
+                    JsonOptions,
+                    cancellationToken)
+                : _httpClient.GetAsync(
+                    string.Join(
+                        "/",
+                        $"api/{ApiVersion}/echo",
+                        Escape(_configuration.MerchantId),
+                        Escape(dttm),
+                        Escape(signature)),
+                    cancellationToken),
             cancellationToken);
         var responseReceivedAt = _timeProvider.GetUtcNow();
         var gatewayResponse = await ReadVerifiedResponseAsync(

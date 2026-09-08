@@ -182,6 +182,10 @@ public sealed class CsobPaymentProviderInitiatorTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<CsobEchoResult> EchoPostAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<CsobPaymentInitResult> InitializeAsync(
             CsobPaymentInit payment,
             CancellationToken cancellationToken = default)

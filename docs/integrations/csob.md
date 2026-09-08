@@ -21,6 +21,8 @@ stejné provozní TODO neduplikovalo na více místech.
 - Merchant private key i integration gateway public key jsou mimo Git/release a
   čitelné účtem služby.
 - GET `echo`: ověřeno proti živému integračnímu prostředí.
+- POST `echo`: implementováno se stejným podpisem, ověřením odpovědi a časovým
+  oknem jako GET; živé integration ověření zatím nebylo provedeno.
 - Úspěšné integrační dobití kreditu 100 Kč: ověřeno 2026-09-07 a znovu
   2026-09-08.
 - Zrušení zákazníkem na bráně: ověřeno 2026-09-08; lokálně skončilo jako
@@ -50,6 +52,14 @@ pouze do jediné settlement služby; settlement, kredit/job, audit a outbox jsou
 atomické a opakovaný return/status má nejvýše jeden finanční účinek. Nejasný
 `payment/init` se slepě neopakuje; známý `payId` jde do recovery a neznámý výsledek
 vyžaduje operátora.
+
+Podepsaná a čerstvá odpověď `payment/status` s přesnou kombinací
+`resultCode=130`, `paymentStatus=6` uzavírá odpovídající `Pending` platbu jako
+`Expired` bez settlement/kredit/job efektu. Stejná odpověď umí bezpečně uzavřít
+i `Created` platbu pouze tehdy, když její nejasná inicializace obsahuje přesně
+stejnou persistovanou observed provider reference. Stav `6` s `resultCode=0`
+zůstává běžné `Failed`; všechny ostatní nenulové kombinace zůstávají
+`RequiresAttention`.
 
 ## Potvrzené UX poznatky z reálného integračního testu
 
@@ -82,16 +92,11 @@ expiry lifecycle, ne mazání historie.
 
 ## Známé implementační mezery před production readiness
 
-1. POST `echo` zatím není implementovaný; současný klient má pouze GET echo.
-2. `payment/reverse` zatím nemá skutečné ČSOB síťové volání. Existující
+1. `payment/reverse` zatím nemá skutečné ČSOB síťové volání. Existující
    provider-neutral Reverse/Refund persistence je základ, nikoli dokončená ČSOB
    operace.
-3. Expired activation scénář ČSOB očekává `resultCode=130` a `paymentStatus=6`.
-   Současná reconciliation nejdřív odmítá každý nenulový `resultCode`, takže
-   kombinace `130/6` se dnes správně nepřeloží na interní `Expired`. Toto je
-   konkrétní integrační gap, který musí být opraven před expired testem.
-4. Po returnu chybí asynchronní dotažení UI do terminálního stavu.
-5. Po úspěšném `payment/init`/ověření chybí přímý redirect na `payment/process`;
+2. Po returnu chybí asynchronní dotažení UI do terminálního stavu.
+3. Po úspěšném `payment/init`/ověření chybí přímý redirect na `payment/process`;
    interní detail vytváří jeden zbytečný klik navíc.
 
 Refund není součástí povinného ČSOB production-activation checklistu. Zda má být
@@ -123,6 +128,12 @@ Při production cutoveru se musí použít produkční konfigurace/klíče schv�
 ČSOB a produkční veřejný klíč brány. Žádný privátní klíč ani secret nesmí být v
 Git/release. Neúplná nebo konfliktní ČSOB konfigurace musí zastavit startup;
 `Development` provider není fallback.
+
+Reconciliation konfigurace musí mít dost pokusů, aby se její retry horizont
+nevyčerpal před `Csob:PaymentTtlSeconds`, třicetisekundovou provider rezervou a
+jedním intervalem workeru. Výchozích 14 pokusů pokrývá celý povolený rozsah TTL
+300–1800 sekund při výchozím backoffu. Expirace se z lokálního času neodvozuje;
+vždy ji potvrzuje až autoritativní podepsané ČSOB `payment/status`.
 
 ## Oficiální aktivační minimum ČSOB
 

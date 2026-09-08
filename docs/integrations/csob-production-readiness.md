@@ -46,10 +46,13 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
       - po zadání částky uživatel nemá zbytečný meziklik;
       - `Details` zůstane recovery cesta pro existující `Pending` platbu a dál
         nabízí `payment/process` odkaz.
-- [ ] Opravit expired lifecycle: oficiální kombinace ČSOB
+- [x] Opravit expired lifecycle: oficiální kombinace ČSOB
       `resultCode=130`, `paymentStatus=6` musí bezpečně skončit jako interní
       `Expired`, nikoli `RequiresAttention` jen kvůli nenulovému resultCode.
-- [ ] Implementovat POST `echo` se stejnou signing/response-verification/freshness
+- [x] Reconciliation konfigurace nesmí vyčerpat retry pokusy před
+      `PaymentTtlSeconds` + provider/worker rezervou; výchozí konfigurace
+      podporuje TTL 900 i 1800 sekund bez lokálního odvozování expirace.
+- [x] Implementovat POST `echo` se stejnou signing/response-verification/freshness
       hranicí jako GET echo a přidat opt-in integrační test.
 - [ ] Implementovat skutečné `payment/reverse` pro ČSOB na existujícím
       provider-neutral základě nebo jiným minimálním způsobem, který zachová
@@ -58,6 +61,10 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
 - [ ] Doplnit cílené unit/integration testy pro nové větve lifecycle a UX
       endpointy.
 - [ ] `scripts/verify.ps1` + PostgreSQL gate + live GET/POST echo před merge.
+
+Zaškrtnuté Stage 1 položky výše označují implementaci a lokální automatizované
+pokrytí. Živé POST echo a bankovní expired scénář zůstávají samostatně
+nezaškrtnuté v sekci C, dokud skutečně neproběhnou.
 
 ### Rozhodnutí, která nejsou automaticky součástí tohoto passu
 

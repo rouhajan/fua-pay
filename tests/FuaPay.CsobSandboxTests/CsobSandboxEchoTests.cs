@@ -7,9 +7,39 @@ public sealed class CsobSandboxEchoTests
     [Fact]
     public async Task EchoAsync_ValidatesMerchantAndBothKeys()
     {
+        var (client, httpClient, signature) = CreateClient();
+        using (httpClient)
+        using (signature)
+        {
+            var result = await client.EchoAsync();
+
+            Assert.Equal(0, result.ResultCode);
+            Assert.Equal("OK", result.ResultMessage);
+        }
+    }
+
+    [Fact]
+    public async Task EchoPostAsync_ValidatesMerchantAndBothKeys()
+    {
+        var (client, httpClient, signature) = CreateClient();
+        using (httpClient)
+        using (signature)
+        {
+            var result = await client.EchoPostAsync();
+
+            Assert.Equal(0, result.ResultCode);
+            Assert.Equal("OK", result.ResultMessage);
+        }
+    }
+
+    private static (
+        CsobGatewayClient Client,
+        HttpClient HttpClient,
+        CsobGatewaySignature Signature) CreateClient()
+    {
         var configuration = CreateConfiguration();
-        using var signature = new CsobGatewaySignature(configuration);
-        using var httpClient = new HttpClient
+        var signature = new CsobGatewaySignature(configuration);
+        var httpClient = new HttpClient
         {
             BaseAddress = configuration.ApiBaseUri,
             Timeout = configuration.RequestTimeout
@@ -21,10 +51,7 @@ public sealed class CsobSandboxEchoTests
             signature,
             TimeProvider.System);
 
-        var result = await client.EchoAsync();
-
-        Assert.Equal(0, result.ResultCode);
-        Assert.Equal("OK", result.ResultMessage);
+        return (client, httpClient, signature);
     }
 
     private static CsobGatewayConfiguration CreateConfiguration()

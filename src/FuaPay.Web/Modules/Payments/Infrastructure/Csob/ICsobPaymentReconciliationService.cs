@@ -14,4 +14,5 @@ public sealed record CsobPaymentReconciliationResult(
     Guid PaymentId,
     PaymentStatus PaymentStatus,
     int GatewayPaymentStatus,
+    int GatewayResultCode,
     bool StateChanged);
