@@ -18,6 +18,7 @@ public sealed class DetailsModel : PageModel
 {
     private readonly IPaymentQueries _paymentQueries;
     private readonly ICreditQueries _creditQueries;
+    private readonly CreditAvailabilityService _creditAvailabilityService;
     private readonly DevelopmentPaymentService _developmentPaymentService;
     private readonly IJobQueries _jobQueries;
     private readonly PaymentCreationService _paymentCreationService;
@@ -28,6 +29,7 @@ public sealed class DetailsModel : PageModel
     public DetailsModel(
         IPaymentQueries paymentQueries,
         ICreditQueries creditQueries,
+        CreditAvailabilityService creditAvailabilityService,
         DevelopmentPaymentService developmentPaymentService,
         IJobQueries jobQueries,
         PaymentCreationService paymentCreationService,
@@ -37,6 +39,7 @@ public sealed class DetailsModel : PageModel
     {
         ArgumentNullException.ThrowIfNull(paymentQueries);
         ArgumentNullException.ThrowIfNull(creditQueries);
+        ArgumentNullException.ThrowIfNull(creditAvailabilityService);
         ArgumentNullException.ThrowIfNull(developmentPaymentService);
         ArgumentNullException.ThrowIfNull(jobQueries);
         ArgumentNullException.ThrowIfNull(paymentCreationService);
@@ -46,6 +49,7 @@ public sealed class DetailsModel : PageModel
 
         _paymentQueries = paymentQueries;
         _creditQueries = creditQueries;
+        _creditAvailabilityService = creditAvailabilityService;
         _developmentPaymentService = developmentPaymentService;
         _jobQueries = jobQueries;
         _paymentCreationService = paymentCreationService;
@@ -100,12 +104,22 @@ public sealed class DetailsModel : PageModel
             return NotFound();
         }
 
-        var availableCredit = payment.PurposeType == PaymentPurposeType.CreditTopUp
-            ? DashboardDisplay.FormatMoney(
-                (await _creditQueries.FindAccountForOwnerAsync(
-                    customerUserId,
-                    cancellationToken))?.BalanceMinorUnits ?? 0)
-            : null;
+        string? availableCredit = null;
+
+        if (payment.PurposeType == PaymentPurposeType.CreditTopUp)
+        {
+            var account = await _creditQueries.FindAccountForOwnerAsync(
+                customerUserId,
+                cancellationToken);
+            var availableMinorUnits = account is null
+                ? 0
+                : (await _creditAvailabilityService.GetAvailableAsync(
+                    account,
+                    cancellationToken)).MinorUnits;
+
+            availableCredit = DashboardDisplay.FormatMoney(
+                availableMinorUnits);
+        }
 
         return new JsonResult(new CustomerPaymentStatusPayload(
             payment.Status.ToString(),

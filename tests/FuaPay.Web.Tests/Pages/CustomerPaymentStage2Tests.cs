@@ -13,11 +13,15 @@ using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Modules.Receipts.Application;
 using FuaPay.Web.Pages;
 using FuaPay.Web.Pages.Customer.Payments;
+using FuaPay.Web.Pages.Shared;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.ViewComponents;
+using Microsoft.Extensions.Logging.Abstractions;
 
 using PaymentDetailsModel =
     FuaPay.Web.Pages.Customer.Payments.DetailsModel;
@@ -114,12 +118,15 @@ public sealed class CustomerPaymentStage2Tests
         var payment = CreateDetail(customerUserId, PaymentStatus.Succeeded);
         var queries = new RecordingPaymentQueries(payment);
         var provider = new RecordingProviderInitiator();
-        var credits = new RecordingCreditQueries(75_000);
+        var credits = new RecordingCreditQueries(1_000);
+        var availabilityRepository =
+            new RecordingCreditAvailabilityRepository(450);
         var model = CreateDetailsModel(
             queries,
             provider,
             customerUserId,
-            credits);
+            credits,
+            new CreditAvailabilityService(availabilityRepository));
 
         var result = await model.OnGetStatusAsync(payment.Id);
 
@@ -136,7 +143,10 @@ public sealed class CustomerPaymentStage2Tests
             payload.UpdatedAt);
         Assert.False(payload.IsPending);
         Assert.Equal(
-            DashboardDisplay.FormatMoney(75_000),
+            DashboardDisplay.FormatMoney(550),
+            payload.AvailableCredit);
+        Assert.NotEqual(
+            DashboardDisplay.FormatMoney(1_000),
             payload.AvailableCredit);
         Assert.Equal("no-store", model.Response.Headers.CacheControl);
         Assert.Equal(1, queries.FindForCustomerCalls);
@@ -144,6 +154,7 @@ public sealed class CustomerPaymentStage2Tests
         Assert.Equal(0, provider.ResolveCalls);
         Assert.Equal(1, credits.FindForOwnerCalls);
         Assert.Equal(customerUserId, credits.LastOwnerId);
+        Assert.Equal(1, availabilityRepository.GetBlockingCalls);
 
         Assert.Equal(
             [
@@ -162,22 +173,120 @@ public sealed class CustomerPaymentStage2Tests
     }
 
     [Fact]
+    public async Task StatusHandler_NoBlockingReturnsFullLedgerBalance()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, PaymentStatus.Pending);
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            new RecordingCreditQueries(1_000),
+            new CreditAvailabilityService(
+                new RecordingCreditAvailabilityRepository(0)));
+
+        var result = await model.OnGetStatusAsync(payment.Id);
+
+        var payload = Assert.IsType<
+            PaymentDetailsModel.CustomerPaymentStatusPayload>(
+                Assert.IsType<JsonResult>(result).Value);
+        Assert.Equal(
+            DashboardDisplay.FormatMoney(1_000),
+            payload.AvailableCredit);
+    }
+
+    [Fact]
+    public async Task StatusHandler_NoCreditAccountReturnsZero()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, PaymentStatus.Pending);
+        var availabilityRepository =
+            new RecordingCreditAvailabilityRepository(450);
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            new RecordingCreditQueries(balanceMinorUnits: null),
+            new CreditAvailabilityService(availabilityRepository));
+
+        var result = await model.OnGetStatusAsync(payment.Id);
+
+        var payload = Assert.IsType<
+            PaymentDetailsModel.CustomerPaymentStatusPayload>(
+                Assert.IsType<JsonResult>(result).Value);
+        Assert.Equal(
+            DashboardDisplay.FormatMoney(0),
+            payload.AvailableCredit);
+        Assert.Equal(0, availabilityRepository.GetBlockingCalls);
+    }
+
+    [Theory]
+    [InlineData(450, 550)]
+    [InlineData(0, 1_000)]
+    public async Task CurrentCreditComponent_UsesAuthoritativeAvailableCredit(
+        long blockingMinorUnits,
+        long expectedAvailableMinorUnits)
+    {
+        var customerUserId = Guid.NewGuid();
+        var component = CreateCurrentCreditComponent(
+            customerUserId,
+            new RecordingCreditQueries(1_000),
+            new CreditAvailabilityService(
+                new RecordingCreditAvailabilityRepository(
+                    blockingMinorUnits)));
+
+        var result = await component.InvokeAsync(visible: true);
+
+        var view = Assert.IsType<ViewViewComponentResult>(result);
+        Assert.NotNull(view.ViewData);
+        var model = Assert.IsType<CurrentCreditViewModel>(
+            view.ViewData.Model);
+        Assert.Equal(expectedAvailableMinorUnits, model.AvailableMinorUnits);
+    }
+
+    [Fact]
+    public async Task CurrentCreditComponent_NoAccountDisplaysZero()
+    {
+        var customerUserId = Guid.NewGuid();
+        var availabilityRepository =
+            new RecordingCreditAvailabilityRepository(450);
+        var component = CreateCurrentCreditComponent(
+            customerUserId,
+            new RecordingCreditQueries(balanceMinorUnits: null),
+            new CreditAvailabilityService(availabilityRepository));
+
+        var result = await component.InvokeAsync(visible: true);
+
+        var view = Assert.IsType<ViewViewComponentResult>(result);
+        Assert.NotNull(view.ViewData);
+        var model = Assert.IsType<CurrentCreditViewModel>(
+            view.ViewData.Model);
+        Assert.Equal(0, model.AvailableMinorUnits);
+        Assert.Equal(0, availabilityRepository.GetBlockingCalls);
+    }
+
+    [Fact]
     public async Task StatusHandler_OtherCustomerGetsProtectedNotFound()
     {
         var ownerId = Guid.NewGuid();
         var otherCustomerId = Guid.NewGuid();
         var payment = CreateDetail(ownerId, PaymentStatus.Pending);
         var queries = new RecordingPaymentQueries(payment);
+        var availabilityRepository =
+            new RecordingCreditAvailabilityRepository(450);
         var model = CreateDetailsModel(
             queries,
             new RecordingProviderInitiator(),
-            otherCustomerId);
+            otherCustomerId,
+            new RecordingCreditQueries(1_000),
+            new CreditAvailabilityService(availabilityRepository));
 
         var result = await model.OnGetStatusAsync(payment.Id);
 
         Assert.IsType<NotFoundResult>(result);
         Assert.Equal("no-store", model.Response.Headers.CacheControl);
         Assert.Equal(otherCustomerId, queries.LastCustomerUserId);
+        Assert.Equal(0, availabilityRepository.GetBlockingCalls);
     }
 
     [Fact]
@@ -339,11 +448,14 @@ public sealed class CustomerPaymentStage2Tests
         IPaymentQueries queries,
         IPaymentProviderInitiator provider,
         Guid customerUserId,
-        ICreditQueries? creditQueries = null)
+        ICreditQueries? creditQueries = null,
+        CreditAvailabilityService? creditAvailabilityService = null)
     {
         return new PaymentDetailsModel(
             queries,
             creditQueries ?? new RecordingCreditQueries(0),
+            creditAvailabilityService ?? new CreditAvailabilityService(
+                new RecordingCreditAvailabilityRepository(0)),
             UnusedDependency<DevelopmentPaymentService>(),
             new UnusedJobQueries(),
             UnusedDependency<PaymentCreationService>(),
@@ -353,6 +465,26 @@ public sealed class CustomerPaymentStage2Tests
         {
             PageContext = CreatePageContext(customerUserId)
         };
+    }
+
+    private static CurrentCreditViewComponent CreateCurrentCreditComponent(
+        Guid customerUserId,
+        ICreditQueries creditQueries,
+        CreditAvailabilityService creditAvailabilityService)
+    {
+        var component = new CurrentCreditViewComponent(
+            creditQueries,
+            creditAvailabilityService,
+            NullLogger<CurrentCreditViewComponent>.Instance);
+        component.ViewComponentContext = new ViewComponentContext
+        {
+            ViewContext = new ViewContext
+            {
+                HttpContext = CreatePageContext(customerUserId).HttpContext
+            }
+        };
+
+        return component;
     }
 
     private static PageContext CreatePageContext(Guid customerUserId)
@@ -401,9 +533,9 @@ public sealed class CustomerPaymentStage2Tests
 
     private sealed class RecordingCreditQueries : ICreditQueries
     {
-        private readonly long _balanceMinorUnits;
+        private readonly long? _balanceMinorUnits;
 
-        public RecordingCreditQueries(long balanceMinorUnits)
+        public RecordingCreditQueries(long? balanceMinorUnits)
         {
             _balanceMinorUnits = balanceMinorUnits;
         }
@@ -419,11 +551,14 @@ public sealed class CustomerPaymentStage2Tests
             cancellationToken.ThrowIfCancellationRequested();
             FindForOwnerCalls++;
             LastOwnerId = ownerId;
-            return Task.FromResult<CreditAccountSummary?>(new(
-                Guid.NewGuid(),
-                ownerId,
-                _balanceMinorUnits,
-                Version: 1));
+            return Task.FromResult(
+                _balanceMinorUnits.HasValue
+                    ? new CreditAccountSummary(
+                        Guid.NewGuid(),
+                        ownerId,
+                        _balanceMinorUnits.Value,
+                        Version: 1)
+                    : null);
         }
 
         public Task<CreditAdministrationMovementPage>
@@ -444,6 +579,29 @@ public sealed class CustomerPaymentStage2Tests
             CreditMovementPageRequest page,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class RecordingCreditAvailabilityRepository :
+        ICreditAvailabilityRepository
+    {
+        private readonly Money _blockingAmount;
+
+        public RecordingCreditAvailabilityRepository(
+            long blockingMinorUnits)
+        {
+            _blockingAmount = new Money(blockingMinorUnits);
+        }
+
+        public int GetBlockingCalls { get; private set; }
+
+        public Task<Money> GetTotalBlockingAmountAsync(
+            Guid creditAccountId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            GetBlockingCalls++;
+            return Task.FromResult(_blockingAmount);
+        }
     }
 
     private sealed class RecordingPaymentQueries : IPaymentQueries

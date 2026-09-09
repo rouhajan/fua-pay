@@ -8,16 +8,20 @@ namespace FuaPay.Web.Pages.Shared;
 public sealed class CurrentCreditViewComponent : ViewComponent
 {
     private readonly ICreditQueries _creditQueries;
+    private readonly CreditAvailabilityService _creditAvailabilityService;
     private readonly ILogger<CurrentCreditViewComponent> _logger;
 
     public CurrentCreditViewComponent(
         ICreditQueries creditQueries,
+        CreditAvailabilityService creditAvailabilityService,
         ILogger<CurrentCreditViewComponent> logger)
     {
         ArgumentNullException.ThrowIfNull(creditQueries);
+        ArgumentNullException.ThrowIfNull(creditAvailabilityService);
         ArgumentNullException.ThrowIfNull(logger);
 
         _creditQueries = creditQueries;
+        _creditAvailabilityService = creditAvailabilityService;
         _logger = logger;
     }
 
@@ -41,10 +45,15 @@ public sealed class CurrentCreditViewComponent : ViewComponent
                 await _creditQueries.FindAccountForOwnerAsync(
                     userId.Value,
                     HttpContext.RequestAborted);
+            var availableMinorUnits = account is null
+                ? 0
+                : (await _creditAvailabilityService.GetAvailableAsync(
+                    account,
+                    HttpContext.RequestAborted)).MinorUnits;
 
             return View(
                 new CurrentCreditViewModel(
-                    account?.BalanceMinorUnits ?? 0));
+                    availableMinorUnits));
         }
         catch (Exception exception) when (
             exception is not OperationCanceledException)
@@ -59,4 +68,4 @@ public sealed class CurrentCreditViewComponent : ViewComponent
     }
 }
 
-public sealed record CurrentCreditViewModel(long BalanceMinorUnits);
+public sealed record CurrentCreditViewModel(long AvailableMinorUnits);
