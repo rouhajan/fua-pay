@@ -71,9 +71,13 @@ sekci C, dokud skutečně neproběhnou.
 
 Stage 3 ukládá `SettlementReturn` i Reverse attempt jako `InProgress` před
 externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy PUT
-mohl odejít, je každý replay/restart pouze statusový. Lokální automatizované
-testy neznamenají provedení živého reverse; aktivační položka v sekci C proto
-zůstává otevřená.
+mohl odejít, je každý replay/restart pouze statusový. Administrace pro recovery
+použije původní uložené request ID a po dokončení, zamítnutí nebo při
+nekonzistentním stavu nový reverse nenabídne. Přímá odpověď reverse rozlišuje
+`0/5`, dokumentované `150` s nereverzibilním stavem a všechny ostatní
+fail-closed kombinace; úspěšné statusové recovery `0/8`, `0/9` nebo `0/10`
+je samostatná autoritativní hranice. Lokální automatizované testy neznamenají
+provedení živého reverse; aktivační položka v sekci C proto zůstává otevřená.
 
 ### Rozhodnutí, která nejsou automaticky součástí tohoto passu
 

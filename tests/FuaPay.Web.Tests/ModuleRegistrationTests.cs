@@ -284,6 +284,12 @@ public sealed class ModuleRegistrationTests
         Assert.Contains(
             services,
             descriptor =>
+                descriptor.ServiceType ==
+                typeof(ISettlementReturnQueries));
+
+        Assert.Contains(
+            services,
+            descriptor =>
                 descriptor.ServiceType == typeof(IPaymentRepository));
 
         Assert.Contains(

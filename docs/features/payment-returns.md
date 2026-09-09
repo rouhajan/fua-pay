@@ -58,11 +58,18 @@ operation ID a ze serverového stavu odvozuje původní platbu, zákazníka, cel
 částku, zakázku, provider i `payId`. Return i attempt musí být durabilně
 `InProgress` před PUT a přes HTTP se nedrží databázová transakce.
 
-Podepsaná a čerstvá odpověď `0/5` vratku potvrdí a dokončí. Nejasný výsledek
-přejde do `Uncertain` / `RequiresAttention`; jeho replay i restart použije pouze
-`payment/status` a stavový PUT se automaticky neopakuje. Podepsaný definitivní
-stav 8, 9 nebo 10 zamítne jen Reverse attempt, takže `SettlementReturn` zůstává
-dostupná pro budoucí samostatně autorizované rozhodnutí o refundu.
+Podepsaná a čerstvá odpověď `0/5` vratku potvrdí a dokončí. Přímá
+odpověď reverse zamítne pokus jen při dokumentovaném `resultCode=150`
+a aktuálním nereverzibilním stavu 8, 9 nebo 10. Jiné nenulové kombinace,
+včetně `160/8`, přejdou do `Uncertain` / `RequiresAttention`.
+
+Replay i restart použije pouze `payment/status` a stavový PUT se automaticky
+neopakuje. Úspěšné podepsané stavové ověření `0/8`, `0/9` nebo `0/10`
+zamítne jen Reverse attempt, takže `SettlementReturn` zůstává dostupná pro
+budoucí samostatně autorizované rozhodnutí o refundu. Administrace při
+existujícím aktivním pokusu zobrazuje stavové ověření se stejným uloženým
+operation ID; dokončená, zamítnutá nebo nekonzistentní vratka nový reverse
+nenabízí.
 
 ## Zatím nepodporované
 

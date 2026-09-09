@@ -1,11 +1,22 @@
+using System.Reflection;
+
 using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Domain;
+using FuaPay.Web.Modules.Access.Application;
+using FuaPay.Web.Modules.Access.Domain;
+using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
+using FuaPay.Web.Pages.Admin.Payments;
+
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 
 namespace FuaPay.Web.Tests.Modules.Payments.Infrastructure.Csob;
 
@@ -171,6 +182,67 @@ public sealed class CsobCardJobSettlementReturnServiceTests
     }
 
     [Fact]
+    public async Task AdminRecoveryPostUsesPersistedOperationForStatusOnly()
+    {
+        var fixture = new Fixture();
+        fixture.SeedExisting(
+            SettlementReturnState.RequiresAttention,
+            SettlementReturnProviderAttemptState.Uncertain);
+        fixture.Gateway.StatusResult = Status(paymentStatus: 5);
+        var queries = DispatchProxy.Create<
+            IPaymentQueries,
+            UnusedQueryProxy>();
+        var accessQueries = DispatchProxy.Create<
+            IAccessUserQueries,
+            UnusedQueryProxy>();
+        var reconciliationQueries = DispatchProxy.Create<
+            IPaymentReconciliationQueries,
+            UnusedQueryProxy>();
+        var returnQueries = DispatchProxy.Create<
+            ISettlementReturnQueries,
+            UnusedQueryProxy>();
+        var model = new IndexModel(
+            queries,
+            accessQueries,
+            reconciliationQueries,
+            returnQueries,
+            fixture.Service);
+        var httpContext = new DefaultHttpContext
+        {
+            User = AccessClaimsPrincipalFactory.Create(
+                new AccessSessionSnapshot(
+                    fixture.Command.AdministratorUserId,
+                    "Administrator",
+                    "admin@example.cz",
+                    AccessUserStatus.Active,
+                    [AccessRole.Admin]),
+                "Test")
+        };
+        model.PageContext = new PageContext
+        {
+            HttpContext = httpContext
+        };
+        model.TempData = new TempDataDictionary(
+            httpContext,
+            new MemoryTempDataProvider());
+
+        var response = await model.OnPostReverseAsync(
+            fixture.Command.OperationId,
+            fixture.Command.OriginalPaymentId,
+            fixture.Command.Reason);
+
+        Assert.IsType<RedirectToPageResult>(response);
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(1, fixture.Gateway.StatusCalls);
+        Assert.Equal(
+            SettlementReturnProviderAttemptState.Confirmed,
+            Assert.Single(fixture.AttemptRepository.Stored).State);
+        Assert.Equal(
+            SettlementReturnState.Completed,
+            Assert.Single(fixture.ReturnRepository.Stored).State);
+    }
+
+    [Fact]
     public async Task ReturnAsync_AmbiguousStatusStaysUncertainWithoutReverse()
     {
         var fixture = new Fixture();
@@ -234,11 +306,17 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         Assert.Equal(0, fixture.Gateway.ReverseCalls);
     }
 
-    [Fact]
-    public async Task ReturnAsync_DefinitiveReverseResponsePreservesRefundPath()
+    [Theory]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    public async Task ReturnAsync_DocumentedInvalidStateReverseResponsePreservesRefundPath(
+        int paymentStatus)
     {
         var fixture = new Fixture();
-        fixture.Gateway.ReverseResult = Reverse(paymentStatus: 8, resultCode: 160);
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus,
+            resultCode: 150);
 
         var result = await fixture.Service.ReturnAsync(fixture.Command);
 
@@ -256,8 +334,14 @@ public sealed class CsobCardJobSettlementReturnServiceTests
 
     [Theory]
     [InlineData(0, 7)]
+    [InlineData(0, 8)]
     [InlineData(130, 5)]
+    [InlineData(150, 4)]
+    [InlineData(150, 5)]
     [InlineData(160, 4)]
+    [InlineData(160, 8)]
+    [InlineData(130, 8)]
+    [InlineData(180, 10)]
     public async Task ReturnAsync_UnexpectedSignedReverseResponseIsUncertain(
         int resultCode,
         int paymentStatus)
@@ -822,5 +906,31 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             SettlementReturnProviderAttempt attempt,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+    }
+
+    private class UnusedQueryProxy : DispatchProxy
+    {
+        protected override object? Invoke(
+            MethodInfo? targetMethod,
+            object?[]? args) =>
+            throw new NotSupportedException(
+                "The successful admin POST must not invoke list queries.");
+    }
+
+    private sealed class MemoryTempDataProvider : ITempDataProvider
+    {
+        private IDictionary<string, object> _values =
+            new Dictionary<string, object>();
+
+        public IDictionary<string, object> LoadTempData(
+            HttpContext context) =>
+            _values;
+
+        public void SaveTempData(
+            HttpContext context,
+            IDictionary<string, object> values)
+        {
+            _values = values;
+        }
     }
 }

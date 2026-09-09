@@ -460,7 +460,9 @@ public sealed class CsobCardJobSettlementReturnService :
                 cancellationToken);
         }
 
-        if (IsDefinitivelyNonReversible(response.PaymentStatus))
+        if (
+            response.ResultCode == 150 &&
+            IsDefinitivelyNonReversible(response.PaymentStatus))
         {
             return RejectAsync(
                 operationId,

@@ -91,6 +91,9 @@ public static class PaymentsModule
             IPaymentOrderNumberAllocator,
             EfPaymentOrderNumberAllocator>();
         services.AddScoped<IPaymentQueries, EfPaymentQueries>();
+        services.AddScoped<
+            ISettlementReturnQueries,
+            EfSettlementReturnQueries>();
 
         return services;
     }

@@ -149,6 +149,23 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
                 });
             }
 
+            using (var readScope = _factory.Services.CreateScope())
+            {
+                var existing = await readScope.ServiceProvider
+                    .GetRequiredService<ISettlementReturnQueries>()
+                    .FindByOriginalPaymentIdsAsync([scenario.PaymentId]);
+                var item = Assert.Single(existing).Value;
+
+                Assert.Equal(command.OperationId, item.RequestId);
+                Assert.Equal(
+                    SettlementReturnState.InProgress,
+                    item.State);
+                Assert.Equal(
+                    SettlementReturnProviderAttemptState.InProgress,
+                    item.ReverseAttemptState);
+                Assert.True(item.CanRecoverReverse);
+            }
+
             var gateway = new StatusOnlyGateway(scenario.PayId);
             var result = await RunAsync(command, gateway);
 
@@ -176,6 +193,14 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
             Assert.Equal(
                 SettlementReturnProviderAttemptState.Confirmed,
                 attempt.State);
+
+            var completed = await verifyScope.ServiceProvider
+                .GetRequiredService<ISettlementReturnQueries>()
+                .FindByOriginalPaymentIdsAsync([scenario.PaymentId]);
+            var completedItem = Assert.Single(completed).Value;
+            Assert.Equal(command.OperationId, completedItem.RequestId);
+            Assert.True(completedItem.IsCompletedReverse);
+            Assert.False(completedItem.CanRecoverReverse);
         }
         finally
         {

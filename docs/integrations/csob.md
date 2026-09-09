@@ -113,10 +113,21 @@ Jediný potvrzený výsledek je čerstvá, podepsaná odpověď pro stejné `pay
 Jakmile PUT mohl být odeslán, timeout, zrušení, transportní chyba, neplatná
 odpověď nebo chyba lokálního zápisu vedou do `Uncertain` /
 `RequiresAttention`. Replay `InProgress` nebo `Uncertain` volá pouze podepsané
-`payment/status` a PUT nikdy automaticky neopakuje. `resultCode=0` se stavem 5
-vratku dokončí; důvěryhodný stav 8, 9 nebo 10 zamítne pouze Reverse attempt a ponechá vratku v
-`RequiresAttention` pro samostatné budoucí rozhodnutí o refundu. Ostatní
-kombinace zůstávají nejasné. Z lokálního času se výsledek neodvozuje.
+`payment/status` a PUT nikdy automaticky neopakuje.
+
+Přímá odpověď reverse potvrzuje pouze `resultCode=0`, `paymentStatus=5`.
+Dokumentované `resultCode=150` spolu se stavem 8, 9 nebo 10 zamítne jen Reverse
+attempt a ponechá vratku v `RequiresAttention` pro samostatné budoucí
+rozhodnutí o refundu. Jiné nenulové kombinace, například `160/8`, zůstávají
+nejasné. Stavové recovery má oddělenou hranici: úspěšná podepsaná
+odpověď `payment/status` `0/5` vratku dokončí a `0/8`, `0/9` nebo `0/10`
+zamítne jen Reverse attempt. Z lokálního času se výsledek neodvozuje.
+
+Administrátorský přehled načítá provider-neutral stav existující vratky.
+Aktivní `InProgress` / `Uncertain` pokus nabídne jen stavové ověření s
+původním uloženým request ID. Dokončená vratka se zobrazí jako vrácená;
+zamítnutý Reverse jako rozhodnutí o refundu a nekonzistentní stav jako
+vyžadující pozornost. Žádný z těchto stavů nenabídne nový reverse.
 
 ## Známé implementační mezery před production readiness
 

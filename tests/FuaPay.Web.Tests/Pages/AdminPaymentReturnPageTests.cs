@@ -36,6 +36,7 @@ public sealed class AdminPaymentReturnPageTests
             new EmptyPaymentQueries(),
             new EmptyAccessUserQueries(),
             new EmptyReconciliationQueries(),
+            new EmptySettlementReturnQueries(),
             service);
         var administratorId = Guid.NewGuid();
         var httpContext = new DefaultHttpContext
@@ -183,5 +184,22 @@ public sealed class AdminPaymentReturnPageTests
                 int limit,
                 CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class EmptySettlementReturnQueries :
+        ISettlementReturnQueries
+    {
+        public Task<
+            IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>>
+            FindByOriginalPaymentIdsAsync(
+                IEnumerable<Guid> originalPaymentIds,
+                CancellationToken cancellationToken = default) =>
+            Task.FromResult<
+                IReadOnlyDictionary<
+                    Guid,
+                    SettlementReturnAdministrationItem>>(
+                new Dictionary<
+                    Guid,
+                    SettlementReturnAdministrationItem>());
     }
 }

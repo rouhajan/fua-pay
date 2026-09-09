@@ -17,6 +17,7 @@ public sealed class IndexModel : PageModel
     private readonly IPaymentQueries _paymentQueries;
     private readonly IAccessUserQueries _accessUserQueries;
     private readonly IPaymentReconciliationQueries _reconciliationQueries;
+    private readonly ISettlementReturnQueries _settlementReturnQueries;
     private readonly ICardJobSettlementReturnService
         _cardJobSettlementReturnService;
 
@@ -24,16 +25,19 @@ public sealed class IndexModel : PageModel
         IPaymentQueries paymentQueries,
         IAccessUserQueries accessUserQueries,
         IPaymentReconciliationQueries reconciliationQueries,
+        ISettlementReturnQueries settlementReturnQueries,
         ICardJobSettlementReturnService cardJobSettlementReturnService)
     {
         ArgumentNullException.ThrowIfNull(paymentQueries);
         ArgumentNullException.ThrowIfNull(accessUserQueries);
         ArgumentNullException.ThrowIfNull(reconciliationQueries);
+        ArgumentNullException.ThrowIfNull(settlementReturnQueries);
         ArgumentNullException.ThrowIfNull(cardJobSettlementReturnService);
 
         _paymentQueries = paymentQueries;
         _accessUserQueries = accessUserQueries;
         _reconciliationQueries = reconciliationQueries;
+        _settlementReturnQueries = settlementReturnQueries;
         _cardJobSettlementReturnService =
             cardJobSettlementReturnService;
     }
@@ -55,6 +59,11 @@ public sealed class IndexModel : PageModel
         get;
         private set;
     } = [];
+
+    public IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>
+        SettlementReturns
+    { get; private set; } =
+            new Dictionary<Guid, SettlementReturnAdministrationItem>();
 
     public async Task OnGetAsync(
         PaymentStatus? status = null,
@@ -79,6 +88,11 @@ public sealed class IndexModel : PageModel
         Users = await _accessUserQueries.FindOptionsAsync(
             Payments.Items.Select(item => item.CustomerUserId),
             cancellationToken);
+
+        SettlementReturns =
+            await _settlementReturnQueries.FindByOriginalPaymentIdsAsync(
+                Payments.Items.Select(item => item.Id),
+                cancellationToken);
 
         ReconciliationItems =
             await _reconciliationQueries.ListOpenAsync(
