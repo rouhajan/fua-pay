@@ -130,7 +130,8 @@ public sealed record PaymentProviderInitializationResult
 
 public sealed record PaymentInitializationOutcome(
     Payment Payment,
-    Uri? ProcessUri);
+    Uri? ProcessUri,
+    bool CompletedByCurrentRequest);
 
 public sealed class PaymentProviderInitializationUncertainException :
     Exception

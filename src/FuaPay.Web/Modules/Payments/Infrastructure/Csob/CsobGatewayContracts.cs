@@ -29,9 +29,27 @@ public sealed record CsobPaymentStatusResult(
     string? AuthCode,
     string? StatusDetail);
 
+public sealed record CsobPaymentReverseResult(
+    string PayId,
+    int ResultCode,
+    string ResultMessage,
+    int PaymentStatus,
+    string? StatusDetail);
+
 public sealed record CsobEchoResult(
     int ResultCode,
     string ResultMessage);
+
+internal sealed record CsobEchoRequest(
+    [property: JsonPropertyName("merchantId")] string MerchantId,
+    [property: JsonPropertyName("dttm")] string Dttm,
+    [property: JsonPropertyName("signature")] string Signature);
+
+internal sealed record CsobPaymentReverseRequest(
+    [property: JsonPropertyName("merchantId")] string MerchantId,
+    [property: JsonPropertyName("payId")] string PayId,
+    [property: JsonPropertyName("dttm")] string Dttm,
+    [property: JsonPropertyName("signature")] string Signature);
 
 internal sealed record CsobPaymentInitRequest(
     [property: JsonPropertyName("merchantId")] string MerchantId,

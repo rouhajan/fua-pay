@@ -78,6 +78,12 @@ public static class CsobTextToSign
         string dttm) =>
         PaymentReferenceOperation(merchantId, payId, dttm);
 
+    public static string PaymentReverse(
+        string merchantId,
+        string payId,
+        string dttm) =>
+        PaymentReferenceOperation(merchantId, payId, dttm);
+
     internal static string PaymentInitResponse(
         CsobGatewayResponse response)
     {
@@ -117,6 +123,21 @@ public static class CsobTextToSign
         {
             values.Add(response.AuthCode);
         }
+
+        if (!string.IsNullOrEmpty(response.StatusDetail))
+        {
+            values.Add(response.StatusDetail);
+        }
+
+        return string.Join('|', values);
+    }
+
+    internal static string PaymentReverseResponse(
+        CsobGatewayResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+
+        var values = BaseResponse(response);
 
         if (!string.IsNullOrEmpty(response.StatusDetail))
         {

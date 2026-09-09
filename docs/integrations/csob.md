@@ -1,6 +1,6 @@
 # ČSOB Payment Gateway eAPI 1.9
 
-Status: 2026-09-08
+Status: 2026-09-09
 
 FUA Pay používá ČSOB jako provider adaptér nad interním provider-neutral modelem
 platby. Browserový návrat nikdy není finanční autorita; autoritativní stav se
@@ -21,6 +21,8 @@ stejné provozní TODO neduplikovalo na více místech.
 - Merchant private key i integration gateway public key jsou mimo Git/release a
   čitelné účtem služby.
 - GET `echo`: ověřeno proti živému integračnímu prostředí.
+- POST `echo`: implementováno se stejným podpisem, ověřením odpovědi a časovým
+  oknem jako GET; živé integration ověření zatím nebylo provedeno.
 - Úspěšné integrační dobití kreditu 100 Kč: ověřeno 2026-09-07 a znovu
   2026-09-08.
 - Zrušení zákazníkem na bráně: ověřeno 2026-09-08; lokálně skončilo jako
@@ -36,9 +38,13 @@ Po vytvoření platby se persistuje interní `Payment`, `PaymentInitiation`,
 podepsanou odpověď, durabilně zachytí `payId`/process URI a bezprostředně provede
 podepsané `payment/status`. Teprve poté se lokální platba přepne do `Pending`.
 
-Zákazník pokračuje přes podepsanou HTTPS `payment/process` URI vytvořenou ze
-známého ČSOB API hostu. FUA Pay nezobrazuje formulář karty a neukládá PAN,
-CVV/CVC, PIN, expiraci ani 3-D Secure údaje.
+Po nové nebo v aktuálním requestu bezpečně dokončené inicializaci přesměruje
+FUA Pay zákazníka přímo na podepsanou HTTPS `payment/process` URI. Před
+redirectem server fail-closed ověří přesný nakonfigurovaný ČSOB origin, tvar
+cesty, merchant ID a shodu `payId` s persistovanou provider reference. Stabilní
+replay již inicializované `Pending` platby a provider bez externí URI vedou na
+lokální detail. FUA Pay nezobrazuje formulář karty a neukládá PAN, CVV/CVC, PIN,
+expiraci ani 3-D Secure údaje.
 
 Return endpoint přijímá GET nebo malý `application/x-www-form-urlencoded` POST.
 Z browseru používá pouze `payId` jako podnět pro persistovanou reconciliation
@@ -51,48 +57,83 @@ atomické a opakovaný return/status má nejvýše jeden finanční účinek. Ne
 `payment/init` se slepě neopakuje; známý `payId` jde do recovery a neznámý výsledek
 vyžaduje operátora.
 
+Podepsaná a čerstvá odpověď `payment/status` s přesnou kombinací
+`resultCode=130`, `paymentStatus=6` uzavírá odpovídající `Pending` platbu jako
+`Expired` bez settlement/kredit/job efektu. Stejná odpověď umí bezpečně uzavřít
+i `Created` platbu pouze tehdy, když její nejasná inicializace obsahuje přesně
+stejnou persistovanou observed provider reference. Stav `6` s `resultCode=0`
+zůstává běžné `Failed`; všechny ostatní nenulové kombinace zůstávají
+`RequiresAttention`.
+
 ## Potvrzené UX poznatky z reálného integračního testu
 
 ### Návrat z brány
 
 Return endpoint pouze naplánuje reconciliation a okamžitě přesměruje browser na
-detail platby. Reconciliation může doběhnout až o několik sekund později. Dne
-2026-09-08 proto detail po návratu krátce zobrazil starý `Pending` stav a nový
-kredit se projevil až po ručním F5.
+detail platby. Reconciliation může doběhnout až o několik sekund později. Detail
+proto při lokálním stavu `Pending` používá owner-scoped GET status handler, který
+čte pouze lokální payment read model a u dobití aktuální lokální kredit. Odpověď
+má `Cache-Control: no-store`; handler nevolá ČSOB, reconciliation ani settlement
+a nic nemění.
 
-To není finanční chyba, ale UX mezera. Cílový návrh je aktualizovat jen relevantní
-data asynchronně bez reloadu celé stránky: stav platby, zobrazený kredit a akce
-na detailu. Polling musí mít omezený čas, po terminálním stavu skončit a při
-nedostupnosti ponechat bezpečný fallback na ruční refresh.
+Self-hosted skript pod stávající CSP načítá stav po dvou sekundách, nejvýše
+30krát. V místě aktualizuje status badge, čas, pending-only akce a případný
+kredit v shellu. Končí při terminálním stavu, chybě, ztrátě přístupu/not-found
+nebo vyčerpání limitu; ruční refresh zůstává dostupný. Jde o lokálně
+implementovaný stav, nikoli důkaz živého ČSOB scénáře.
 
 ### Přechod na platební bránu
 
-Aktuálně po zadání částky vznikne a inicializuje se platba, browser je přesměrován
-na interní detail a teprve tam uživatel kliká na „Pokračovat na zabezpečenou
-platební bránu ČSOB“.
-
-Cílový UX je po úspěšné inicializaci přesměrovat rovnou na `payment/process`.
-Detail platby zůstane zachovaný jako recovery cesta pro již existující `Pending`
-platbu, takže uživatel může pokračovat na bránu i po přerušení toku.
+Po úspěšné nové nebo bezpečně obnovené inicializaci a okamžitém podepsaném
+`payment/status` ověření vede top-up i přímá CardJob cesta rovnou na důvěryhodnou
+`payment/process` URI. Detail platby zůstává recovery cesta pro již existující
+`Pending` platbu a znovu ověřuje persistovanou URI stejnou provider hranicí před
+zobrazením odkazu. Browser/form/query vstup cíl redirectu neurčuje.
 
 Je správně, že lokální `Pending` záznam může existovat ještě před zadáním karty:
 v té chvíli už byla platba skutečně založena u ČSOB a má `payId`. Opuštěné
 `Pending` pokusy proto nejsou samy o sobě chyba a musí je řešit reconciliation /
 expiry lifecycle, ne mazání historie.
 
+## CardJob payment/reverse
+
+Administrátor může z přehledu plateb spustit pouze plnou vratku úspěšné
+ČSOB platby zakázky. POST s antiforgery předá jen idempotentní operation ID,
+identifikátor vybírané platby a důvod; zákazníka, zakázku, částku, provider a
+`payId` služba vždy znovu odvodí z autoritativní uložené platby a vypořádání
+zakázky. CardTopUp, kreditní zakázka, částečná vratka a refund nejsou touto
+cestou podporovány.
+
+`SettlementReturn` a jeho Reverse provider attempt se nejdřív v jedné databázové
+transakci uloží jako `InProgress`. Teprve po commitu smí první oprávněný request
+odeslat podepsaný PUT `payment/reverse`; databázová transakce se přes HTTP nedrží.
+Jediný potvrzený výsledek je čerstvá, podepsaná odpověď pro stejné `payId` s
+`resultCode=0`, `paymentStatus=5`.
+
+Jakmile PUT mohl být odeslán, timeout, zrušení, transportní chyba, neplatná
+odpověď nebo chyba lokálního zápisu vedou do `Uncertain` /
+`RequiresAttention`. Replay `InProgress` nebo `Uncertain` volá pouze podepsané
+`payment/status` a PUT nikdy automaticky neopakuje.
+
+Přímá odpověď reverse potvrzuje pouze `resultCode=0`, `paymentStatus=5`.
+Dokumentované `resultCode=150` spolu se stavem 8, 9 nebo 10 zamítne jen Reverse
+attempt a ponechá vratku v `RequiresAttention` pro samostatné budoucí
+rozhodnutí o refundu. Jiné nenulové kombinace, například `160/8`, zůstávají
+nejasné. Stavové recovery má oddělenou hranici: úspěšná podepsaná
+odpověď `payment/status` `0/5` vratku dokončí a `0/8`, `0/9` nebo `0/10`
+zamítne jen Reverse attempt. Z lokálního času se výsledek neodvozuje.
+
+Administrátorský přehled načítá provider-neutral stav existující vratky.
+Aktivní `InProgress` / `Uncertain` pokus nabídne jen stavové ověření s
+původním uloženým request ID. Dokončená vratka se zobrazí jako vrácená;
+zamítnutý Reverse jako rozhodnutí o refundu a nekonzistentní stav jako
+vyžadující pozornost. Žádný z těchto stavů nenabídne nový reverse.
+
 ## Známé implementační mezery před production readiness
 
-1. POST `echo` zatím není implementovaný; současný klient má pouze GET echo.
-2. `payment/reverse` zatím nemá skutečné ČSOB síťové volání. Existující
-   provider-neutral Reverse/Refund persistence je základ, nikoli dokončená ČSOB
-   operace.
-3. Expired activation scénář ČSOB očekává `resultCode=130` a `paymentStatus=6`.
-   Současná reconciliation nejdřív odmítá každý nenulový `resultCode`, takže
-   kombinace `130/6` se dnes správně nepřeloží na interní `Expired`. Toto je
-   konkrétní integrační gap, který musí být opraven před expired testem.
-4. Po returnu chybí asynchronní dotažení UI do terminálního stavu.
-5. Po úspěšném `payment/init`/ověření chybí přímý redirect na `payment/process`;
-   interní detail vytváří jeden zbytečný klik navíc.
+Skutečné ČSOB `payment/reverse` pro plnou CardJob vratku je implementované nad
+provider-neutral persistence, ale živý bankovní aktivační scénář zatím nebyl
+proveden a zůstává nezaškrtnutý v readiness checklistu.
 
 Refund není součástí povinného ČSOB production-activation checklistu. Zda má být
 in-app card refund součást první produkční verze FUA Pay, zůstává samostatné
@@ -123,6 +164,12 @@ Při production cutoveru se musí použít produkční konfigurace/klíče schv�
 ČSOB a produkční veřejný klíč brány. Žádný privátní klíč ani secret nesmí být v
 Git/release. Neúplná nebo konfliktní ČSOB konfigurace musí zastavit startup;
 `Development` provider není fallback.
+
+Reconciliation konfigurace musí mít dost pokusů, aby se její retry horizont
+nevyčerpal před `Csob:PaymentTtlSeconds`, třicetisekundovou provider rezervou a
+jedním intervalem workeru. Výchozích 14 pokusů pokrývá celý povolený rozsah TTL
+300–1800 sekund při výchozím backoffu. Expirace se z lokálního času neodvozuje;
+vždy ji potvrzuje až autoritativní podepsané ČSOB `payment/status`.
 
 ## Oficiální aktivační minimum ČSOB
 

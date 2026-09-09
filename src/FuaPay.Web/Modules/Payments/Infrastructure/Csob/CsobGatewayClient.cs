@@ -43,8 +43,17 @@ public sealed class CsobGatewayClient : ICsobGatewayClient
         _gatewayTimeZone = ResolveGatewayTimeZone();
     }
 
-    public async Task<CsobEchoResult> EchoAsync(
-        CancellationToken cancellationToken = default)
+    public Task<CsobEchoResult> EchoAsync(
+        CancellationToken cancellationToken = default) =>
+        SendEchoAsync(usePost: false, cancellationToken);
+
+    public Task<CsobEchoResult> EchoPostAsync(
+        CancellationToken cancellationToken = default) =>
+        SendEchoAsync(usePost: true, cancellationToken);
+
+    private async Task<CsobEchoResult> SendEchoAsync(
+        bool usePost,
+        CancellationToken cancellationToken)
     {
         _availability.EnsureEnabled();
         var requestStartedAt = _timeProvider.GetUtcNow();
@@ -53,17 +62,25 @@ public sealed class CsobGatewayClient : ICsobGatewayClient
             CsobTextToSign.Echo(
                 _configuration.MerchantId,
                 dttm));
-        var requestUri = string.Join(
-            "/",
-            $"api/{ApiVersion}/echo",
-            Escape(_configuration.MerchantId),
-            Escape(dttm),
-            Escape(signature));
 
         using var response = await SendAsync(
-            () => _httpClient.GetAsync(
-                requestUri,
-                cancellationToken),
+            () => usePost
+                ? _httpClient.PostAsJsonAsync(
+                    $"api/{ApiVersion}/echo",
+                    new CsobEchoRequest(
+                        _configuration.MerchantId,
+                        dttm,
+                        signature),
+                    JsonOptions,
+                    cancellationToken)
+                : _httpClient.GetAsync(
+                    string.Join(
+                        "/",
+                        $"api/{ApiVersion}/echo",
+                        Escape(_configuration.MerchantId),
+                        Escape(dttm),
+                        Escape(signature)),
+                    cancellationToken),
             cancellationToken);
         var responseReceivedAt = _timeProvider.GetUtcNow();
         var gatewayResponse = await ReadVerifiedResponseAsync(
@@ -220,6 +237,64 @@ public sealed class CsobGatewayClient : ICsobGatewayClient
                 ?? throw new CsobGatewayException(
                     "Odpověď payment/status neobsahuje stav platby."),
             gatewayResponse.AuthCode,
+            gatewayResponse.StatusDetail);
+    }
+
+    public async Task<CsobPaymentReverseResult> ReverseAsync(
+        string payId,
+        CancellationToken cancellationToken = default)
+    {
+        _availability.EnsureEnabled();
+        var normalizedPayId = CsobPayId.RequireGatewayInput(payId);
+        var requestStartedAt = _timeProvider.GetUtcNow();
+        var dttm = CreateDttm(requestStartedAt);
+        var signature = _signature.Sign(
+            CsobTextToSign.PaymentReverse(
+                _configuration.MerchantId,
+                normalizedPayId,
+                dttm));
+        var request = new CsobPaymentReverseRequest(
+            _configuration.MerchantId,
+            normalizedPayId,
+            dttm,
+            signature);
+
+        using var response = await SendAsync(
+            () => _httpClient.PutAsJsonAsync(
+                $"api/{ApiVersion}/payment/reverse",
+                request,
+                JsonOptions,
+                cancellationToken),
+            cancellationToken);
+        var responseReceivedAt = _timeProvider.GetUtcNow();
+        var gatewayResponse = await ReadVerifiedResponseAsync(
+            response,
+            CsobTextToSign.PaymentReverseResponse,
+            requestStartedAt,
+            responseReceivedAt,
+            cancellationToken);
+        var responsePayId = CsobPayId.RequireSigned(
+            gatewayResponse.PayId,
+            "Odpověď payment/reverse neobsahuje platné payId.");
+
+        if (!string.Equals(
+            responsePayId,
+            normalizedPayId,
+            StringComparison.Ordinal))
+        {
+            throw new CsobGatewayException(
+                "Odpověď payment/reverse patří jiné platbě než požadované payId.");
+        }
+
+        return new CsobPaymentReverseResult(
+            responsePayId,
+            gatewayResponse.ResultCode,
+            RequireResponseValue(
+                gatewayResponse.ResultMessage,
+                "Odpověď payment/reverse neobsahuje resultMessage."),
+            gatewayResponse.PaymentStatus
+                ?? throw new CsobGatewayException(
+                    "Odpověď payment/reverse neobsahuje stav platby."),
             gatewayResponse.StatusDetail);
     }
 

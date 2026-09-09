@@ -38,6 +38,7 @@ public sealed class PaymentInitiationServiceTests
         Assert.Equal(PaymentInitiationState.Initialized, initiation.State);
         Assert.Equal(processUri, initiation.ProcessUri);
         Assert.Equal(processUri, outcome.ProcessUri);
+        Assert.True(outcome.CompletedByCurrentRequest);
         Assert.Equal(1, provider.InitializeCalls);
         Assert.Equal(1, provider.VerifyCalls);
         Assert.Equal(1, payments.SaveCalls);
@@ -101,6 +102,7 @@ public sealed class PaymentInitiationServiceTests
 
         Assert.Same(payment, outcome.Payment);
         Assert.Null(outcome.ProcessUri);
+        Assert.False(outcome.CompletedByCurrentRequest);
         Assert.Equal(0, provider.InitializeCalls);
         Assert.Equal(PaymentInitiationState.Uncertain, initiation.State);
     }
@@ -122,6 +124,7 @@ public sealed class PaymentInitiationServiceTests
         var outcome = await service.InitializeIfPreparedAsync(payment);
 
         Assert.Same(payment, outcome.Payment);
+        Assert.False(outcome.CompletedByCurrentRequest);
         Assert.Equal(PaymentInitiationState.InProgress, initiation.State);
         Assert.Equal(0, provider.InitializeCalls);
     }
@@ -153,6 +156,7 @@ public sealed class PaymentInitiationServiceTests
         Assert.Equal("PAY-LATE", payment.ProviderReference);
         Assert.Equal(PaymentInitiationState.Initialized, initiation.State);
         Assert.Equal(processUri, outcome.ProcessUri);
+        Assert.True(outcome.CompletedByCurrentRequest);
     }
 
     [Fact]
@@ -257,6 +261,7 @@ public sealed class PaymentInitiationServiceTests
         var replay = await service.InitializeIfPreparedAsync(payment);
 
         Assert.Same(payment, replay.Payment);
+        Assert.False(replay.CompletedByCurrentRequest);
         Assert.Equal(1, provider.InitializeCalls);
         Assert.Equal(1, provider.VerifyCalls);
     }
@@ -284,6 +289,7 @@ public sealed class PaymentInitiationServiceTests
 
         Assert.Same(payment, outcome.Payment);
         Assert.Equal(processUri, outcome.ProcessUri);
+        Assert.False(outcome.CompletedByCurrentRequest);
         Assert.Equal(0, provider.InitializeCalls);
     }
 

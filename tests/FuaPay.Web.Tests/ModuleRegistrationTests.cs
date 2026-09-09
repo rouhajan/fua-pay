@@ -284,6 +284,12 @@ public sealed class ModuleRegistrationTests
         Assert.Contains(
             services,
             descriptor =>
+                descriptor.ServiceType ==
+                typeof(ISettlementReturnQueries));
+
+        Assert.Contains(
+            services,
+            descriptor =>
                 descriptor.ServiceType == typeof(IPaymentRepository));
 
         Assert.Contains(
@@ -326,6 +332,13 @@ public sealed class ModuleRegistrationTests
             services,
             descriptor =>
                 descriptor.ServiceType == typeof(DevelopmentPaymentService));
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(ICardJobSettlementReturnService) &&
+                descriptor.ImplementationType ==
+                    typeof(UnavailableCardJobSettlementReturnService));
 
         var availability = Assert.Single(
             services,
@@ -421,7 +434,14 @@ public sealed class ModuleRegistrationTests
             services,
             descriptor =>
                 descriptor.ServiceType ==
-                typeof(ICsobPaymentReconciliationService));
+                    typeof(ICsobPaymentReconciliationService));
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(ICardJobSettlementReturnService) &&
+                descriptor.ImplementationType ==
+                    typeof(CsobCardJobSettlementReturnService));
         Assert.Contains(
             services,
             descriptor =>
@@ -539,12 +559,21 @@ public sealed class ModuleRegistrationTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<CsobEchoResult> EchoPostAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<CsobPaymentInitResult> InitializeAsync(
             CsobPaymentInit payment,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
         public Task<CsobPaymentStatusResult> GetStatusAsync(
+            string payId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobPaymentReverseResult> ReverseAsync(
             string payId,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

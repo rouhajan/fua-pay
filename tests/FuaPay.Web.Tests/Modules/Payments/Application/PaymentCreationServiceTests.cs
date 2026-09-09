@@ -13,6 +13,9 @@ public sealed class PaymentCreationServiceTests
     private static readonly DateTimeOffset CurrentTime =
         new(2026, 7, 29, 14, 30, 0, TimeSpan.Zero);
 
+    private static readonly Uri ProcessUri =
+        new("https://gateway.example/api/payment/process/PAY-123");
+
     [Fact]
     public async Task CreateCreditTopUpAsync_UsesProviderNeutralInitialization()
     {
@@ -20,12 +23,17 @@ public sealed class PaymentCreationServiceTests
         var customerUserId = Guid.NewGuid();
         var creationRequestId = Guid.NewGuid();
 
-        var payment = await harness.Service.CreateCreditTopUpAsync(
+        var outcome = await harness.Service.CreateCreditTopUpAsync(
             creationRequestId,
             customerUserId,
             new Money(50_000));
+        var payment = outcome.Payment;
 
         Assert.Same(payment, harness.Payments.AddedPayment);
+        Assert.Equal(
+            PaymentCreationDisposition.FreshInitialization,
+            outcome.Disposition);
+        Assert.False(outcome.ShouldRedirectToProvider);
         Assert.Equal(customerUserId, payment.CustomerUserId);
         Assert.Equal(PaymentPurposeType.CreditTopUp, payment.PurposeType);
         Assert.Equal(creationRequestId, payment.CreationRequestId);
@@ -79,15 +87,58 @@ public sealed class PaymentCreationServiceTests
         var queries = new StubJobQueries { Job = job };
         var harness = new CreationHarness(jobQueries: queries);
 
-        var payment = await harness.Service.CreateJobPaymentAsync(
+        var outcome = await harness.Service.CreateJobPaymentAsync(
             customerUserId,
             job.Id);
+        var payment = outcome.Payment;
 
         Assert.Equal(PaymentPurposeType.Job, payment.PurposeType);
         Assert.Equal(job.Id, payment.JobId);
         Assert.Equal(job.PriceMinorUnits, payment.Amount.MinorUnits);
         Assert.Equal(1, queries.FindForCustomerCalls);
         Assert.Equal(1, harness.Provider.InitializeCalls);
+    }
+
+    [Fact]
+    public async Task CreateJobPaymentAsync_FreshCsobInitializationProvidesTrustedRedirect()
+    {
+        var customerUserId = Guid.NewGuid();
+        var job = CreateJobDetail(customerUserId);
+        var harness = new CreationHarness(
+            jobQueries: new StubJobQueries { Job = job },
+            provider: PaymentProvider.Csob,
+            processUri: ProcessUri);
+
+        var outcome = await harness.Service.CreateJobPaymentAsync(
+            customerUserId,
+            job.Id);
+
+        Assert.Equal(
+            PaymentCreationDisposition.FreshInitialization,
+            outcome.Disposition);
+        Assert.Equal(ProcessUri, outcome.ProcessUri);
+        Assert.True(outcome.ShouldRedirectToProvider);
+        Assert.Equal(1, harness.Provider.InitializeCalls);
+        Assert.Equal(1, harness.Provider.VerifyCalls);
+    }
+
+    [Fact]
+    public async Task CreateCreditTopUpAsync_UntrustedProcessUriCannotRedirect()
+    {
+        var harness = new CreationHarness(
+            provider: PaymentProvider.Csob,
+            processUri: ProcessUri,
+            trustProcessUri: false);
+
+        var outcome = await harness.Service.CreateCreditTopUpAsync(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new Money(50_000));
+
+        Assert.Null(outcome.ProcessUri);
+        Assert.False(outcome.ShouldRedirectToProvider);
+        Assert.Equal(1, harness.Provider.InitializeCalls);
+        Assert.Equal(1, harness.Provider.VerifyCalls);
     }
 
     [Fact]
@@ -117,7 +168,11 @@ public sealed class PaymentCreationServiceTests
             customerUserId,
             jobId);
 
-        Assert.Same(existing, result);
+        Assert.Same(existing, result.Payment);
+        Assert.Equal(
+            PaymentCreationDisposition.ExistingPayment,
+            result.Disposition);
+        Assert.False(result.ShouldRedirectToProvider);
         Assert.Equal(1, queries.FindForCustomerCalls);
         Assert.Equal(0, harness.Payments.AddPreparedCalls);
         Assert.Equal(0, harness.Provider.InitializeCalls);
@@ -142,7 +197,10 @@ public sealed class PaymentCreationServiceTests
     public async Task CreateCreditTopUpAsync_SameRequestReturnsOriginalPayment()
     {
         var audit = new RecordingAuditTrail();
-        var harness = new CreationHarness(auditTrail: audit);
+        var harness = new CreationHarness(
+            auditTrail: audit,
+            provider: PaymentProvider.Csob,
+            processUri: ProcessUri);
         var creationRequestId = Guid.NewGuid();
         var customerUserId = Guid.NewGuid();
 
@@ -155,7 +213,17 @@ public sealed class PaymentCreationServiceTests
             customerUserId,
             new Money(50_000));
 
-        Assert.Same(first, replay);
+        Assert.Same(first.Payment, replay.Payment);
+        Assert.Equal(
+            PaymentCreationDisposition.FreshInitialization,
+            first.Disposition);
+        Assert.Equal(
+            PaymentCreationDisposition.ExistingPayment,
+            replay.Disposition);
+        Assert.Equal(ProcessUri, first.ProcessUri);
+        Assert.True(first.ShouldRedirectToProvider);
+        Assert.Equal(ProcessUri, replay.ProcessUri);
+        Assert.False(replay.ShouldRedirectToProvider);
         Assert.Equal(1, harness.Payments.AddPreparedCalls);
         Assert.Equal(1, harness.Provider.InitializeCalls);
         Assert.Equal(4, audit.Entries.Count);
@@ -190,7 +258,10 @@ public sealed class PaymentCreationServiceTests
             customerUserId,
             new Money(50_000));
 
-        Assert.Same(created, replay);
+        Assert.Same(created.Payment, replay.Payment);
+        Assert.Equal(
+            PaymentCreationDisposition.ExistingPayment,
+            replay.Disposition);
         Assert.Equal(1, payments.AddPreparedCalls);
         Assert.Equal(0, disabled.Provider.InitializeCalls);
     }
@@ -208,7 +279,7 @@ public sealed class PaymentCreationServiceTests
             PaymentPurposeType.CreditTopUp,
             jobId: null,
             new Money(50_000),
-            PaymentProvider.Development,
+            PaymentProvider.Csob,
             CurrentTime,
             creationRequestId);
         var initiation = new PaymentInitiation(
@@ -220,15 +291,22 @@ public sealed class PaymentCreationServiceTests
         payments.Seed(payment, initiation);
         var harness = new CreationHarness(
             payments: payments,
-            initiations: initiations);
+            initiations: initiations,
+            provider: PaymentProvider.Csob,
+            processUri: ProcessUri);
 
         var replay = await harness.Service.CreateCreditTopUpAsync(
             creationRequestId,
             customerUserId,
             new Money(50_000));
 
-        Assert.Same(payment, replay);
-        Assert.Equal(PaymentStatus.Pending, replay.Status);
+        Assert.Same(payment, replay.Payment);
+        Assert.Equal(PaymentStatus.Pending, replay.Payment.Status);
+        Assert.Equal(
+            PaymentCreationDisposition.ResumedInitialization,
+            replay.Disposition);
+        Assert.Equal(ProcessUri, replay.ProcessUri);
+        Assert.True(replay.ShouldRedirectToProvider);
         Assert.Equal(PaymentInitiationState.Initialized, initiation.State);
         Assert.Equal(1, harness.Provider.InitializeCalls);
         Assert.Equal(0, harness.OrderNumbers.AllocateCalls);
@@ -288,13 +366,19 @@ public sealed class PaymentCreationServiceTests
             FakePaymentInitiationRepository? initiations = null,
             IJobQueries? jobQueries = null,
             IAuditTrail? auditTrail = null,
-            bool providerEnabled = true)
+            bool providerEnabled = true,
+            PaymentProvider provider = PaymentProvider.Development,
+            Uri? processUri = null,
+            bool trustProcessUri = true)
         {
             Initiations = initiations ?? new FakePaymentInitiationRepository();
             Payments = payments ?? new FakePaymentRepository(Initiations);
             OrderNumbers = new FixedOrderNumberAllocator();
-            Provider = new RecordingDevelopmentProviderInitiator(
-                providerEnabled);
+            Provider = new RecordingPaymentProviderInitiator(
+                providerEnabled,
+                provider,
+                processUri,
+                trustProcessUri);
             var audit = auditTrail ?? NullAuditTrail.Instance;
             var initiationService = new PaymentInitiationService(
                 Payments,
@@ -323,7 +407,7 @@ public sealed class PaymentCreationServiceTests
 
         public FixedOrderNumberAllocator OrderNumbers { get; }
 
-        public RecordingDevelopmentProviderInitiator Provider { get; }
+        public RecordingPaymentProviderInitiator Provider { get; }
     }
 
     private sealed class FakePaymentRepository : IPaymentRepository
@@ -448,19 +532,31 @@ public sealed class PaymentCreationServiceTests
         }
     }
 
-    private sealed class RecordingDevelopmentProviderInitiator :
+    private sealed class RecordingPaymentProviderInitiator :
         IPaymentProviderInitiator
     {
         private readonly DevelopmentPaymentAvailability _availability;
+        private readonly PaymentProvider _provider;
+        private readonly Uri? _processUri;
+        private readonly bool _trustProcessUri;
 
-        public RecordingDevelopmentProviderInitiator(bool enabled)
+        public RecordingPaymentProviderInitiator(
+            bool enabled,
+            PaymentProvider provider,
+            Uri? processUri,
+            bool trustProcessUri)
         {
             _availability = new DevelopmentPaymentAvailability(enabled);
+            _provider = provider;
+            _processUri = processUri;
+            _trustProcessUri = trustProcessUri;
         }
 
-        public PaymentProvider Provider => PaymentProvider.Development;
+        public PaymentProvider Provider => _provider;
 
         public int InitializeCalls { get; private set; }
+
+        public int VerifyCalls { get; private set; }
 
         public PaymentProviderInitializationRequest? LastRequest
         {
@@ -481,13 +577,34 @@ public sealed class PaymentCreationServiceTests
                 new PaymentProviderInitializationResult(
                     Provider,
                     $"DEV-{request.PaymentId:N}".ToUpperInvariant(),
-                    processUri: null));
+                    _processUri));
         }
 
         public Task VerifyAsync(
             PaymentProviderInitializationResult candidate,
-            CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+            CancellationToken cancellationToken = default)
+        {
+            VerifyCalls++;
+            return Task.CompletedTask;
+        }
+
+        public Uri? ResolveTrustedProcessUri(
+            PaymentProvider provider,
+            string? providerReference,
+            string? processUri)
+        {
+            return
+                provider == Provider &&
+                providerReference is not null &&
+                _trustProcessUri &&
+                _processUri is not null &&
+                string.Equals(
+                    _processUri.AbsoluteUri,
+                    processUri,
+                    StringComparison.Ordinal)
+                    ? _processUri
+                    : null;
+        }
     }
 
     private sealed class ImmediateTransaction : IApplicationTransaction

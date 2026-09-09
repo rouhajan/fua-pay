@@ -27,7 +27,7 @@ public static class CsobGatewayServiceCollectionExtensions
                 LeaseDuration: TimeSpan.FromMinutes(3),
                 BaseBackoff: TimeSpan.FromSeconds(15),
                 MaximumBackoff: TimeSpan.FromMinutes(3),
-                MaximumAttempts: 12,
+                MaximumAttempts: 14,
                 BatchSize: 20);
 
         if (reconciliationConfiguration.Enabled)
@@ -108,6 +108,10 @@ public static class CsobGatewayServiceCollectionExtensions
             provider => provider.GetRequiredService<
                 CsobPaymentRecoveryScheduler>());
         services.AddScoped<CsobPaymentRecoveryProcessor>();
+        services.Replace(
+            ServiceDescriptor.Scoped<
+                ICardJobSettlementReturnService,
+                CsobCardJobSettlementReturnService>());
 
         if (reconciliationConfiguration.Enabled)
         {

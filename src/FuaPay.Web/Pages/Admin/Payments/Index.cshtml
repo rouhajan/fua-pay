@@ -24,6 +24,12 @@
         </div>
     </header>
 
+    @if (TempData["StatusMessage"] is string statusMessage)
+    {
+        <div class="message-box is-success">@statusMessage</div>
+    }
+    <div asp-validation-summary="All" class="message-box is-error"></div>
+
     <form method="get" class="filter-grid customer-filter-grid">
         <input type="hidden" name="view" value="admin" />
         <label>
@@ -86,12 +92,15 @@
                             <th>Částka</th>
                             <th>Stav</th>
                             <th>Reference</th>
+                            <th>Vratka</th>
                         </tr>
                     </thead>
                     <tbody>
                     @foreach (var payment in Model.Payments.Items)
                     {
                         var user = Model.Users.GetValueOrDefault(payment.CustomerUserId);
+                        var settlementReturn =
+                            Model.SettlementReturns.GetValueOrDefault(payment.Id);
                         <tr>
                             <td>@DashboardDisplay.FormatDate(payment.CreatedAt)</td>
                             <td>
@@ -106,6 +115,87 @@
                                 </span>
                             </td>
                             <td><code>@payment.ProviderReference</code></td>
+                            <td>
+                                @if (
+                                    payment.Provider == PaymentProvider.Csob &&
+                                    payment.PurposeType == PaymentPurposeType.Job &&
+                                    payment.Status == PaymentStatus.Succeeded)
+                                {
+                                    if (settlementReturn is null)
+                                    {
+                                        var operationId = Guid.NewGuid();
+                                        <form method="post"
+                                              asp-page-handler="Reverse"
+                                              class="compact-action-form"
+                                              data-return-action="new"
+                                              data-return-operation-id="@operationId">
+                                            <input type="hidden"
+                                                   name="operationId"
+                                                   value="@operationId" />
+                                            <input type="hidden"
+                                                   name="originalPaymentId"
+                                                   value="@payment.Id" />
+                                            <label>
+                                                <span class="visually-hidden">Důvod vratky</span>
+                                                <input type="text"
+                                                       name="reason"
+                                                       maxlength="@SettlementReturn.MaximumReasonLength"
+                                                       required
+                                                       placeholder="Důvod plné vratky" />
+                                            </label>
+                                            <button type="submit" class="danger-button">
+                                                Vrátit kartou
+                                            </button>
+                                        </form>
+                                    }
+                                    else if (settlementReturn.CanRecoverReverse)
+                                    {
+                                        <form method="post"
+                                              asp-page-handler="Reverse"
+                                              class="compact-action-form"
+                                              data-return-action="recover"
+                                              data-return-operation-id="@settlementReturn.RequestId">
+                                            <input type="hidden"
+                                                   name="operationId"
+                                                   value="@settlementReturn.RequestId" />
+                                            <input type="hidden"
+                                                   name="originalPaymentId"
+                                                   value="@settlementReturn.OriginalPaymentId" />
+                                            <input type="hidden"
+                                                   name="reason"
+                                                   value="@settlementReturn.Reason" />
+                                            <button type="submit" class="secondary-button">
+                                                Ověřit stav vratky
+                                            </button>
+                                        </form>
+                                    }
+                                    else if (settlementReturn.IsCompletedReverse)
+                                    {
+                                        <span class="status-badge is-completed"
+                                              data-return-state="completed">
+                                            Vráceno
+                                        </span>
+                                    }
+                                    else if (settlementReturn.IsRejectedReverse)
+                                    {
+                                        <span class="status-badge is-failed"
+                                              data-return-state="refund-needed">
+                                            Reverse zamítnut; nutné rozhodnutí o refundu
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-badge is-progress"
+                                              data-return-state="attention">
+                                            Vratka vyžaduje pozornost
+                                        </span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span aria-hidden="true">—</span>
+                                }
+                            </td>
                         </tr>
                     }
                     </tbody>

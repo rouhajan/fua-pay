@@ -477,6 +477,76 @@ public sealed class PaymentReconciliationPersistenceTests :
     }
 
     [Fact]
+    public async Task MarkCompletedAsync_PersistsAuthoritativeExpiryEvidence()
+    {
+        var payment = CreatePendingPayment("payexpired0130");
+        var scheduledAt = CreatedAt.AddMinutes(1);
+
+        try
+        {
+            await AddPaymentAsync(payment);
+            await ScheduleReturnAsync(
+                payment.ProviderReference!,
+                scheduledAt);
+            var claim = Assert.Single(
+                await ClaimAsync(
+                    scheduledAt,
+                    TimeSpan.FromMinutes(2)));
+
+            using (var transitionScope = _factory.Services.CreateScope())
+            {
+                var repository = transitionScope.ServiceProvider
+                    .GetRequiredService<ICsobPaymentRecoveryRepository>();
+
+                Assert.True(
+                    await repository.MarkCompletedAsync(
+                        claim,
+                        scheduledAt.AddSeconds(1),
+                        gatewayPaymentStatus: 6,
+                        resultCode: 130));
+            }
+
+            using var verifyScope = _factory.Services.CreateScope();
+            var dbContext = verifyScope.ServiceProvider
+                .GetRequiredService<FuaPayDbContext>();
+            await dbContext.Database.OpenConnectionAsync();
+            await using var command = dbContext.Database
+                .GetDbConnection()
+                .CreateCommand();
+            command.CommandText =
+                """
+                SELECT state,
+                       last_gateway_payment_status,
+                       last_result_code,
+                       completed_at
+                FROM payments.csob_payment_reconciliation
+                WHERE payment_id = @paymentId
+                """;
+            var paymentIdParameter = command.CreateParameter();
+            paymentIdParameter.ParameterName = "paymentId";
+            paymentIdParameter.Value = payment.Id;
+            command.Parameters.Add(paymentIdParameter);
+            await using var reader = await command.ExecuteReaderAsync();
+
+            Assert.True(await reader.ReadAsync());
+
+            Assert.Equal(
+                (int)PaymentReconciliationState.Completed,
+                reader.GetInt32(0));
+            Assert.Equal(6, reader.GetInt32(1));
+            Assert.Equal(130, reader.GetInt32(2));
+            Assert.Equal(
+                scheduledAt.AddSeconds(1),
+                reader.GetFieldValue<DateTimeOffset>(3));
+            Assert.False(await reader.ReadAsync());
+        }
+        finally
+        {
+            await DeletePaymentAsync(payment.Id);
+        }
+    }
+
+    [Fact]
     public async Task RecoveryAuditInsertFailure_RollsBackClaimTransition()
     {
         var payment = CreatePendingPayment("payauditfail01");
@@ -658,6 +728,7 @@ public sealed class PaymentReconciliationPersistenceTests :
                 _paymentId,
                 PaymentStatus.Pending,
                 GatewayPaymentStatus: 2,
+                GatewayResultCode: 0,
                 StateChanged: false));
     }
 

@@ -5,6 +5,7 @@ using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Jobs.Web;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Receipts.Application;
+using FuaPay.Web.Pages.Customer.Payments;
 using FuaPay.Web.Pages.Shared;
 
 using Microsoft.AspNetCore.Authorization;
@@ -73,14 +74,13 @@ public sealed class DetailsModel : PageModel
     {
         try
         {
-            var payment = await _paymentCreationService.CreateJobPaymentAsync(
+            var outcome = await _paymentCreationService.CreateJobPaymentAsync(
                 RequireCustomerUserId(),
                 id,
                 cancellationToken);
 
-            return RedirectToPage(
-                "/Customer/Payments/Details",
-                new { id = payment.Id, view = "customer" });
+            return CustomerPaymentNavigation.AfterCreation(
+                outcome);
         }
         catch (Exception exception) when (
             PageOperationError.IsExpected(exception))

@@ -92,10 +92,39 @@ public sealed class CsobPaymentReconciliationService :
                     normalizedPayId);
             }
         }
+        else if (!string.Equals(
+            payment.ProviderReference,
+            normalizedPayId,
+            StringComparison.Ordinal))
+        {
+            throw CreateProviderReferenceConflictException(
+                payment,
+                normalizedPayId);
+        }
 
         var gatewayStatus = await _gatewayClient.GetStatusAsync(
             normalizedPayId,
             cancellationToken);
+
+        if (
+            gatewayStatus.ResultCode == 130 &&
+            gatewayStatus.PaymentStatus == 6)
+        {
+            return payment.Status == PaymentStatus.Created
+                ? await RecoverExpiredInitializationAsync(
+                    payment,
+                    normalizedPayId,
+                    gatewayStatus.ResultCode,
+                    gatewayStatus.PaymentStatus,
+                    cancellationToken)
+                : await ChangeTerminalStateAsync(
+                    payment.Id,
+                    normalizedPayId,
+                    PaymentStatus.Expired,
+                    gatewayStatus.ResultCode,
+                    gatewayStatus.PaymentStatus,
+                    cancellationToken);
+        }
 
         if (gatewayStatus.ResultCode != 0)
         {
@@ -110,45 +139,41 @@ public sealed class CsobPaymentReconciliationService :
             return await RecoverInitializationAsync(
                 payment,
                 normalizedPayId,
+                gatewayStatus.ResultCode,
                 gatewayStatus.PaymentStatus,
                 cancellationToken);
-        }
-
-        if (!string.Equals(
-                payment.ProviderReference,
-                normalizedPayId,
-                StringComparison.Ordinal))
-        {
-            throw CreateProviderReferenceConflictException(
-                payment,
-                normalizedPayId);
         }
 
         return gatewayStatus.PaymentStatus switch
         {
             1 or 2 or 4 => RequirePending(
                 payment,
+                gatewayStatus.ResultCode,
                 gatewayStatus.PaymentStatus),
             3 => await ChangeTerminalStateAsync(
                 payment.Id,
                 normalizedPayId,
                 PaymentStatus.Cancelled,
+                gatewayStatus.ResultCode,
                 gatewayStatus.PaymentStatus,
                 cancellationToken),
             6 => await ChangeTerminalStateAsync(
                 payment.Id,
                 normalizedPayId,
                 PaymentStatus.Failed,
+                gatewayStatus.ResultCode,
                 gatewayStatus.PaymentStatus,
                 cancellationToken),
             7 or 8 => await SettleAsync(
                 payment,
                 normalizedPayId,
+                gatewayStatus.ResultCode,
                 gatewayStatus.PaymentStatus,
                 cancellationToken),
             5 or 9 or 10 => throw CreateUnsupportedLifecycleException(
                 payment,
-                gatewayStatus.PaymentStatus),
+                gatewayStatus.PaymentStatus,
+                gatewayStatus.ResultCode),
             _ => throw new CsobPaymentRequiresAttentionException(
                 $"Platební brána ČSOB vrátila neznámý stav " +
                 $"'{gatewayStatus.PaymentStatus}' pro platbu " +
@@ -162,6 +187,7 @@ public sealed class CsobPaymentReconciliationService :
         RecoverInitializationAsync(
             Payment payment,
             string payId,
+            int gatewayResultCode,
             int gatewayPaymentStatus,
             CancellationToken cancellationToken)
     {
@@ -189,7 +215,8 @@ public sealed class CsobPaymentReconciliationService :
                 $"Ověřený stav ČSOB '{gatewayPaymentStatus}' není správný " +
                 $"pre-process stav 1 pro obnovu inicializace platby " +
                 $"'{payment.Id}'.",
-                gatewayPaymentStatus);
+                gatewayPaymentStatus,
+                gatewayResultCode);
         }
 
         try
@@ -225,6 +252,7 @@ public sealed class CsobPaymentReconciliationService :
                             currentPayment.Id,
                             currentPayment.Status,
                             gatewayPaymentStatus,
+                            gatewayResultCode,
                             StateChanged: false);
                     }
 
@@ -270,6 +298,7 @@ public sealed class CsobPaymentReconciliationService :
                         currentPayment.Id,
                         currentPayment.Status,
                         gatewayPaymentStatus,
+                        gatewayResultCode,
                         StateChanged: true);
                 },
                 cancellationToken);
@@ -298,6 +327,192 @@ public sealed class CsobPaymentReconciliationService :
                     payment.Id,
                     PaymentStatus.Pending,
                     gatewayPaymentStatus,
+                    gatewayResultCode,
+                    StateChanged: false);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<CsobPaymentReconciliationResult>
+        RecoverExpiredInitializationAsync(
+            Payment payment,
+            string payId,
+            int gatewayResultCode,
+            int gatewayPaymentStatus,
+            CancellationToken cancellationToken)
+    {
+        var initiation = await _initiationRepository.FindByPaymentIdAsync(
+            payment.Id,
+            cancellationToken);
+
+        if (
+            initiation is null ||
+            initiation.Provider != PaymentProvider.Csob ||
+            initiation.State != PaymentInitiationState.Uncertain ||
+            !string.Equals(
+                initiation.ObservedProviderReference,
+                payId,
+                StringComparison.Ordinal))
+        {
+            throw CreateInitializationConflictException(
+                payment,
+                gatewayPaymentStatus,
+                gatewayResultCode);
+        }
+
+        try
+        {
+            return await _transaction.ExecuteAsync(
+                async ct =>
+                {
+                    var currentPayment =
+                        await _paymentRepository.FindByIdAsync(
+                            payment.Id,
+                            ct)
+                        ?? throw new PaymentProviderReferenceNotFoundException(
+                            PaymentProvider.Csob,
+                            payId);
+                    var currentInitiation =
+                        await _initiationRepository.FindByPaymentIdAsync(
+                            payment.Id,
+                            ct)
+                        ?? throw CreateInitializationConflictException(
+                            currentPayment,
+                            gatewayPaymentStatus,
+                            gatewayResultCode);
+
+                    if (
+                        currentPayment.Status == PaymentStatus.Expired &&
+                        currentInitiation.State ==
+                            PaymentInitiationState.Initialized &&
+                        string.Equals(
+                            currentPayment.ProviderReference,
+                            payId,
+                            StringComparison.Ordinal))
+                    {
+                        return new CsobPaymentReconciliationResult(
+                            currentPayment.Id,
+                            currentPayment.Status,
+                            gatewayPaymentStatus,
+                            gatewayResultCode,
+                            StateChanged: false);
+                    }
+
+                    var expiredAt = _timeProvider.GetUtcNow();
+
+                    if (
+                        currentPayment.Status == PaymentStatus.Pending &&
+                        currentInitiation.State ==
+                            PaymentInitiationState.Initialized &&
+                        string.Equals(
+                            currentPayment.ProviderReference,
+                            payId,
+                            StringComparison.Ordinal))
+                    {
+                        var changed = currentPayment.Expire(expiredAt);
+
+                        if (changed)
+                        {
+                            StageTerminalAudit(
+                                currentPayment,
+                                PaymentStatus.Expired,
+                                gatewayPaymentStatus,
+                                expiredAt);
+                            await _paymentRepository.SaveAsync(
+                                currentPayment,
+                                ct);
+                        }
+
+                        return new CsobPaymentReconciliationResult(
+                            currentPayment.Id,
+                            currentPayment.Status,
+                            gatewayPaymentStatus,
+                            gatewayResultCode,
+                            changed);
+                    }
+
+                    if (
+                        currentPayment.Provider != PaymentProvider.Csob ||
+                        currentPayment.Status != PaymentStatus.Created ||
+                        currentInitiation.Provider != PaymentProvider.Csob ||
+                        currentInitiation.State !=
+                            PaymentInitiationState.Uncertain ||
+                        !string.Equals(
+                            currentInitiation.ObservedProviderReference,
+                            payId,
+                            StringComparison.Ordinal))
+                    {
+                        throw CreateInitializationConflictException(
+                            currentPayment,
+                            gatewayPaymentStatus,
+                            gatewayResultCode);
+                    }
+
+                    currentPayment.MarkPending(payId, expiredAt);
+                    currentInitiation.RecoverObservedInitialization(
+                        expiredAt);
+                    currentPayment.Expire(expiredAt);
+
+                    _auditTrail.Stage(AuditEntry.ForProcess(
+                        "payment-reconciliation",
+                        "payment.provider-initiation.expiry-verified",
+                        "payment",
+                        currentPayment.Id.ToString(),
+                        $"Persistovaná ČSOB reference {payId} platby " +
+                        $"{currentPayment.Id} byla ověřena podepsaným " +
+                        $"payment/status {gatewayResultCode}/" +
+                        $"{gatewayPaymentStatus}; inicializace byla " +
+                        "bez finančního efektu uzavřena jako expirovaná.",
+                        expiredAt));
+                    StageTerminalAudit(
+                        currentPayment,
+                        PaymentStatus.Expired,
+                        gatewayPaymentStatus,
+                        expiredAt);
+
+                    await _paymentRepository.SaveAsync(
+                        currentPayment,
+                        ct);
+                    await _initiationRepository.SaveAsync(
+                        currentInitiation,
+                        ct);
+
+                    return new CsobPaymentReconciliationResult(
+                        currentPayment.Id,
+                        currentPayment.Status,
+                        gatewayPaymentStatus,
+                        gatewayResultCode,
+                        StateChanged: true);
+                },
+                cancellationToken);
+        }
+        catch (PaymentConcurrencyException)
+        {
+            var persistedPayment =
+                await _paymentRepository.FindByIdAsync(
+                    payment.Id,
+                    cancellationToken);
+            var persistedInitiation =
+                await _initiationRepository.FindByPaymentIdAsync(
+                    payment.Id,
+                    cancellationToken);
+
+            if (
+                persistedPayment?.Status == PaymentStatus.Expired &&
+                persistedInitiation?.State ==
+                    PaymentInitiationState.Initialized &&
+                string.Equals(
+                    persistedPayment.ProviderReference,
+                    payId,
+                    StringComparison.Ordinal))
+            {
+                return new CsobPaymentReconciliationResult(
+                    payment.Id,
+                    PaymentStatus.Expired,
+                    gatewayPaymentStatus,
+                    gatewayResultCode,
                     StateChanged: false);
             }
 
@@ -308,6 +523,7 @@ public sealed class CsobPaymentReconciliationService :
     private async Task<CsobPaymentReconciliationResult> SettleAsync(
         Payment payment,
         string payId,
+        int gatewayResultCode,
         int gatewayPaymentStatus,
         CancellationToken cancellationToken)
     {
@@ -317,7 +533,8 @@ public sealed class CsobPaymentReconciliationService :
         {
             throw CreateLifecycleConflictException(
                 payment,
-                gatewayPaymentStatus);
+                gatewayPaymentStatus,
+                gatewayResultCode);
         }
 
         var changed = await _settlementService.CompleteAsync(
@@ -331,6 +548,7 @@ public sealed class CsobPaymentReconciliationService :
             payment.Id,
             PaymentStatus.Succeeded,
             gatewayPaymentStatus,
+            gatewayResultCode,
             changed);
     }
 
@@ -339,6 +557,7 @@ public sealed class CsobPaymentReconciliationService :
             Guid paymentId,
             string payId,
             PaymentStatus targetStatus,
+            int gatewayResultCode,
             int gatewayPaymentStatus,
             CancellationToken cancellationToken)
     {
@@ -370,6 +589,7 @@ public sealed class CsobPaymentReconciliationService :
                             payment.Id,
                             payment.Status,
                             gatewayPaymentStatus,
+                            gatewayResultCode,
                             StateChanged: false);
                     }
 
@@ -377,7 +597,8 @@ public sealed class CsobPaymentReconciliationService :
                     {
                         throw CreateLifecycleConflictException(
                             payment,
-                            gatewayPaymentStatus);
+                            gatewayPaymentStatus,
+                            gatewayResultCode);
                     }
 
                     var occurredAt = _timeProvider.GetUtcNow();
@@ -389,6 +610,8 @@ public sealed class CsobPaymentReconciliationService :
                             payment.Fail(
                                 "Platba byla platební bránou ČSOB zamítnuta.",
                                 occurredAt),
+                        PaymentStatus.Expired =>
+                            payment.Expire(occurredAt),
                         _ => throw new InvalidOperationException(
                             "Nepodporovaný cílový stav rekonciliace platby.")
                     };
@@ -407,6 +630,7 @@ public sealed class CsobPaymentReconciliationService :
                         payment.Id,
                         payment.Status,
                         gatewayPaymentStatus,
+                        gatewayResultCode,
                         changed);
                 },
                 cancellationToken);
@@ -427,6 +651,7 @@ public sealed class CsobPaymentReconciliationService :
                     persisted.Id,
                     persisted.Status,
                     gatewayPaymentStatus,
+                    gatewayResultCode,
                     StateChanged: false);
             }
 
@@ -436,19 +661,22 @@ public sealed class CsobPaymentReconciliationService :
 
     private static CsobPaymentReconciliationResult RequirePending(
         Payment payment,
+        int gatewayResultCode,
         int gatewayPaymentStatus)
     {
         if (payment.Status != PaymentStatus.Pending)
         {
             throw CreateLifecycleConflictException(
                 payment,
-                gatewayPaymentStatus);
+                gatewayPaymentStatus,
+                gatewayResultCode);
         }
 
         return new CsobPaymentReconciliationResult(
             payment.Id,
             payment.Status,
             gatewayPaymentStatus,
+            gatewayResultCode,
             StateChanged: false);
     }
 
@@ -458,14 +686,23 @@ public sealed class CsobPaymentReconciliationService :
         int gatewayPaymentStatus,
         DateTimeOffset occurredAt)
     {
-        var action = targetStatus == PaymentStatus.Cancelled
-            ? "payment.cancelled"
-            : "payment.failed";
-        var description = targetStatus == PaymentStatus.Cancelled
-            ? $"Platba {payment.Id} byla podle ověřeného stavu " +
-              $"ČSOB {gatewayPaymentStatus} zrušena."
-            : $"Platba {payment.Id} byla podle ověřeného stavu " +
-              $"ČSOB {gatewayPaymentStatus} označena jako neúspěšná.";
+        var (action, description) = targetStatus switch
+        {
+            PaymentStatus.Cancelled => (
+                "payment.cancelled",
+                $"Platba {payment.Id} byla podle ověřeného stavu " +
+                $"ČSOB {gatewayPaymentStatus} zrušena."),
+            PaymentStatus.Failed => (
+                "payment.failed",
+                $"Platba {payment.Id} byla podle ověřeného stavu " +
+                $"ČSOB {gatewayPaymentStatus} označena jako neúspěšná."),
+            PaymentStatus.Expired => (
+                "payment.expired",
+                $"Platba {payment.Id} byla podle ověřeného stavu " +
+                $"ČSOB {gatewayPaymentStatus} označena jako expirovaná."),
+            _ => throw new InvalidOperationException(
+                "Audit nepodporuje cílový stav rekonciliace platby.")
+        };
 
         _auditTrail.Stage(AuditEntry.ForProcess(
             "payment-provider",
@@ -478,19 +715,23 @@ public sealed class CsobPaymentReconciliationService :
 
     private static CsobGatewayException CreateLifecycleConflictException(
         Payment payment,
-        int gatewayPaymentStatus) =>
+        int gatewayPaymentStatus,
+        int? gatewayResultCode = null) =>
         new CsobPaymentRequiresAttentionException(
             $"Ověřený stav ČSOB '{gatewayPaymentStatus}' je v rozporu " +
             $"s lokálním stavem '{payment.Status}' platby '{payment.Id}'.",
-            gatewayPaymentStatus);
+            gatewayPaymentStatus,
+            gatewayResultCode);
 
     private static CsobGatewayException CreateInitializationConflictException(
         Payment payment,
-        int gatewayPaymentStatus) =>
+        int gatewayPaymentStatus,
+        int? gatewayResultCode = null) =>
         new CsobPaymentRequiresAttentionException(
             $"Ověřený stav ČSOB '{gatewayPaymentStatus}' nelze bezpečně " +
             $"aplikovat na nejasnou inicializaci platby '{payment.Id}'.",
-            gatewayPaymentStatus);
+            gatewayPaymentStatus,
+            gatewayResultCode);
 
     private static CsobGatewayException CreateProviderReferenceConflictException(
         Payment payment,
@@ -501,10 +742,12 @@ public sealed class CsobPaymentReconciliationService :
 
     private static CsobGatewayException CreateUnsupportedLifecycleException(
         Payment payment,
-        int gatewayPaymentStatus) =>
+        int gatewayPaymentStatus,
+        int gatewayResultCode) =>
         new CsobPaymentRequiresAttentionException(
             $"Ověřený stav ČSOB '{gatewayPaymentStatus}' pro platbu " +
             $"'{payment.Id}' vyžaduje samostatnou reverse/refund " +
             "rekonciliaci a nebude automaticky měnit finanční stav.",
-            gatewayPaymentStatus);
+            gatewayPaymentStatus,
+            gatewayResultCode);
 }

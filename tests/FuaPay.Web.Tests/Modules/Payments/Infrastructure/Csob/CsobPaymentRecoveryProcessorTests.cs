@@ -26,6 +26,7 @@ public sealed class CsobPaymentRecoveryProcessorTests
                     paymentId,
                     PaymentStatus.Pending,
                     GatewayPaymentStatus: 2,
+                    GatewayResultCode: 0,
                     StateChanged: false)),
             maximumAttempts: 4);
 
@@ -40,6 +41,7 @@ public sealed class CsobPaymentRecoveryProcessorTests
         Assert.Equal(TestTime, reschedule.AttemptedAt);
         Assert.Equal(TestTime.AddSeconds(15), reschedule.NextAttemptAt);
         Assert.Equal(2, reschedule.GatewayPaymentStatus);
+        Assert.Equal(0, reschedule.ResultCode);
     }
 
     [Fact]
@@ -55,6 +57,7 @@ public sealed class CsobPaymentRecoveryProcessorTests
                     paymentId,
                     PaymentStatus.Succeeded,
                     GatewayPaymentStatus: 8,
+                    GatewayResultCode: 0,
                     StateChanged: true)),
             maximumAttempts: 4);
 
@@ -66,6 +69,33 @@ public sealed class CsobPaymentRecoveryProcessorTests
         Assert.Equal(0, result.LostClaimCount);
         var completed = Assert.IsType<CompletedCall>(repository.Completed);
         Assert.Equal(8, completed.GatewayPaymentStatus);
+        Assert.Equal(0, completed.ResultCode);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_ExpiredPayment_PersistsActualResultCode()
+    {
+        var paymentId = Guid.NewGuid();
+        var claim = CreateClaim(paymentId, attemptCount: 0);
+        var repository = new RecordingRecoveryRepository(claim);
+        var processor = CreateProcessor(
+            repository,
+            new StubReconciliationService(
+                new CsobPaymentReconciliationResult(
+                    paymentId,
+                    PaymentStatus.Expired,
+                    GatewayPaymentStatus: 6,
+                    GatewayResultCode: 130,
+                    StateChanged: true)),
+            maximumAttempts: 4);
+
+        var result = await processor.RunOnceAsync();
+
+        Assert.Equal(1, result.CompletedCount);
+        Assert.Equal(0, result.RequiresAttentionCount);
+        var completed = Assert.IsType<CompletedCall>(repository.Completed);
+        Assert.Equal(6, completed.GatewayPaymentStatus);
+        Assert.Equal(130, completed.ResultCode);
     }
 
     [Fact]
@@ -84,6 +114,7 @@ public sealed class CsobPaymentRecoveryProcessorTests
                     paymentId,
                     PaymentStatus.Succeeded,
                     GatewayPaymentStatus: 8,
+                    GatewayResultCode: 0,
                     StateChanged: false)),
             maximumAttempts: 4);
 

@@ -1,8 +1,11 @@
 using FuaPay.Web.Modules.Access.Application;
+using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
+using FuaPay.Web.Pages.Shared;
 
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace FuaPay.Web.Pages.Admin.Payments;
@@ -14,19 +17,29 @@ public sealed class IndexModel : PageModel
     private readonly IPaymentQueries _paymentQueries;
     private readonly IAccessUserQueries _accessUserQueries;
     private readonly IPaymentReconciliationQueries _reconciliationQueries;
+    private readonly ISettlementReturnQueries _settlementReturnQueries;
+    private readonly ICardJobSettlementReturnService
+        _cardJobSettlementReturnService;
 
     public IndexModel(
         IPaymentQueries paymentQueries,
         IAccessUserQueries accessUserQueries,
-        IPaymentReconciliationQueries reconciliationQueries)
+        IPaymentReconciliationQueries reconciliationQueries,
+        ISettlementReturnQueries settlementReturnQueries,
+        ICardJobSettlementReturnService cardJobSettlementReturnService)
     {
         ArgumentNullException.ThrowIfNull(paymentQueries);
         ArgumentNullException.ThrowIfNull(accessUserQueries);
         ArgumentNullException.ThrowIfNull(reconciliationQueries);
+        ArgumentNullException.ThrowIfNull(settlementReturnQueries);
+        ArgumentNullException.ThrowIfNull(cardJobSettlementReturnService);
 
         _paymentQueries = paymentQueries;
         _accessUserQueries = accessUserQueries;
         _reconciliationQueries = reconciliationQueries;
+        _settlementReturnQueries = settlementReturnQueries;
+        _cardJobSettlementReturnService =
+            cardJobSettlementReturnService;
     }
 
     public PaymentPage Payments { get; private set; } =
@@ -46,6 +59,11 @@ public sealed class IndexModel : PageModel
         get;
         private set;
     } = [];
+
+    public IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>
+        SettlementReturns
+    { get; private set; } =
+            new Dictionary<Guid, SettlementReturnAdministrationItem>();
 
     public async Task OnGetAsync(
         PaymentStatus? status = null,
@@ -71,9 +89,117 @@ public sealed class IndexModel : PageModel
             Payments.Items.Select(item => item.CustomerUserId),
             cancellationToken);
 
+        SettlementReturns =
+            await _settlementReturnQueries.FindByOriginalPaymentIdsAsync(
+                Payments.Items.Select(item => item.Id),
+                cancellationToken);
+
         ReconciliationItems =
             await _reconciliationQueries.ListOpenAsync(
                 limit: 20,
                 cancellationToken);
+    }
+
+    public async Task<IActionResult> OnPostReverseAsync(
+        Guid operationId,
+        Guid originalPaymentId,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        if (operationId == Guid.Empty)
+        {
+            ModelState.AddModelError(
+                nameof(operationId),
+                "Identifikátor vratky není platný.");
+        }
+
+        if (originalPaymentId == Guid.Empty)
+        {
+            ModelState.AddModelError(
+                nameof(originalPaymentId),
+                "Identifikátor platby není platný.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            ModelState.AddModelError(
+                nameof(reason),
+                "Důvod vratky je povinný.");
+        }
+        else if (reason.Trim().Length > SettlementReturn.MaximumReasonLength)
+        {
+            ModelState.AddModelError(
+                nameof(reason),
+                "Důvod vratky je příliš dlouhý.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            await LoadAsync(
+                status: null,
+                purposeType: null,
+                search: null,
+                offset: 0,
+                cancellationToken);
+            return Page();
+        }
+
+        try
+        {
+            var result = await _cardJobSettlementReturnService.ReturnAsync(
+                new CardJobSettlementReturnCommand(
+                    operationId,
+                    originalPaymentId,
+                    User.FindAccessUserId()
+                        ?? throw new InvalidOperationException(
+                            "Administrátor nemá interní ID."),
+                    reason),
+                cancellationToken);
+
+            TempData["StatusMessage"] = result.Outcome switch
+            {
+                CardJobSettlementReturnOutcome.Confirmed =>
+                    "ČSOB reverse byl ověřen a vratka dokončena.",
+                CardJobSettlementReturnOutcome.ReverseRejected =>
+                    "Platba již není reverzibilní. Vratka vyžaduje " +
+                    "samostatné rozhodnutí o refundu.",
+                _ =>
+                    "Výsledek ČSOB reverse je nejasný. Vratka vyžaduje " +
+                    "pozornost; další ověření je pouze stavové."
+            };
+
+            return RedirectToPage(new { view = "admin" });
+        }
+        catch (Exception exception) when (
+            PageOperationError.IsExpected(exception))
+        {
+            PageOperationError.Add(
+                this,
+                exception,
+                "settlement-return.card-job.reverse",
+                "Karetní vratku se nepodařilo bezpečně zpracovat.");
+            await LoadAsync(
+                status: null,
+                purposeType: null,
+                search: null,
+                offset: 0,
+                cancellationToken);
+            return Page();
+        }
+    }
+
+    private async Task LoadAsync(
+        PaymentStatus? status,
+        PaymentPurposeType? purposeType,
+        string? search,
+        int offset,
+        CancellationToken cancellationToken)
+    {
+        await OnGetAsync(
+            status,
+            purposeType,
+            search,
+            offset,
+            cancellationToken);
     }
 }

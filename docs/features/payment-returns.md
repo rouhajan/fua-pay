@@ -35,7 +35,7 @@ Debit, vytvoření print rezervace i capture používají tento výpočet. Všec
 závody mezi blokováním a čerpáním se serializují zámkem kreditního účtu jako
 prvním zámkem.
 
-## Durabilní základ providerové vratky
+## Durabilní providerová vratka
 
 Pro budoucí karetní vratky ukládá Payments oddělené provider-neutral pokusy
 `SettlementReturnProviderAttempt`. Každý pokus má neměnný druh `Reverse` nebo
@@ -52,17 +52,28 @@ restartu se sám nevrací do stavu připraveného k odeslání. Potvrzený pokus
 sekvenci uzavírá; další pokus lze založit jen po předchozích definitivně
 zamítnutých nebo neprovedených pokusech.
 
-Tato persistence zatím neprovádí žádné síťové volání a nemění business stav
-`SettlementReturn`. ČSOB `payment/reverse` ani `payment/refund`, automatický
-retry nejasného refundu, polling a CardJob/CardTopUp orchestrace ještě nejsou
-implementované.
+Pro plnou vratku zakázky uhrazené kartou přes ČSOB je nad tímto základem
+implementované `payment/reverse`. Administrátorský POST používá stabilní
+operation ID a ze serverového stavu odvozuje původní platbu, zákazníka, celou
+částku, zakázku, provider i `payId`. Return i attempt musí být durabilně
+`InProgress` před PUT a přes HTTP se nedrží databázová transakce.
+
+Podepsaná a čerstvá odpověď `0/5` vratku potvrdí a dokončí. Přímá
+odpověď reverse zamítne pokus jen při dokumentovaném `resultCode=150`
+a aktuálním nereverzibilním stavu 8, 9 nebo 10. Jiné nenulové kombinace,
+včetně `160/8`, přejdou do `Uncertain` / `RequiresAttention`.
+
+Replay i restart použije pouze `payment/status` a stavový PUT se automaticky
+neopakuje. Úspěšné podepsané stavové ověření `0/8`, `0/9` nebo `0/10`
+zamítne jen Reverse attempt, takže `SettlementReturn` zůstává dostupná pro
+budoucí samostatně autorizované rozhodnutí o refundu. Administrace při
+existujícím aktivním pokusu zobrazuje stavové ověření se stejným uloženým
+operation ID; dokončená, zamítnutá nebo nekonzistentní vratka nový reverse
+nenabízí.
 
 ## Zatím nepodporované
 
-- reverse/refund volání ČSOB ani jiného karetního poskytovatele;
-- providerová vratka karetní úhrady zakázky;
+- `payment/refund` volání ČSOB ani vratka jiného karetního poskytovatele;
 - vratka karetního dobití kreditu;
-- providerová orchestrace nejistého výsledku a následné recovery;
-- administrační UI pro vratky;
 - PDF nebo potvrzení o vratce;
 - částečné vratky.

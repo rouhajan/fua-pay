@@ -51,6 +51,9 @@ public static class PaymentsModule
         services.AddScoped<SettlementReturnRegistrationService>();
         services.AddScoped<SettlementReturnProviderAttemptService>();
         services.AddScoped<CreditJobSettlementReturnService>();
+        services.AddScoped<
+            ICardJobSettlementReturnService,
+            UnavailableCardJobSettlementReturnService>();
         services.AddScoped<IPaymentSettlementService>(
             provider => provider.GetRequiredService<
                 PaymentSettlementService>());
@@ -88,6 +91,9 @@ public static class PaymentsModule
             IPaymentOrderNumberAllocator,
             EfPaymentOrderNumberAllocator>();
         services.AddScoped<IPaymentQueries, EfPaymentQueries>();
+        services.AddScoped<
+            ISettlementReturnQueries,
+            EfSettlementReturnQueries>();
 
         return services;
     }

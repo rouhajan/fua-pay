@@ -197,6 +197,58 @@ public sealed class SecurityPerimeterTests :
     }
 
     [Fact]
+    public async Task CardJobReversePost_WithoutAntiforgeryToken_ReturnsBadRequest()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací administrátor",
+            "admin@example.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Admin]);
+        var sessionQueries =
+            new RecordingAccessSessionQueries(session);
+        using var configuredFactory =
+            _factory.WithWebHostBuilder(
+                builder => builder.ConfigureTestServices(
+                    services =>
+                    {
+                        services.RemoveAll<IAccessSessionQueries>();
+                        services.AddSingleton<IAccessSessionQueries>(
+                            sessionQueries);
+                    }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<
+                IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var protectedTicket = cookieOptions.TicketDataFormat.Protect(ticket);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}={protectedTicket}");
+        using var content = new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["operationId"] = Guid.NewGuid().ToString(),
+                ["originalPaymentId"] = Guid.NewGuid().ToString(),
+                ["reason"] = "Approved full return"
+            });
+        using var response = await client.PostAsync(
+            "/Admin/Payments?handler=Reverse",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, sessionQueries.CallCount);
+        Assert.Equal(session.UserId, sessionQueries.LastUserId);
+    }
+
+    [Fact]
     public void StagingSecurityCookies_UseSecurePolicies()
     {
         using var stagingFactory =

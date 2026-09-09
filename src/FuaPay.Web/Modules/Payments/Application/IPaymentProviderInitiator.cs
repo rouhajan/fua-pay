@@ -15,4 +15,10 @@ public interface IPaymentProviderInitiator
     Task VerifyAsync(
         PaymentProviderInitializationResult candidate,
         CancellationToken cancellationToken = default);
+
+    Uri? ResolveTrustedProcessUri(
+        PaymentProvider provider,
+        string? providerReference,
+        string? processUri) =>
+        null;
 }

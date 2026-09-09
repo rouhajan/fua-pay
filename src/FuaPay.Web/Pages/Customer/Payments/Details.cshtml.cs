@@ -1,4 +1,5 @@
 using FuaPay.Web.Modules.Access.Web;
+using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
@@ -16,32 +17,44 @@ namespace FuaPay.Web.Pages.Customer.Payments;
 public sealed class DetailsModel : PageModel
 {
     private readonly IPaymentQueries _paymentQueries;
+    private readonly ICreditQueries _creditQueries;
+    private readonly CreditAvailabilityService _creditAvailabilityService;
     private readonly DevelopmentPaymentService _developmentPaymentService;
     private readonly IJobQueries _jobQueries;
     private readonly PaymentCreationService _paymentCreationService;
     private readonly DevelopmentPaymentAvailability _developmentAvailability;
+    private readonly IPaymentProviderInitiator _providerInitiator;
     private readonly ReceiptConfiguration _receiptConfiguration;
 
     public DetailsModel(
         IPaymentQueries paymentQueries,
+        ICreditQueries creditQueries,
+        CreditAvailabilityService creditAvailabilityService,
         DevelopmentPaymentService developmentPaymentService,
         IJobQueries jobQueries,
         PaymentCreationService paymentCreationService,
         DevelopmentPaymentAvailability developmentAvailability,
+        IPaymentProviderInitiator providerInitiator,
         ReceiptConfiguration receiptConfiguration)
     {
         ArgumentNullException.ThrowIfNull(paymentQueries);
+        ArgumentNullException.ThrowIfNull(creditQueries);
+        ArgumentNullException.ThrowIfNull(creditAvailabilityService);
         ArgumentNullException.ThrowIfNull(developmentPaymentService);
         ArgumentNullException.ThrowIfNull(jobQueries);
         ArgumentNullException.ThrowIfNull(paymentCreationService);
         ArgumentNullException.ThrowIfNull(developmentAvailability);
+        ArgumentNullException.ThrowIfNull(providerInitiator);
         ArgumentNullException.ThrowIfNull(receiptConfiguration);
 
         _paymentQueries = paymentQueries;
+        _creditQueries = creditQueries;
+        _creditAvailabilityService = creditAvailabilityService;
         _developmentPaymentService = developmentPaymentService;
         _jobQueries = jobQueries;
         _paymentCreationService = paymentCreationService;
         _developmentAvailability = developmentAvailability;
+        _providerInitiator = providerInitiator;
         _receiptConfiguration = receiptConfiguration;
     }
 
@@ -52,6 +65,8 @@ public sealed class DetailsModel : PageModel
     public bool JobCanBePaid { get; private set; }
 
     public bool JobHasReceipt { get; private set; }
+
+    public Uri? TrustedProcessUri { get; private set; }
 
     public bool CanRetryJobPayment =>
         Payment.PurposeType == PaymentPurposeType.Job &&
@@ -70,6 +85,49 @@ public sealed class DetailsModel : PageModel
         return await LoadAsync(id, cancellationToken)
             ? Page()
             : NotFound();
+    }
+
+    public async Task<IActionResult> OnGetStatusAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        Response.Headers.CacheControl = "no-store";
+
+        var customerUserId = RequireCustomerUserId();
+        var payment = await _paymentQueries.FindForCustomerAsync(
+            customerUserId,
+            id,
+            cancellationToken);
+
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        string? availableCredit = null;
+
+        if (payment.PurposeType == PaymentPurposeType.CreditTopUp)
+        {
+            var account = await _creditQueries.FindAccountForOwnerAsync(
+                customerUserId,
+                cancellationToken);
+            var availableMinorUnits = account is null
+                ? 0
+                : (await _creditAvailabilityService.GetAvailableAsync(
+                    account,
+                    cancellationToken)).MinorUnits;
+
+            availableCredit = DashboardDisplay.FormatMoney(
+                availableMinorUnits);
+        }
+
+        return new JsonResult(new CustomerPaymentStatusPayload(
+            payment.Status.ToString(),
+            PaymentDisplay.StatusLabel(payment.Status),
+            PaymentDisplay.StatusCssClass(payment.Status),
+            DashboardDisplay.FormatDate(payment.UpdatedAt),
+            IsPending: payment.Status == PaymentStatus.Pending,
+            AvailableCredit: availableCredit));
     }
 
     public Task<IActionResult> OnPostCompleteAsync(
@@ -138,13 +196,13 @@ public sealed class DetailsModel : PageModel
 
         try
         {
-            var retry = await _paymentCreationService.CreateJobPaymentAsync(
+            var outcome = await _paymentCreationService.CreateJobPaymentAsync(
                 RequireCustomerUserId(),
                 Payment.JobId.Value,
                 cancellationToken);
 
-            return RedirectToPage(
-                new { id = retry.Id, view = "customer" });
+            return CustomerPaymentNavigation.AfterCreation(
+                outcome);
         }
         catch (Exception exception) when (
             PageOperationError.IsExpected(exception))
@@ -213,6 +271,13 @@ public sealed class DetailsModel : PageModel
             return false;
         }
 
+        TrustedProcessUri = Payment.Status == PaymentStatus.Pending
+            ? _providerInitiator.ResolveTrustedProcessUri(
+                Payment.Provider,
+                Payment.ProviderReference,
+                Payment.ProcessUri)
+            : null;
+
         if (Payment.JobId.HasValue)
         {
             var job = await _jobQueries.FindForCustomerAsync(
@@ -243,4 +308,12 @@ public sealed class DetailsModel : PageModel
             ?? throw new InvalidOperationException(
                 "Přihlášený zákazník nemá interní ID.");
     }
+
+    internal sealed record CustomerPaymentStatusPayload(
+        string Status,
+        string StatusLabel,
+        string StatusCssClass,
+        string UpdatedAt,
+        bool IsPending,
+        string? AvailableCredit);
 }

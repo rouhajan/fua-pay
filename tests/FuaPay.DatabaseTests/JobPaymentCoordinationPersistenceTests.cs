@@ -137,7 +137,7 @@ public sealed class JobPaymentCoordinationPersistenceTests :
             var payment = await directTask;
             var exception = await creditTask;
 
-            Assert.Equal(scenario.JobId, payment.JobId);
+            Assert.Equal(scenario.JobId, payment.Payment.JobId);
             Assert.Equal(scenario.JobId, exception.JobId);
             await AssertUnsettledScenarioAsync(
                 factory,
@@ -190,7 +190,7 @@ public sealed class JobPaymentCoordinationPersistenceTests :
             var payment = await directTask;
             var exception = await cancellationTask;
 
-            Assert.Equal(scenario.JobId, payment.JobId);
+            Assert.Equal(scenario.JobId, payment.Payment.JobId);
             Assert.Equal(scenario.JobId, exception.JobId);
             await AssertUnsettledScenarioAsync(
                 factory,
@@ -258,9 +258,9 @@ public sealed class JobPaymentCoordinationPersistenceTests :
         Guid jobId)
     {
         using var scope = factory.Services.CreateScope();
-        return await scope.ServiceProvider
+        return (await scope.ServiceProvider
             .GetRequiredService<PaymentCreationService>()
-            .CreateJobPaymentAsync(customerUserId, jobId);
+            .CreateJobPaymentAsync(customerUserId, jobId)).Payment;
     }
 
     private static async Task<TestScenario> SeedScenarioAsync(

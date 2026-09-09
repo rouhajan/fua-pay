@@ -82,6 +82,176 @@ public sealed class CsobGatewayClientTests
     }
 
     [Fact]
+    public async Task EchoPostAsync_UsesOfficialJsonContractAndVerifiesResponse()
+    {
+        var response = JsonSerializer.Serialize(
+            new
+            {
+                dttm = "20260701120001",
+                resultCode = 0,
+                resultMessage = "OK",
+                signature = "gateway-signature"
+            });
+        var handler = new RecordingHandler(
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    response,
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        var signature = new RecordingSignature
+        {
+            VerificationResult = true
+        };
+        var client = CreateClient(handler, signature);
+
+        var result = await client.EchoPostAsync();
+
+        Assert.Equal(0, result.ResultCode);
+        Assert.Equal("OK", result.ResultMessage);
+        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
+        Assert.Equal(
+            "/api/v1.9/echo",
+            handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal(
+            "application/json",
+            handler.Request.Content!.Headers.ContentType!.MediaType);
+        using var request = JsonDocument.Parse(handler.RequestBody);
+        var root = request.RootElement;
+        Assert.Equal(3, root.EnumerateObject().Count());
+        Assert.Equal("M1MIPS0000", root.GetProperty("merchantId").GetString());
+        Assert.Equal("20260701120000", root.GetProperty("dttm").GetString());
+        Assert.Equal(
+            "merchant-signature",
+            root.GetProperty("signature").GetString());
+        Assert.Equal(
+            "M1MIPS0000|20260701120000",
+            Assert.Single(signature.SignedTexts));
+        Assert.Equal(
+            "20260701120001|0|OK",
+            Assert.Single(signature.VerifiedTexts));
+    }
+
+    [Fact]
+    public async Task EchoPostAsync_RejectsInvalidGatewaySignature()
+    {
+        var response = JsonSerializer.Serialize(
+            new
+            {
+                dttm = "20260701120001",
+                resultCode = 0,
+                resultMessage = "OK",
+                signature = "invalid-signature"
+            });
+        var signature = new RecordingSignature
+        {
+            VerificationResult = false
+        };
+        var client = CreateClient(
+            new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    response,
+                    Encoding.UTF8,
+                    "application/json")
+            }),
+            signature);
+
+        var exception = await Assert.ThrowsAsync<CsobGatewayException>(
+            () => client.EchoPostAsync());
+
+        Assert.Contains(
+            "podpis",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "20260701120001|0|OK",
+            Assert.Single(signature.VerifiedTexts));
+    }
+
+    [Fact]
+    public async Task EchoPostAsync_RejectsStaleSignedResponse()
+    {
+        var response = JsonSerializer.Serialize(
+            new
+            {
+                dttm = "20260701114959",
+                resultCode = 0,
+                resultMessage = "OK",
+                signature = "gateway-signature"
+            });
+        var signature = new RecordingSignature
+        {
+            VerificationResult = true
+        };
+        var client = CreateClient(
+            new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    response,
+                    Encoding.UTF8,
+                    "application/json")
+            }),
+            signature);
+
+        var exception = await Assert.ThrowsAsync<CsobGatewayException>(
+            () => client.EchoPostAsync());
+
+        Assert.Contains(
+            "časové okno",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Single(signature.VerifiedTexts);
+    }
+
+    [Fact]
+    public async Task EchoPostAsync_NonSuccessResponseIsNeverTreatedAsSigned()
+    {
+        var handler = new RecordingHandler(
+            new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent(
+                    "{\"resultCode\":180,\"resultMessage\":\"Not allowed\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        var signature = new RecordingSignature
+        {
+            VerificationResult = true
+        };
+        var client = CreateClient(handler, signature);
+
+        var exception = await Assert.ThrowsAsync<CsobGatewayException>(
+            () => client.EchoPostAsync());
+
+        Assert.Equal(HttpStatusCode.Forbidden, exception.HttpStatusCode);
+        Assert.Empty(signature.VerifiedTexts);
+    }
+
+    [Fact]
+    public async Task EchoPostAsync_TimeoutAndCallerCancellationKeepExistingSemantics()
+    {
+        var timeoutClient = CreateClient(
+            new ThrowingHandler(new TaskCanceledException()),
+            new RecordingSignature());
+
+        var timeout = await Assert.ThrowsAsync<CsobGatewayException>(
+            () => timeoutClient.EchoPostAsync());
+
+        Assert.IsType<TaskCanceledException>(timeout.InnerException);
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var cancelledClient = CreateClient(
+            new ThrowingHandler(new TaskCanceledException()),
+            new RecordingSignature());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => cancelledClient.EchoPostAsync(cancellation.Token));
+    }
+
+    [Fact]
     public async Task InitializeAsync_SignsRequestAndReturnsBrowserProcessUri()
     {
         var response = JsonSerializer.Serialize(
@@ -150,6 +320,212 @@ public sealed class CsobGatewayClientTests
         Assert.Equal(
             "ff41e84b7e33@HA|20260701120001|0|OK|1",
             Assert.Single(signature.VerifiedTexts));
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_ReturnsSignedAuthoritativeExpiry()
+    {
+        var response = JsonSerializer.Serialize(
+            new
+            {
+                payId = "ff41e84b7e33@HA",
+                dttm = "20260701120001",
+                resultCode = 130,
+                resultMessage = "Payment expired",
+                paymentStatus = 6,
+                signature = "gateway-signature"
+            });
+        var handler = new RecordingHandler(
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    response,
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        var signature = new RecordingSignature
+        {
+            VerificationResult = true
+        };
+        var client = CreateClient(handler, signature);
+
+        var result = await client.GetStatusAsync("ff41e84b7e33@HA");
+
+        Assert.Equal("ff41e84b7e33@HA", result.PayId);
+        Assert.Equal(130, result.ResultCode);
+        Assert.Equal(6, result.PaymentStatus);
+        Assert.Equal(
+            "ff41e84b7e33@HA|20260701120001|130|Payment expired|6",
+            Assert.Single(signature.VerifiedTexts));
+    }
+
+    [Fact]
+    public async Task ReverseAsync_UsesOfficialPutContractAndVerifiesResponse()
+    {
+        var response = JsonSerializer.Serialize(
+            new
+            {
+                payId = "ff41e84b7e33@HA",
+                dttm = "20260701120001",
+                resultCode = 0,
+                resultMessage = "OK",
+                paymentStatus = 5,
+                signature = "gateway-signature"
+            });
+        var handler = new RecordingHandler(
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    response,
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        var signature = new RecordingSignature
+        {
+            VerificationResult = true
+        };
+        var client = CreateClient(handler, signature);
+
+        var result = await client.ReverseAsync("ff41e84b7e33@HA");
+
+        Assert.Equal("ff41e84b7e33@HA", result.PayId);
+        Assert.Equal(0, result.ResultCode);
+        Assert.Equal(5, result.PaymentStatus);
+        Assert.Equal(HttpMethod.Put, handler.Request!.Method);
+        Assert.Equal(
+            "/api/v1.9/payment/reverse",
+            handler.Request.RequestUri!.AbsolutePath);
+        Assert.Equal(
+            "application/json",
+            handler.Request.Content!.Headers.ContentType!.MediaType);
+        using var request = JsonDocument.Parse(handler.RequestBody);
+        var root = request.RootElement;
+        Assert.Equal(4, root.EnumerateObject().Count());
+        Assert.Equal("M1MIPS0000", root.GetProperty("merchantId").GetString());
+        Assert.Equal("ff41e84b7e33@HA", root.GetProperty("payId").GetString());
+        Assert.Equal("20260701120000", root.GetProperty("dttm").GetString());
+        Assert.Equal(
+            "merchant-signature",
+            root.GetProperty("signature").GetString());
+        Assert.Equal(
+            "M1MIPS0000|ff41e84b7e33@HA|20260701120000",
+            Assert.Single(signature.SignedTexts));
+        Assert.Equal(
+            "ff41e84b7e33@HA|20260701120001|0|OK|5",
+            Assert.Single(signature.VerifiedTexts));
+    }
+
+    [Theory]
+    [InlineData(null, "20260701120001", "ff41e84b7e33@HA", false)]
+    [InlineData("invalid", "20260701120001", "ff41e84b7e33@HA", false)]
+    [InlineData("gateway-signature", "20260701114959", "ff41e84b7e33@HA", true)]
+    [InlineData("gateway-signature", "20260701120001", "aa41e84b7e33", true)]
+    public async Task ReverseAsync_RejectsUnsignedStaleOrWrongPaymentResponse(
+        string? gatewaySignature,
+        string dttm,
+        string responsePayId,
+        bool verificationResult)
+    {
+        var response = JsonSerializer.Serialize(
+            new
+            {
+                payId = responsePayId,
+                dttm,
+                resultCode = 0,
+                resultMessage = "OK",
+                paymentStatus = 5,
+                signature = gatewaySignature
+            });
+        var signature = new RecordingSignature
+        {
+            VerificationResult = verificationResult
+        };
+        var client = CreateClient(
+            new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    response,
+                    Encoding.UTF8,
+                    "application/json")
+            }),
+            signature);
+
+        await Assert.ThrowsAsync<CsobGatewayException>(
+            () => client.ReverseAsync("ff41e84b7e33@HA"));
+
+        Assert.Single(signature.VerifiedTexts);
+    }
+
+    [Fact]
+    public async Task ReverseAsync_MalformedResponseFailsClosed()
+    {
+        var client = CreateClient(
+            new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{not-json",
+                    Encoding.UTF8,
+                    "application/json")
+            }),
+            new RecordingSignature { VerificationResult = true });
+
+        await Assert.ThrowsAsync<CsobGatewayException>(
+            () => client.ReverseAsync("ff41e84b7e33@HA"));
+    }
+
+    [Fact]
+    public async Task ReverseAsync_NonSuccessResponseIsNeverTrusted()
+    {
+        var signature = new RecordingSignature
+        {
+            VerificationResult = true
+        };
+        var client = CreateClient(
+            new RecordingHandler(
+                new HttpResponseMessage(HttpStatusCode.Conflict)
+                {
+                    Content = new StringContent(
+                        "{\"resultCode\":160,\"resultMessage\":\"Not reversible\"}",
+                        Encoding.UTF8,
+                        "application/json")
+                }),
+            signature);
+
+        var exception = await Assert.ThrowsAsync<CsobGatewayException>(
+            () => client.ReverseAsync("ff41e84b7e33@HA"));
+
+        Assert.Equal(HttpStatusCode.Conflict, exception.HttpStatusCode);
+        Assert.Empty(signature.VerifiedTexts);
+    }
+
+    [Fact]
+    public async Task ReverseAsync_TransportTimeoutAndCancellationFailClosed()
+    {
+        var transportClient = CreateClient(
+            new ThrowingHandler(
+                new HttpRequestException("network unavailable")),
+            new RecordingSignature());
+        var transport = await Assert.ThrowsAsync<CsobGatewayException>(
+            () => transportClient.ReverseAsync("ff41e84b7e33@HA"));
+        Assert.IsType<HttpRequestException>(transport.InnerException);
+
+        var timeoutClient = CreateClient(
+            new ThrowingHandler(new TaskCanceledException()),
+            new RecordingSignature());
+        var timeout = await Assert.ThrowsAsync<CsobGatewayException>(
+            () => timeoutClient.ReverseAsync("ff41e84b7e33@HA"));
+        Assert.IsType<TaskCanceledException>(timeout.InnerException);
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var cancelledClient = CreateClient(
+            new ThrowingHandler(new TaskCanceledException()),
+            new RecordingSignature());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => cancelledClient.ReverseAsync(
+                "ff41e84b7e33@HA",
+                cancellation.Token));
     }
 
     [Fact]

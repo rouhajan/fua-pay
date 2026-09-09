@@ -6,9 +6,16 @@
     var payment = Model.Payment;
     var statusMessageKind =
         TempData["StatusMessageKind"] as string;
+    var statusUrl = Url.Page(
+        "./Details",
+        "Status",
+        new { id = payment.Id, view = "customer" });
 }
 
-<section class="functional-page narrow-page">
+<section class="functional-page narrow-page"
+         data-payment-status-poller
+         data-payment-status-url="@statusUrl"
+         data-payment-status-pending="@(payment.Status == PaymentStatus.Pending ? "true" : "false")">
     <header class="functional-header split-header">
         <div>
             <p class="panel-kicker">Platba</p>
@@ -29,6 +36,11 @@
         </div>
     }
     <div asp-validation-summary="All" class="message-box is-error"></div>
+    <div class="message-box is-success"
+         role="status"
+         aria-live="polite"
+         aria-atomic="true"
+         data-payment-status-message></div>
 
     <section class="data-panel">
         <div class="payment-hero">
@@ -36,7 +48,8 @@
                 <span>Částka</span>
                 <strong>@DashboardDisplay.FormatMoney(payment.AmountMinorUnits)</strong>
             </div>
-            <span class="status-badge @PaymentDisplay.StatusCssClass(payment.Status)">
+            <span class="status-badge @PaymentDisplay.StatusCssClass(payment.Status)"
+                  data-payment-status-badge>
                 @PaymentDisplay.StatusLabel(payment.Status)
             </span>
         </div>
@@ -47,7 +60,9 @@
             </div>
             <div>
                 <dt>Poslední změna</dt>
-                <dd>@DashboardDisplay.FormatDate(payment.UpdatedAt)</dd>
+                <dd data-payment-status-updated-at>
+                    @DashboardDisplay.FormatDate(payment.UpdatedAt)
+                </dd>
             </div>
             <div>
                 <dt>Poskytovatel</dt>
@@ -79,15 +94,27 @@
         @if (
             payment.Provider == PaymentProvider.Csob &&
             payment.Status == PaymentStatus.Pending &&
-            payment.ProcessUri is not null)
+            Model.TrustedProcessUri is not null)
         {
-            <div class="form-actions">
-                <a href="@payment.ProcessUri"
+            <div class="form-actions" data-payment-pending-only>
+                <a href="@Model.TrustedProcessUri"
                    class="primary-action-button"
                    rel="external nofollow">
                     Pokračovat na zabezpečenou platební bránu ČSOB
                 </a>
             </div>
+        }
+
+        @if (payment.Status == PaymentStatus.Pending)
+        {
+            <p>
+                <a asp-page="./Details"
+                   asp-route-id="@payment.Id"
+                   asp-route-view="customer"
+                   class="text-link">
+                    Obnovit stav ručně
+                </a>
+            </p>
         }
     </section>
 
@@ -167,7 +194,8 @@
         Model.DevelopmentSimulationEnabled &&
         payment.Status == PaymentStatus.Pending)
     {
-        <section class="data-panel development-simulator">
+        <section class="data-panel development-simulator"
+                 data-payment-pending-only>
             <div class="data-panel-header">
                 <h2>Vývojový simulátor brány</h2>
             </div>
@@ -201,3 +229,8 @@
         </section>
     }
 </section>
+
+@section Scripts {
+    <script src="~/js/payment-status-polling.js"
+            asp-append-version="true"></script>
+}
