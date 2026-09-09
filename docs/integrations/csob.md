@@ -1,6 +1,6 @@
 # ČSOB Payment Gateway eAPI 1.9
 
-Status: 2026-09-08
+Status: 2026-09-09
 
 FUA Pay používá ČSOB jako provider adaptér nad interním provider-neutral modelem
 platby. Browserový návrat nikdy není finanční autorita; autoritativní stav se
@@ -95,11 +95,34 @@ v té chvíli už byla platba skutečně založena u ČSOB a má `payId`. Opušt
 `Pending` pokusy proto nejsou samy o sobě chyba a musí je řešit reconciliation /
 expiry lifecycle, ne mazání historie.
 
+## CardJob payment/reverse
+
+Administrátor může z přehledu plateb spustit pouze plnou vratku úspěšné
+ČSOB platby zakázky. POST s antiforgery předá jen idempotentní operation ID,
+identifikátor vybírané platby a důvod; zákazníka, zakázku, částku, provider a
+`payId` služba vždy znovu odvodí z autoritativní uložené platby a vypořádání
+zakázky. CardTopUp, kreditní zakázka, částečná vratka a refund nejsou touto
+cestou podporovány.
+
+`SettlementReturn` a jeho Reverse provider attempt se nejdřív v jedné databázové
+transakci uloží jako `InProgress`. Teprve po commitu smí první oprávněný request
+odeslat podepsaný PUT `payment/reverse`; databázová transakce se přes HTTP nedrží.
+Jediný potvrzený výsledek je čerstvá, podepsaná odpověď pro stejné `payId` s
+`resultCode=0`, `paymentStatus=5`.
+
+Jakmile PUT mohl být odeslán, timeout, zrušení, transportní chyba, neplatná
+odpověď nebo chyba lokálního zápisu vedou do `Uncertain` /
+`RequiresAttention`. Replay `InProgress` nebo `Uncertain` volá pouze podepsané
+`payment/status` a PUT nikdy automaticky neopakuje. `resultCode=0` se stavem 5
+vratku dokončí; důvěryhodný stav 8, 9 nebo 10 zamítne pouze Reverse attempt a ponechá vratku v
+`RequiresAttention` pro samostatné budoucí rozhodnutí o refundu. Ostatní
+kombinace zůstávají nejasné. Z lokálního času se výsledek neodvozuje.
+
 ## Známé implementační mezery před production readiness
 
-1. `payment/reverse` zatím nemá skutečné ČSOB síťové volání. Existující
-   provider-neutral Reverse/Refund persistence je základ, nikoli dokončená ČSOB
-   operace.
+Skutečné ČSOB `payment/reverse` pro plnou CardJob vratku je implementované nad
+provider-neutral persistence, ale živý bankovní aktivační scénář zatím nebyl
+proveden a zůstává nezaškrtnutý v readiness checklistu.
 
 Refund není součástí povinného ČSOB production-activation checklistu. Zda má být
 in-app card refund součást první produkční verze FUA Pay, zůstává samostatné

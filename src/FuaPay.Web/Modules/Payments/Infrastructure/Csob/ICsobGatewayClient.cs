@@ -15,4 +15,8 @@ public interface ICsobGatewayClient
     Task<CsobPaymentStatusResult> GetStatusAsync(
         string payId,
         CancellationToken cancellationToken = default);
+
+    Task<CsobPaymentReverseResult> ReverseAsync(
+        string payId,
+        CancellationToken cancellationToken = default);
 }

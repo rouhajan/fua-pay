@@ -275,5 +275,10 @@ public sealed class CsobPaymentProviderInitiatorTests
                 AuthCode: null,
                 StatusDetail: null));
         }
+
+        public Task<CsobPaymentReverseResult> ReverseAsync(
+            string payId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

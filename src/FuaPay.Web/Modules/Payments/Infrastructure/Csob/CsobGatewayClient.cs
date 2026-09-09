@@ -240,6 +240,64 @@ public sealed class CsobGatewayClient : ICsobGatewayClient
             gatewayResponse.StatusDetail);
     }
 
+    public async Task<CsobPaymentReverseResult> ReverseAsync(
+        string payId,
+        CancellationToken cancellationToken = default)
+    {
+        _availability.EnsureEnabled();
+        var normalizedPayId = CsobPayId.RequireGatewayInput(payId);
+        var requestStartedAt = _timeProvider.GetUtcNow();
+        var dttm = CreateDttm(requestStartedAt);
+        var signature = _signature.Sign(
+            CsobTextToSign.PaymentReverse(
+                _configuration.MerchantId,
+                normalizedPayId,
+                dttm));
+        var request = new CsobPaymentReverseRequest(
+            _configuration.MerchantId,
+            normalizedPayId,
+            dttm,
+            signature);
+
+        using var response = await SendAsync(
+            () => _httpClient.PutAsJsonAsync(
+                $"api/{ApiVersion}/payment/reverse",
+                request,
+                JsonOptions,
+                cancellationToken),
+            cancellationToken);
+        var responseReceivedAt = _timeProvider.GetUtcNow();
+        var gatewayResponse = await ReadVerifiedResponseAsync(
+            response,
+            CsobTextToSign.PaymentReverseResponse,
+            requestStartedAt,
+            responseReceivedAt,
+            cancellationToken);
+        var responsePayId = CsobPayId.RequireSigned(
+            gatewayResponse.PayId,
+            "Odpověď payment/reverse neobsahuje platné payId.");
+
+        if (!string.Equals(
+            responsePayId,
+            normalizedPayId,
+            StringComparison.Ordinal))
+        {
+            throw new CsobGatewayException(
+                "Odpověď payment/reverse patří jiné platbě než požadované payId.");
+        }
+
+        return new CsobPaymentReverseResult(
+            responsePayId,
+            gatewayResponse.ResultCode,
+            RequireResponseValue(
+                gatewayResponse.ResultMessage,
+                "Odpověď payment/reverse neobsahuje resultMessage."),
+            gatewayResponse.PaymentStatus
+                ?? throw new CsobGatewayException(
+                    "Odpověď payment/reverse neobsahuje stav platby."),
+            gatewayResponse.StatusDetail);
+    }
+
     private Uri CreateProcessUri(string payId)
     {
         var dttm = CreateDttm(_timeProvider.GetUtcNow());

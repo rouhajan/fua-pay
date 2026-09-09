@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-08
+Status: 2026-09-09
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu FUA Pay až k bezpečnému production cutoveru. Stabilní technický kontrakt je
@@ -54,12 +54,13 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
       podporuje TTL 900 i 1800 sekund bez lokálního odvozování expirace.
 - [x] Implementovat POST `echo` se stejnou signing/response-verification/freshness
       hranicí jako GET echo a přidat opt-in integrační test.
-- [ ] Implementovat skutečné `payment/reverse` pro ČSOB na existujícím
+- [x] Implementovat skutečné `payment/reverse` pro ČSOB na existujícím
       provider-neutral základě nebo jiným minimálním způsobem, který zachová
       idempotenci, audit a bezpečné řešení nejasného timeoutu. Bez throwaway
       bypassu jen pro aktivaci.
-- [x] Doplnit cílené unit testy pro Stage 1 lifecycle a Stage 2 UX endpointy;
-      persistence cesty zůstávají pokryté PostgreSQL integračním gate.
+- [x] Doplnit cílené unit testy pro Stage 1 lifecycle, Stage 2 UX endpointy a
+      Stage 3 reverse protokol/orchestrace; PostgreSQL testy pokrývají souběh a
+      restart z durabilního `InProgress` bez druhého PUT.
 - [ ] `scripts/verify.ps1` + PostgreSQL gate + live GET/POST echo před merge.
 
 Zaškrtnuté Stage 1 a Stage 2 položky výše označují implementaci a lokální
@@ -67,6 +68,12 @@ automatizované pokrytí. Stage 2 používá owner-scoped read-only status handl
 bounded polling (2 sekundy, nejvýše 30 pokusů); nejde o živý bankovní test.
 Živé POST echo a bankovní expired scénář zůstávají samostatně nezaškrtnuté v
 sekci C, dokud skutečně neproběhnou.
+
+Stage 3 ukládá `SettlementReturn` i Reverse attempt jako `InProgress` před
+externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy PUT
+mohl odejít, je každý replay/restart pouze statusový. Lokální automatizované
+testy neznamenají provedení živého reverse; aktivační položka v sekci C proto
+zůstává otevřená.
 
 ### Rozhodnutí, která nejsou automaticky součástí tohoto passu
 

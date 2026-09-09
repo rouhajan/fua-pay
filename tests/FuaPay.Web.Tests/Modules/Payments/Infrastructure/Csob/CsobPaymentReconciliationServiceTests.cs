@@ -534,6 +534,11 @@ public sealed class CsobPaymentReconciliationServiceTests
                     PayId = payId
                 });
         }
+
+        public Task<CsobPaymentReverseResult> ReverseAsync(
+            string payId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class StubPaymentRepository : IPaymentRepository

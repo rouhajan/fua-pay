@@ -66,6 +66,17 @@ public static class PageOperationError
             PaymentAmountNotAllowedException or
             PaymentProviderUnavailableException or
             BlockingJobPaymentAlreadyExistsException or
+            CardJobSettlementReturnNotAvailableException or
+            CardJobSettlementReturnNotAllowedException or
+            CardJobSettlementReturnStateInconsistentException or
+            CardJobSettlementReturnSafetyStateException or
+            SettlementReturnRequestConflictException or
+            SettlementReturnSourceConflictException or
+            SettlementReturnConcurrencyException or
+            SettlementReturnProviderAttemptAlreadyActiveException or
+            SettlementReturnProviderAttemptConflictException or
+            SettlementReturnProviderAttemptNotAllowedException or
+            SettlementReturnProviderAttemptConcurrencyException or
             InvalidPaymentStateTransitionException or
             ServiceUnitNotFoundException or
             ServiceUnitCodeAlreadyUsedException or
@@ -160,6 +171,19 @@ public static class PageOperationError
                 "Částka platby je mimo povolený rozsah.",
             PaymentProviderUnavailableException =>
                 "Platební služba nyní není dostupná.",
+            CardJobSettlementReturnNotAvailableException =>
+                "Karetní vratky nyní nejsou dostupné.",
+            CardJobSettlementReturnNotAllowedException or
+            SettlementReturnProviderAttemptNotAllowedException =>
+                "Tuto karetní vratku nelze provést.",
+            SettlementReturnRequestConflictException or
+            SettlementReturnSourceConflictException or
+            SettlementReturnProviderAttemptAlreadyActiveException or
+            SettlementReturnProviderAttemptConflictException =>
+                "Vratka už existuje nebo je zpracovávána s jinými daty.",
+            CardJobSettlementReturnStateInconsistentException or
+            CardJobSettlementReturnSafetyStateException =>
+                "Vratka vyžaduje kontrolu administrátorem; operaci neopakujte.",
             JobPriceNotAllowedException =>
                 "Cena zakázky je mimo povolený rozsah.",
             BlockingJobPaymentAlreadyExistsException or
@@ -173,6 +197,8 @@ public static class PageOperationError
             CreditAdjustmentCommandAlreadyExistsException or
             JobConcurrencyException or
             PaymentConcurrencyException or
+            SettlementReturnConcurrencyException or
+            SettlementReturnProviderAttemptConcurrencyException or
             PaymentCreationRequestAlreadyExistsException or
             ServiceUnitConcurrencyException or
             RequesterAssignmentConcurrencyException =>

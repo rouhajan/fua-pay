@@ -108,6 +108,10 @@ public static class CsobGatewayServiceCollectionExtensions
             provider => provider.GetRequiredService<
                 CsobPaymentRecoveryScheduler>());
         services.AddScoped<CsobPaymentRecoveryProcessor>();
+        services.Replace(
+            ServiceDescriptor.Scoped<
+                ICardJobSettlementReturnService,
+                CsobCardJobSettlementReturnService>());
 
         if (reconciliationConfiguration.Enabled)
         {

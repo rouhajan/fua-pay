@@ -24,6 +24,12 @@
         </div>
     </header>
 
+    @if (TempData["StatusMessage"] is string statusMessage)
+    {
+        <div class="message-box is-success">@statusMessage</div>
+    }
+    <div asp-validation-summary="All" class="message-box is-error"></div>
+
     <form method="get" class="filter-grid customer-filter-grid">
         <input type="hidden" name="view" value="admin" />
         <label>
@@ -86,6 +92,7 @@
                             <th>Částka</th>
                             <th>Stav</th>
                             <th>Reference</th>
+                            <th>Vratka</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -106,6 +113,39 @@
                                 </span>
                             </td>
                             <td><code>@payment.ProviderReference</code></td>
+                            <td>
+                                @if (
+                                    payment.Provider == PaymentProvider.Csob &&
+                                    payment.PurposeType == PaymentPurposeType.Job &&
+                                    payment.Status == PaymentStatus.Succeeded)
+                                {
+                                    <form method="post"
+                                          asp-page-handler="Reverse"
+                                          class="compact-action-form">
+                                        <input type="hidden"
+                                               name="operationId"
+                                               value="@Guid.NewGuid()" />
+                                        <input type="hidden"
+                                               name="originalPaymentId"
+                                               value="@payment.Id" />
+                                        <label>
+                                            <span class="visually-hidden">Důvod vratky</span>
+                                            <input type="text"
+                                                   name="reason"
+                                                   maxlength="@SettlementReturn.MaximumReasonLength"
+                                                   required
+                                                   placeholder="Důvod plné vratky" />
+                                        </label>
+                                        <button type="submit" class="danger-button">
+                                            Vrátit kartou
+                                        </button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <span aria-hidden="true">—</span>
+                                }
+                            </td>
                         </tr>
                     }
                     </tbody>
