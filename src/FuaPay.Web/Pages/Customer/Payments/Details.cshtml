@@ -15,7 +15,7 @@
 <section class="functional-page narrow-page"
          data-payment-status-poller
          data-payment-status-url="@statusUrl"
-         data-payment-status-pending="@(payment.Status == PaymentStatus.Pending ? "true" : "false")">
+         data-payment-status-pending="@(Model.ShouldPoll ? "true" : "false")">
     <header class="functional-header split-header">
         <div>
             <p class="panel-kicker">Platba</p>

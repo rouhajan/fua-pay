@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-09
+Status: 2026-09-10
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu FUA Pay až k bezpečnému production cutoveru. Stabilní technický kontrakt je
@@ -37,7 +37,12 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
 
 - [x] Async stav po návratu z brány bez reloadu celé stránky.
       - detail po returnu smí krátce začít jako `Pending`;
-      - klient periodicky načte pouze potřebná data;
+      - return pouze urychlí server-side reconciliation a browser není finanční
+        autorita;
+      - nedůvěryhodný UI marker zapne polling jen pro post-return `Pending`
+        detail a sám nespouští provider call ani zápis;
+      - klient periodicky načte pouze potřebná lokální data přes owner-scoped
+        read-only status handler;
       - aktualizuje status badge, relevantní text/akce a kredit v shellu;
       - polling skončí při terminálním stavu nebo po bounded timeoutu;
       - chyba pollingu nesmí změnit finanční stav a ponechá bezpečný refresh
@@ -65,9 +70,9 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
 
 Zaškrtnuté Stage 1 a Stage 2 položky výše označují implementaci a lokální
 automatizované pokrytí. Stage 2 používá owner-scoped read-only status handler a
-bounded polling (2 sekundy, nejvýše 30 pokusů); nejde o živý bankovní test.
-Živé POST echo a bankovní expired scénář zůstávají samostatně nezaškrtnuté v
-sekci C, dokud skutečně neproběhnou.
+bounded polling post-return stavu (2 sekundy, nejvýše 30 pokusů); nejde o živý
+bankovní test. Živé POST echo již bylo ověřeno; bankovní expired scénář zůstává
+samostatně nezaškrtnutý v sekci C, dokud skutečně neproběhne.
 
 Stage 3 ukládá `SettlementReturn` i Reverse attempt jako `InProgress` před
 externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy PUT
@@ -92,7 +97,7 @@ provedení živého reverse; aktivační položka v sekci C proto zůstává ote
 Podle oficiální wiki upravené 2026-06-30:
 
 - [x] GET echo: HTTP 200, validní podpis, `resultCode=0`.
-- [ ] POST echo: HTTP 200, validní podpis, `resultCode=0`.
+- [x] POST echo: HTTP 200, validní podpis, `resultCode=0`; živě ověřeno na staging release `b057ecf84f33908bb5c6a20d5389c025a4e712ca`.
 - [x] Successful authorised payment: integrační testovací karta
       `4000007000010006`, budoucí expirace, CVC `100`; návrat na požadovanou
       stránku ověřen.

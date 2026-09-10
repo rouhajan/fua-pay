@@ -142,7 +142,7 @@ public static class CsobPaymentReturnEndpoint
             : string.Empty;
         var location =
             $"{pathBase}/Customer/Payments/Details/{paymentId:D}" +
-            "?view=customer";
+            "?view=customer&waitForReconciliation=true";
 
         context.Response.StatusCode = StatusCodes.Status303SeeOther;
         context.Response.Headers.Location = location;

@@ -110,6 +110,11 @@ internal sealed class EfCsobPaymentRecoveryRepository :
                 UPDATE payments.csob_payment_reconciliation
                 SET
                     last_browser_return_at = {observedAt},
+                    next_attempt_at = CASE
+                        WHEN state = {(int)PaymentReconciliationState.Scheduled}
+                            THEN LEAST(next_attempt_at, {observedAt})
+                        ELSE next_attempt_at
+                    END,
                     updated_at = GREATEST(updated_at, {observedAt}),
                     version = version + 1
                 WHERE

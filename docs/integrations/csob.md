@@ -48,8 +48,11 @@ expiraci ani 3-D Secure údaje.
 
 Return endpoint přijímá GET nebo malý `application/x-www-form-urlencoded` POST.
 Z browseru používá pouze `payId` jako podnět pro persistovanou reconciliation
-frontu. Částka, identita, účel ani browserový stav nejsou důkazem platby.
-Background worker vždy znovu volá serverové `payment/status`.
+frontu. První return existující naplánovanou položku atomicky přitáhne nejvýše
+na čas pozorování; aktivní lease ani uzavřené recovery stavy znovu neotevírá.
+Částka, identita, účel ani browserový stav nejsou důkazem platby. Browser pouze
+urychluje server-side ověření; background worker vždy znovu volá podepsané
+`payment/status` a teprve jeho ověřený výsledek smí změnit finanční stav.
 
 Ověřené stavy ČSOB se mapují do interního lifecycle. Úspěšné stavy mohou vstoupit
 pouze do jediné settlement služby; settlement, kredit/job, audit a outbox jsou
@@ -69,18 +72,22 @@ zůstává běžné `Failed`; všechny ostatní nenulové kombinace zůstávají
 
 ### Návrat z brány
 
-Return endpoint pouze naplánuje reconciliation a okamžitě přesměruje browser na
-detail platby. Reconciliation může doběhnout až o několik sekund později. Detail
-proto při lokálním stavu `Pending` používá owner-scoped GET status handler, který
-čte pouze lokální payment read model a u dobití aktuální lokální kredit. Odpověď
-má `Cache-Control: no-store`; handler nevolá ČSOB, reconciliation ani settlement
-a nic nemění.
+Return endpoint pouze naplánuje nebo urychlí reconciliation a okamžitě
+přesměruje browser na detail platby s nedůvěryhodným UI markerem. Reconciliation
+může doběhnout až o několik sekund později. Pouze post-return detail s markerem a
+lokálním stavem `Pending` zapne bounded polling owner-scoped GET status handleru.
+Marker nespouští provider call, reconciliation ani zápis a není finanční ani
+security autoritou. Status handler čte pouze lokální payment read model a u
+dobití aktuální lokální kredit. Odpověď má `Cache-Control: no-store`; handler
+nevolá ČSOB, reconciliation ani settlement a nic nemění.
 
-Self-hosted skript pod stávající CSP načítá stav po dvou sekundách, nejvýše
-30krát. V místě aktualizuje status badge, čas, pending-only akce a případný
-kredit v shellu. Končí při terminálním stavu, chybě, ztrátě přístupu/not-found
-nebo vyčerpání limitu; ruční refresh zůstává dostupný. Jde o lokálně
-implementovaný stav, nikoli důkaz živého ČSOB scénáře.
+Self-hosted skript pod stávající CSP načítá po návratu z brány pouze lokální stav
+po dvou sekundách, nejvýše 30krát. Běžný `Pending` detail před přechodem na bránu
+automaticky nepolluje. Skript v místě aktualizuje status badge, čas, pending-only
+akce a případný kredit v shellu. Končí při terminálním stavu, chybě, ztrátě
+přístupu/not-found nebo vyčerpání limitu; continuation link na ČSOB a ruční
+refresh zůstávají dostupné. Jde o post-return UX, nikoli důkaz živého ČSOB
+scénáře ani zdroj finančního rozhodnutí.
 
 ### Přechod na platební bránu
 
