@@ -68,6 +68,8 @@ public sealed class DetailsModel : PageModel
 
     public Uri? TrustedProcessUri { get; private set; }
 
+    public bool ShouldPoll { get; private set; }
+
     public bool CanRetryJobPayment =>
         Payment.PurposeType == PaymentPurposeType.Job &&
         PaymentDisplay.IsUnsuccessfulTerminalStatus(Payment.Status) &&
@@ -80,11 +82,19 @@ public sealed class DetailsModel : PageModel
 
     public async Task<IActionResult> OnGetAsync(
         Guid id,
+        bool waitForReconciliation = false,
         CancellationToken cancellationToken = default)
     {
-        return await LoadAsync(id, cancellationToken)
-            ? Page()
-            : NotFound();
+        if (!await LoadAsync(id, cancellationToken))
+        {
+            return NotFound();
+        }
+
+        ShouldPoll =
+            waitForReconciliation &&
+            Payment.Status == PaymentStatus.Pending;
+
+        return Page();
     }
 
     public async Task<IActionResult> OnGetStatusAsync(

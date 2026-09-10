@@ -326,6 +326,64 @@ public sealed class CustomerPaymentStage2Tests
     }
 
     [Fact]
+    public async Task Details_PendingBeforeGatewayReturnDoesNotPoll()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, PaymentStatus.Pending);
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId);
+
+        var result = await model.OnGetAsync(payment.Id);
+
+        Assert.IsType<PageResult>(result);
+        Assert.False(model.ShouldPoll);
+    }
+
+    [Fact]
+    public async Task Details_PendingAfterGatewayReturnPollsWithoutProviderSideEffects()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, PaymentStatus.Pending);
+        var provider = new RecordingProviderInitiator();
+        var queries = new RecordingPaymentQueries(payment);
+        var model = CreateDetailsModel(
+            queries,
+            provider,
+            customerUserId);
+
+        var result = await model.OnGetAsync(
+            payment.Id,
+            waitForReconciliation: true);
+
+        Assert.IsType<PageResult>(result);
+        Assert.True(model.ShouldPoll);
+        Assert.Equal(1, queries.FindForCustomerCalls);
+        Assert.Equal(1, provider.ResolveCalls);
+        Assert.Equal(0, provider.InitializeCalls);
+        Assert.Equal(0, provider.VerifyCalls);
+    }
+
+    [Fact]
+    public async Task Details_TerminalAfterGatewayReturnDoesNotPoll()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, PaymentStatus.Succeeded);
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId);
+
+        var result = await model.OnGetAsync(
+            payment.Id,
+            waitForReconciliation: true);
+
+        Assert.IsType<PageResult>(result);
+        Assert.False(model.ShouldPoll);
+    }
+
+    [Fact]
     public void DetailsStatusHandler_RemainsCustomerAuthorized()
     {
         var authorize = Assert.Single(
@@ -394,6 +452,7 @@ public sealed class CustomerPaymentStage2Tests
             source,
             StringComparison.Ordinal);
         Assert.Contains("data-payment-status-poller", source, StringComparison.Ordinal);
+        Assert.Contains("Model.ShouldPoll", source, StringComparison.Ordinal);
         Assert.Contains("aria-live=\"polite\"", source, StringComparison.Ordinal);
         Assert.Contains("Obnovit stav ručně", source, StringComparison.Ordinal);
         Assert.DoesNotContain("<script>", source, StringComparison.Ordinal);
@@ -660,17 +719,27 @@ public sealed class CustomerPaymentStage2Tests
 
         public int ResolveCalls { get; private set; }
 
+        public int InitializeCalls { get; private set; }
+
+        public int VerifyCalls { get; private set; }
+
         public void EnsureAvailable() => throw new NotSupportedException();
 
         public Task<PaymentProviderInitializationResult> InitializeAsync(
             PaymentProviderInitializationRequest request,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default)
+        {
+            InitializeCalls++;
             throw new NotSupportedException();
+        }
 
         public Task VerifyAsync(
             PaymentProviderInitializationResult candidate,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default)
+        {
+            VerifyCalls++;
             throw new NotSupportedException();
+        }
 
         public Uri? ResolveTrustedProcessUri(
             PaymentProvider provider,

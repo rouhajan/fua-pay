@@ -206,6 +206,199 @@ public sealed class PaymentReconciliationPersistenceTests :
     }
 
     [Fact]
+    public async Task ScheduleFromReturnAsync_FirstReturnAcceleratesFutureScheduledRecovery()
+    {
+        var payment = CreatePendingPayment("payfuture00001");
+        var scheduledAt = CreatedAt.AddMinutes(10);
+        var attemptedAt = CreatedAt.AddMinutes(11);
+        var futureAttemptAt = CreatedAt.AddMinutes(20);
+        var returnedAt = CreatedAt.AddMinutes(12);
+
+        try
+        {
+            await AddPaymentAsync(payment);
+            await ScheduleLongOpenAsync(payment, scheduledAt);
+
+            var claim = Assert.Single(
+                await ClaimAsync(scheduledAt, TimeSpan.FromMinutes(2)));
+
+            using (var rescheduleScope = _factory.Services.CreateScope())
+            {
+                Assert.True(
+                    await rescheduleScope.ServiceProvider
+                        .GetRequiredService<ICsobPaymentRecoveryRepository>()
+                        .RescheduleAsync(
+                            claim,
+                            attemptedAt,
+                            futureAttemptAt,
+                            gatewayPaymentStatus: 2,
+                            resultCode: 100,
+                            error: "provider still pending"));
+            }
+
+            var observation = Assert.IsType<CsobBrowserReturnObservation>(
+                await ScheduleReturnAsync(
+                    payment.ProviderReference!,
+                    returnedAt));
+            var recovery = await LoadRecoveryAsync(payment.Id);
+
+            Assert.True(observation.IsFirstObservation);
+            Assert.Equal(
+                (int)PaymentReconciliationState.Scheduled,
+                recovery.State);
+            Assert.Equal(returnedAt, recovery.NextAttemptAt);
+            Assert.Equal(1, recovery.AttemptCount);
+            Assert.Equal(attemptedAt, recovery.LastAttemptAt);
+            Assert.Equal(2, recovery.LastGatewayPaymentStatus);
+            Assert.Equal(100, recovery.LastResultCode);
+            Assert.Equal("provider still pending", recovery.LastError);
+
+            var acceleratedClaim = Assert.Single(
+                await ClaimAsync(returnedAt, TimeSpan.FromMinutes(2)));
+            Assert.Equal(payment.Id, acceleratedClaim.PaymentId);
+            Assert.Equal(1, acceleratedClaim.AttemptCount);
+        }
+        finally
+        {
+            await DeletePaymentAsync(payment.Id);
+        }
+    }
+
+    [Fact]
+    public async Task ScheduleFromReturnAsync_DoesNotPostponeEarlierDueTimeOrDuplicate()
+    {
+        var payment = CreatePendingPayment("payearlier0001");
+        var scheduledAt = CreatedAt.AddMinutes(10);
+        var returnedAt = CreatedAt.AddMinutes(12);
+
+        try
+        {
+            await AddPaymentAsync(payment);
+            await ScheduleLongOpenAsync(payment, scheduledAt);
+
+            var first = Assert.IsType<CsobBrowserReturnObservation>(
+                await ScheduleReturnAsync(
+                    payment.ProviderReference!,
+                    returnedAt));
+            var duplicate = Assert.IsType<CsobBrowserReturnObservation>(
+                await ScheduleReturnAsync(
+                    payment.ProviderReference!,
+                    returnedAt.AddMinutes(5)));
+            var recovery = await LoadRecoveryAsync(payment.Id);
+
+            Assert.True(first.IsFirstObservation);
+            Assert.False(duplicate.IsFirstObservation);
+            Assert.Equal(scheduledAt, recovery.NextAttemptAt);
+            Assert.Equal(returnedAt, recovery.LastBrowserReturnAt);
+            Assert.Equal(
+                (int)PaymentReconciliationState.Scheduled,
+                recovery.State);
+            Assert.Equal(0, recovery.AttemptCount);
+        }
+        finally
+        {
+            await DeletePaymentAsync(payment.Id);
+        }
+    }
+
+    [Fact]
+    public async Task ScheduleFromReturnAsync_DoesNotRewriteActiveLeaseScheduling()
+    {
+        var payment = CreatePendingPayment("payleased00001");
+        var scheduledAt = CreatedAt.AddMinutes(10);
+        var leaseDuration = TimeSpan.FromMinutes(3);
+        var returnedAt = CreatedAt.AddMinutes(11);
+
+        try
+        {
+            await AddPaymentAsync(payment);
+            await ScheduleLongOpenAsync(payment, scheduledAt);
+            var claim = Assert.Single(
+                await ClaimAsync(scheduledAt, leaseDuration));
+
+            var observation = Assert.IsType<CsobBrowserReturnObservation>(
+                await ScheduleReturnAsync(
+                    payment.ProviderReference!,
+                    returnedAt));
+            var recovery = await LoadRecoveryAsync(payment.Id);
+
+            Assert.True(observation.IsFirstObservation);
+            Assert.Equal(
+                (int)PaymentReconciliationState.Leased,
+                recovery.State);
+            Assert.Equal(scheduledAt, recovery.NextAttemptAt);
+            Assert.Equal(claim.LeaseToken, recovery.LeaseToken);
+            Assert.Equal(scheduledAt + leaseDuration, recovery.LeaseExpiresAt);
+            Assert.Equal(0, recovery.AttemptCount);
+        }
+        finally
+        {
+            await DeletePaymentAsync(payment.Id);
+        }
+    }
+
+    [Theory]
+    [InlineData(PaymentReconciliationState.Completed)]
+    [InlineData(PaymentReconciliationState.RequiresAttention)]
+    public async Task ScheduleFromReturnAsync_DoesNotReopenClosedRecovery(
+        PaymentReconciliationState terminalState)
+    {
+        var providerReference = terminalState ==
+            PaymentReconciliationState.Completed
+                ? "payterminal001"
+                : "payterminal002";
+        var payment = CreatePendingPayment(providerReference);
+        var scheduledAt = CreatedAt.AddMinutes(10);
+        var attemptedAt = CreatedAt.AddMinutes(11);
+
+        try
+        {
+            await AddPaymentAsync(payment);
+            await ScheduleLongOpenAsync(payment, scheduledAt);
+            var claim = Assert.Single(
+                await ClaimAsync(scheduledAt, TimeSpan.FromMinutes(2)));
+
+            using (var transitionScope = _factory.Services.CreateScope())
+            {
+                var repository = transitionScope.ServiceProvider
+                    .GetRequiredService<ICsobPaymentRecoveryRepository>();
+                var transitioned = terminalState ==
+                    PaymentReconciliationState.Completed
+                        ? await repository.MarkCompletedAsync(
+                            claim,
+                            attemptedAt,
+                            gatewayPaymentStatus: 7,
+                            resultCode: 0)
+                        : await repository.MarkRequiresAttentionAsync(
+                            claim,
+                            attemptedAt,
+                            gatewayPaymentStatus: 2,
+                            resultCode: 100,
+                            error: "manual review");
+                Assert.True(transitioned);
+            }
+
+            var observation = Assert.IsType<CsobBrowserReturnObservation>(
+                await ScheduleReturnAsync(
+                    payment.ProviderReference!,
+                    attemptedAt.AddMinutes(1)));
+            var recovery = await LoadRecoveryAsync(payment.Id);
+
+            Assert.True(observation.IsFirstObservation);
+            Assert.Equal((int)terminalState, recovery.State);
+            Assert.Equal(1, recovery.AttemptCount);
+            Assert.Empty(
+                await ClaimAsync(
+                    attemptedAt.AddHours(1),
+                    TimeSpan.FromMinutes(2)));
+        }
+        finally
+        {
+            await DeletePaymentAsync(payment.Id);
+        }
+    }
+
+    [Fact]
     public async Task ScheduleFromReturnAsync_InconsistentPaymentReferenceRelationshipFailsClosed()
     {
         var firstPayment = CreatePendingPayment("payrelation0001");
@@ -648,6 +841,60 @@ public sealed class PaymentReconciliationPersistenceTests :
                 leaseDuration,
                 limit: 20);
     }
+
+    private async Task ScheduleLongOpenAsync(
+        Payment payment,
+        DateTimeOffset scheduledAt)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var scheduled = await scope.ServiceProvider
+            .GetRequiredService<ICsobPaymentRecoveryRepository>()
+            .ScheduleLongOpenPaymentsAsync(
+                pendingBefore: payment.UpdatedAt.AddSeconds(1),
+                scheduledAt,
+                limit: 20);
+
+        Assert.Equal(1, scheduled);
+    }
+
+    private async Task<RecoverySnapshot> LoadRecoveryAsync(
+        Guid paymentId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+
+        return await dbContext.Database
+            .SqlQuery<RecoverySnapshot>(
+                $"""
+                SELECT
+                    state AS "State",
+                    attempt_count AS "AttemptCount",
+                    next_attempt_at AS "NextAttemptAt",
+                    lease_token AS "LeaseToken",
+                    lease_expires_at AS "LeaseExpiresAt",
+                    last_attempt_at AS "LastAttemptAt",
+                    last_browser_return_at AS "LastBrowserReturnAt",
+                    last_gateway_payment_status AS "LastGatewayPaymentStatus",
+                    last_result_code AS "LastResultCode",
+                    last_error AS "LastError"
+                FROM payments.csob_payment_reconciliation
+                WHERE payment_id = {paymentId}
+                """)
+            .SingleAsync();
+    }
+
+    private sealed record RecoverySnapshot(
+        int State,
+        int AttemptCount,
+        DateTimeOffset NextAttemptAt,
+        Guid? LeaseToken,
+        DateTimeOffset? LeaseExpiresAt,
+        DateTimeOffset? LastAttemptAt,
+        DateTimeOffset? LastBrowserReturnAt,
+        int? LastGatewayPaymentStatus,
+        int? LastResultCode,
+        string? LastError);
 
     private async Task<int> RegisterStaleInProgressAsync(
         DateTimeOffset staleBefore,
