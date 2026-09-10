@@ -332,6 +332,29 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             Assert.Single(fixture.AttemptRepository.Stored).State);
     }
 
+    [Fact]
+    public async Task ReturnAsync_RejectedReplayDoesNotCallGatewayAgain()
+    {
+        var fixture = new Fixture();
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 8,
+            resultCode: 150);
+
+        var first = await fixture.Service.ReturnAsync(fixture.Command);
+        var replay = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.ReverseRejected,
+            first.Outcome);
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.ReverseRejected,
+            replay.Outcome);
+        Assert.True(first.ReverseRequestSent);
+        Assert.False(replay.ReverseRequestSent);
+        Assert.Equal(1, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+    }
+
     [Theory]
     [InlineData(0, 7)]
     [InlineData(0, 8)]
