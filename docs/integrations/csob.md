@@ -97,13 +97,39 @@ Po úspěšné nové nebo bezpečně obnovené inicializaci a okamžitém podeps
 `Pending` platbu a znovu ověřuje persistovanou URI stejnou provider hranicí před
 zobrazením odkazu. Browser/form/query vstup cíl redirectu neurčuje.
 
-Na stagingu byl 2026-09-11 při čerstvém single-click testu přímé
-CardJob platby jednoznačně reprodukován browserový defekt: server po úspěšné inicializaci vrátil `302` se
-správnou integrační `payment/process` URI, ale Chrome přechod zablokoval kvůli
-globálnímu CSP `form-action 'self'`. Hotfix při aktivním ČSOB provideru zachovává
-`'self'` a přidává pouze přesný origin z fail-closed validovaného
-`CsobGatewayConfiguration.ApiBaseUri`; bez aktivního ČSOB zůstává povoleno jen
-`'self'`. Živé ověření single-click přechodu proběhne až po nasazení hotfixu.
+Staging release `f2c85083c994f657ee70da704413f0c8407b90df` prokázal při
+čerstvém single-click testu přímé CardJob platby `PLT-2026-000005` tento
+standardní browserový tok:
+
+```text
+FUA Pay
+→ HTTP 302
+→ ČSOB payment/process API origin
+→ HTTP 303
+→ ČSOB payment-page origin
+```
+
+První CSP hotfix umožnil Chromu následovat `302` na integrační
+`https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/...`. ČSOB pak
+vrátilo `303` s `Location: https://iplatebnibrana.csob.cz/pay/...`, ale druhou
+navigaci Chrome zablokoval, protože nasazené `form-action` obsahovalo jen
+`'self'` a integrační API origin.
+
+ČSOB browser trust boundary proto při aktivním provideru obsahuje právě dva
+pevné originy pro dané prostředí:
+
+- Integration: `https://iapi.iplatebnibrana.csob.cz` a
+  `https://iplatebnibrana.csob.cz`;
+- Production: `https://api.platebnibrana.csob.cz` a
+  `https://platebnibrana.csob.cz`.
+
+Bez aktivního ČSOB provideru zůstává `form-action 'self'`. Originy vlastní
+fail-closed `CsobGatewayConfiguration`; neodvozují se z browser vstupu ani z
+runtime `Location`. Produkční dvojici potvrzuje oficiální ČSOB eAPI dokumentace
+[`payment/process`](https://github.com/csob/paymentgateway/wiki/Basic-Methods#paymentprocess-method),
+která popisuje browserový GET na produkční API a následný `303` na produkční
+payment page. Tato úplná hranice zatím není nasazena, takže nový single-click
+flow ještě není live PASS.
 
 Je správně, že lokální `Pending` záznam může existovat ještě před zadáním karty:
 v té chvíli už byla platba skutečně založena u ČSOB a má `payId`. Opuštěné

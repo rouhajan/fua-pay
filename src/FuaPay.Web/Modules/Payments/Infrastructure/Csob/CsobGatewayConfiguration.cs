@@ -13,11 +13,26 @@ public sealed record CsobGatewayConfiguration(
     public static readonly Uri IntegrationApiBaseUri =
         new("https://iapi.iplatebnibrana.csob.cz/");
 
+    public static readonly Uri IntegrationPaymentPageBaseUri =
+        new("https://iplatebnibrana.csob.cz/");
+
     public static readonly Uri SandboxApiBaseUri =
         IntegrationApiBaseUri;
 
     public static readonly Uri ProductionApiBaseUri =
         new("https://api.platebnibrana.csob.cz/");
+
+    public static readonly Uri ProductionPaymentPageBaseUri =
+        new("https://platebnibrana.csob.cz/");
+
+    public IReadOnlyList<Uri> BrowserFormActionOrigins =>
+        ApiBaseUri == IntegrationApiBaseUri
+            ? [IntegrationApiBaseUri, IntegrationPaymentPageBaseUri]
+            : ApiBaseUri == ProductionApiBaseUri
+                ? [ProductionApiBaseUri, ProductionPaymentPageBaseUri]
+                : throw new InvalidOperationException(
+                    "ČSOB browser form-action hranice není definována " +
+                    "pro nakonfigurované API prostředí.");
 
     public static CsobGatewayConfiguration Resolve(
         IConfiguration configuration,
