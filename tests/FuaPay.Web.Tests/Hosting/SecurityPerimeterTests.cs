@@ -448,6 +448,19 @@ public sealed class SecurityPerimeterTests :
             "base-uri 'none'",
             contentSecurityPolicy,
             StringComparison.Ordinal);
+        Assert.Equal(
+            "style-src 'self'",
+            GetContentSecurityPolicyDirective(
+                acceptedResponse,
+                "style-src"));
+        Assert.DoesNotContain(
+            "unsafe-inline",
+            contentSecurityPolicy,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "unsafe-hashes",
+            contentSecurityPolicy,
+            StringComparison.Ordinal);
 
         var hsts =
             GetSingleHeader(
