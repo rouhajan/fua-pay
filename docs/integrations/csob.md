@@ -1,6 +1,6 @@
 # ČSOB Payment Gateway eAPI 1.9
 
-Status: 2026-09-09
+Status: 2026-09-11
 
 FUA Pay používá ČSOB jako provider adaptér nad interním provider-neutral modelem
 platby. Browserový návrat nikdy není finanční autorita; autoritativní stav se
@@ -96,6 +96,14 @@ Po úspěšné nové nebo bezpečně obnovené inicializaci a okamžitém podeps
 `payment/process` URI. Detail platby zůstává recovery cesta pro již existující
 `Pending` platbu a znovu ověřuje persistovanou URI stejnou provider hranicí před
 zobrazením odkazu. Browser/form/query vstup cíl redirectu neurčuje.
+
+Na stagingu byl 2026-09-11 při čerstvém single-click testu přímé
+CardJob platby jednoznačně reprodukován browserový defekt: server po úspěšné inicializaci vrátil `302` se
+správnou integrační `payment/process` URI, ale Chrome přechod zablokoval kvůli
+globálnímu CSP `form-action 'self'`. Hotfix při aktivním ČSOB provideru zachovává
+`'self'` a přidává pouze přesný origin z fail-closed validovaného
+`CsobGatewayConfiguration.ApiBaseUri`; bez aktivního ČSOB zůstává povoleno jen
+`'self'`. Živé ověření single-click přechodu proběhne až po nasazení hotfixu.
 
 Je správně, že lokální `Pending` záznam může existovat ještě před zadáním karty:
 v té chvíli už byla platba skutečně založena u ČSOB a má `payId`. Opuštěné
