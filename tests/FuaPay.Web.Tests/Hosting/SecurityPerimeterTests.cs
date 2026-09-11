@@ -53,6 +53,19 @@ public sealed class SecurityPerimeterTests :
     }
 
     [Fact]
+    public async Task PublicLayout_DoesNotReferenceUnproducedScopedCssBundle()
+    {
+        using var client = CreateClient(_factory);
+        using var response = await client.GetAsync("/");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.DoesNotContain(
+            "/FuaPay.Web.styles.css",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task UnannotatedSignOutPage_WithoutAuthentication_IsProtectedByFallbackPolicy()
     {
         using var client = CreateClient(_factory);
