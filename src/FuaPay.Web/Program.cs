@@ -64,7 +64,10 @@ var paymentProviderSelection =
         csobGatewayConfiguration.Enabled);
 var formActionSources =
     paymentProviderSelection.Provider == PaymentProvider.Csob
-        ? $"'self' {csobGatewayConfiguration.ApiBaseUri.GetLeftPart(UriPartial.Authority)}"
+        ? "'self' " + string.Join(
+            ' ',
+            csobGatewayConfiguration.BrowserFormActionOrigins.Select(
+                uri => uri.GetLeftPart(UriPartial.Authority)))
         : "'self'";
 var csobReconciliationConfiguration =
     CsobReconciliationConfiguration.Resolve(

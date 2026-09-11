@@ -7,6 +7,34 @@ namespace FuaPay.Web.Tests.Modules.Payments.Infrastructure.Csob;
 
 public sealed class CsobGatewayConfigurationTests
 {
+    [Theory]
+    [InlineData(
+        "Staging",
+        "https://iapi.iplatebnibrana.csob.cz/",
+        "https://iplatebnibrana.csob.cz/")]
+    [InlineData(
+        "Production",
+        "https://api.platebnibrana.csob.cz/",
+        "https://platebnibrana.csob.cz/")]
+    public void Resolve_UsesExactOfficialBrowserFormActionBoundary(
+        string environmentName,
+        string expectedApiOrigin,
+        string expectedPaymentPageOrigin)
+    {
+        var configuration = new ConfigurationBuilder().Build();
+
+        var result = CsobGatewayConfiguration.Resolve(
+            configuration,
+            environmentName);
+
+        Assert.Equal(
+            [
+                new Uri(expectedApiOrigin),
+                new Uri(expectedPaymentPageOrigin)
+            ],
+            result.BrowserFormActionOrigins);
+    }
+
     [Fact]
     public void Resolve_DisabledConfigurationDoesNotRequireKeys()
     {

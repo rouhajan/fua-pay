@@ -346,13 +346,13 @@ public sealed class SecurityPerimeterTests :
     [Theory]
     [InlineData(
         "Staging",
-        "https://iapi.iplatebnibrana.csob.cz")]
+        "form-action 'self' https://iapi.iplatebnibrana.csob.cz https://iplatebnibrana.csob.cz")]
     [InlineData(
         "Production",
-        "https://api.platebnibrana.csob.cz")]
-    public async Task ActiveCsobProvider_FormActionAllowsOnlySelfAndValidatedApiOrigin(
+        "form-action 'self' https://api.platebnibrana.csob.cz https://platebnibrana.csob.cz")]
+    public async Task ActiveCsobProvider_FormActionUsesExactValidatedBrowserBoundary(
         string environmentName,
-        string expectedOrigin)
+        string expectedDirective)
     {
         using var externalFiles =
             new TemporaryDirectory("fua-pay-csp-csob");
@@ -378,7 +378,7 @@ public sealed class SecurityPerimeterTests :
         using var response = await client.GetAsync("/");
 
         Assert.Equal(
-            $"form-action 'self' {expectedOrigin}",
+            expectedDirective,
             GetContentSecurityPolicyDirective(
                 response,
                 "form-action"));
