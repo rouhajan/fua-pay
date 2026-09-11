@@ -13,6 +13,7 @@ using FuaPay.Web.Modules.Credits.Web.PrintPayments;
 using FuaPay.Web.Modules.Jobs;
 using FuaPay.Web.Modules.Notifications;
 using FuaPay.Web.Modules.Payments;
+using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
 using FuaPay.Web.Modules.Receipts;
 using FuaPay.Web.Modules.Receipts.Application;
@@ -61,6 +62,10 @@ var paymentProviderSelection =
         builder.Configuration,
         runtimeFeatures,
         csobGatewayConfiguration.Enabled);
+var formActionSources =
+    paymentProviderSelection.Provider == PaymentProvider.Csob
+        ? $"'self' {csobGatewayConfiguration.ApiBaseUri.GetLeftPart(UriPartial.Authority)}"
+        : "'self'";
 var csobReconciliationConfiguration =
     CsobReconciliationConfiguration.Resolve(
         builder.Configuration,
@@ -192,7 +197,7 @@ builder.Services
         csobReconciliationConfiguration,
         activateProviderInitiator:
             paymentProviderSelection.Provider ==
-            FuaPay.Web.Modules.Payments.Domain.PaymentProvider.Csob)
+            PaymentProvider.Csob)
     .AddNotificationsModule()
     .AddReportingModule()
     .AddDevelopmentData(
@@ -304,7 +309,7 @@ app.Use(
         context.Response.Headers["Content-Security-Policy"] =
             "default-src 'self'; " +
             "base-uri 'none'; " +
-            "form-action 'self'; " +
+            $"form-action {formActionSources}; " +
             "frame-ancestors 'none'; " +
             "img-src 'self' data:; " +
             "object-src 'none'; " +

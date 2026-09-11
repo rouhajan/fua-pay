@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
@@ -16,6 +17,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace FuaPay.Web.Tests.Hosting;
@@ -329,6 +331,60 @@ public sealed class SecurityPerimeterTests :
     }
 
     [Fact]
+    public async Task CsobDisabled_FormActionAllowsOnlySelf()
+    {
+        using var client = CreateClient(_factory);
+        using var response = await client.GetAsync("/");
+
+        Assert.Equal(
+            "form-action 'self'",
+            GetContentSecurityPolicyDirective(
+                response,
+                "form-action"));
+    }
+
+    [Theory]
+    [InlineData(
+        "Staging",
+        "https://iapi.iplatebnibrana.csob.cz")]
+    [InlineData(
+        "Production",
+        "https://api.platebnibrana.csob.cz")]
+    public async Task ActiveCsobProvider_FormActionAllowsOnlySelfAndValidatedApiOrigin(
+        string environmentName,
+        string expectedOrigin)
+    {
+        using var externalFiles =
+            new TemporaryDirectory("fua-pay-csp-csob");
+        var privateKeyPath = Path.Combine(
+            externalFiles.Path,
+            "merchant.key");
+        var publicKeyPath = Path.Combine(
+            externalFiles.Path,
+            "gateway.pub");
+        WriteTestCsobKeys(privateKeyPath, publicKeyPath);
+
+        using var factory =
+            new ConfiguredWebApplicationFactory(
+                environmentName,
+                CreateCsobSettings(
+                    environmentName,
+                    externalFiles.Path,
+                    privateKeyPath,
+                    publicKeyPath));
+        using var client = CreateClient(
+            factory,
+            new Uri("https://fuapay.example.test"));
+        using var response = await client.GetAsync("/");
+
+        Assert.Equal(
+            $"form-action 'self' {expectedOrigin}",
+            GetContentSecurityPolicyDirective(
+                response,
+                "form-action"));
+    }
+
+    [Fact]
     public async Task NonDevelopmentResponse_UsesHostFilteringAndSecurityHeaders()
     {
         using var keyRing =
@@ -428,6 +484,76 @@ public sealed class SecurityPerimeterTests :
                 "Username=unused;" +
                 "Password=unused"
         };
+    }
+
+    private static IReadOnlyDictionary<string, string?>
+        CreateCsobSettings(
+            string environmentName,
+            string keyRingPath,
+            string privateKeyPath,
+            string publicKeyPath)
+    {
+        var isProduction = Environments.Production.Equals(
+            environmentName,
+            StringComparison.OrdinalIgnoreCase);
+
+        return new Dictionary<string, string?>
+        {
+            ["AllowedHosts"] = "fuapay.example.test",
+            ["DataProtection:KeyRingPath"] = keyRingPath,
+            ["ConnectionStrings:FuaPay"] =
+                "Host=localhost;Database=unused;" +
+                "Username=unused;Password=unused",
+            ["Entra:Enabled"] = isProduction.ToString(),
+            ["Entra:TenantId"] =
+                "11111111-1111-1111-1111-111111111111",
+            ["Entra:ClientId"] =
+                "22222222-2222-2222-2222-222222222222",
+            ["Entra:ClientSecret"] = "test-only-secret",
+            ["Payments:Provider"] = "Csob",
+            ["Csob:Enabled"] = "true",
+            ["Csob:ApiBaseUrl"] = isProduction
+                ? "https://api.platebnibrana.csob.cz/"
+                : "https://iapi.iplatebnibrana.csob.cz/",
+            ["Csob:MerchantId"] = "M123456789",
+            ["Csob:PrivateKeyPath"] = privateKeyPath,
+            ["Csob:GatewayPublicKeyPath"] = publicKeyPath,
+            ["Csob:ReturnUrl"] =
+                "https://fuapay.example.test/payments/csob/return"
+        };
+    }
+
+    private static string GetContentSecurityPolicyDirective(
+        HttpResponseMessage response,
+        string directiveName)
+    {
+        var policy = GetSingleHeader(
+            response,
+            "Content-Security-Policy");
+
+        return Assert.Single(
+            policy.Split(
+                ';',
+                StringSplitOptions.RemoveEmptyEntries |
+                StringSplitOptions.TrimEntries),
+            directive => directive.StartsWith(
+                $"{directiveName} ",
+                StringComparison.Ordinal));
+    }
+
+    private static void WriteTestCsobKeys(
+        string privateKeyPath,
+        string publicKeyPath)
+    {
+        using var merchant = RSA.Create(2048);
+        using var gateway = RSA.Create(2048);
+
+        File.WriteAllText(
+            privateKeyPath,
+            merchant.ExportPkcs8PrivateKeyPem());
+        File.WriteAllText(
+            publicKeyPath,
+            gateway.ExportSubjectPublicKeyInfoPem());
     }
 
     private static string GetSingleHeader(
