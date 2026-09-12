@@ -63,7 +63,8 @@ public sealed class CsobGatewaySignature :
                 HashAlgorithmName.SHA256,
                 RSASignaturePadding.Pkcs1);
         }
-        catch (FormatException)
+        catch (Exception exception)
+            when (exception is FormatException or CryptographicException)
         {
             return false;
         }

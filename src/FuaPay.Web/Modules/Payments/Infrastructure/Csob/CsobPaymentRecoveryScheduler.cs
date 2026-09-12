@@ -31,19 +31,22 @@ public sealed class CsobPaymentRecoveryScheduler :
     }
 
     public async Task<Guid> ScheduleReturnAsync(
-        string providerReference,
+        CsobVerifiedPaymentReturn verifiedReturn,
         CancellationToken cancellationToken = default)
     {
-        var normalized = CsobPayId.NormalizeBrowserInput(
-            providerReference,
-            nameof(providerReference));
+        ArgumentNullException.ThrowIfNull(verifiedReturn);
+
+        _ = CsobPayId.RequireCanonical(
+            verifiedReturn.PayId,
+            nameof(verifiedReturn));
+
         var observedAt = _timeProvider.GetUtcNow();
         return await _transaction.ExecuteAsync(
             async ct =>
             {
                 var observation =
                     await _repository.ScheduleFromReturnAsync(
-                        normalized,
+                        verifiedReturn,
                         observedAt,
                         ct);
 
@@ -51,7 +54,7 @@ public sealed class CsobPaymentRecoveryScheduler :
                 {
                     throw new PaymentProviderReferenceNotFoundException(
                         PaymentProvider.Csob,
-                        normalized);
+                        verifiedReturn.PayId);
                 }
 
                 if (observation.IsFirstObservation)
@@ -65,6 +68,22 @@ public sealed class CsobPaymentRecoveryScheduler :
                             $"Pro platbu {observation.PaymentId} byl poprvé " +
                             "zaznamenán návrat z ČSOB; finanční stav se ověří " +
                             "serverovou reconciliation.",
+                            observedAt),
+                        ct);
+                }
+
+                if (observation.IsFirstVerifiedExpiryObservation)
+                {
+                    await _auditTrail.WriteAsync(
+                        AuditEntry.ForProcess(
+                            "payment-provider",
+                            "payment.reconciliation.verified-expiry-return-observed",
+                            "payment",
+                            observation.PaymentId.ToString(),
+                            $"Pro platbu {observation.PaymentId} byl " +
+                            "durabilně zaznamenán validně podepsaný návrat " +
+                            "ČSOB 130/6; finanční stav nadále určí až " +
+                            "serverová reconciliation.",
                             observedAt),
                         ct);
                 }

@@ -39,6 +39,25 @@ internal sealed class CsobPaymentRecoveryConfiguration :
                     "(last_browser_return_at IS NULL OR last_browser_return_at >= created_at) AND " +
                     "(completed_at IS NULL OR completed_at >= created_at)");
                 table.HasCheckConstraint(
+                    "ck_csob_reconciliation_verified_expiry_consistent",
+                    "(verified_expiry_return_dttm IS NULL AND " +
+                    "verified_expiry_result_code IS NULL AND " +
+                    "verified_expiry_payment_status IS NULL AND " +
+                    "verified_expiry_text_to_sign IS NULL AND " +
+                    "verified_expiry_signature IS NULL AND " +
+                    "verified_expiry_observed_at IS NULL) OR " +
+                    "(verified_expiry_return_dttm IS NOT NULL AND " +
+                    "length(verified_expiry_return_dttm) = 14 AND " +
+                    "verified_expiry_return_dttm ~ '^[0-9]{14}$' AND " +
+                    "verified_expiry_result_code = 130 AND " +
+                    "verified_expiry_payment_status = 6 AND " +
+                    "verified_expiry_text_to_sign IS NOT NULL AND " +
+                    "length(verified_expiry_text_to_sign) > 0 AND " +
+                    "verified_expiry_signature IS NOT NULL AND " +
+                    "length(verified_expiry_signature) > 0 AND " +
+                    "verified_expiry_observed_at IS NOT NULL AND " +
+                    "verified_expiry_observed_at >= created_at)");
+                table.HasCheckConstraint(
                     "ck_csob_reconciliation_lease_consistent",
                     "(state = 2 AND lease_token IS NOT NULL AND lease_expires_at IS NOT NULL) OR " +
                     "(state <> 2 AND lease_token IS NULL AND lease_expires_at IS NULL)");
@@ -76,6 +95,21 @@ internal sealed class CsobPaymentRecoveryConfiguration :
             .HasColumnName("last_attempt_at");
         builder.Property(item => item.LastBrowserReturnAt)
             .HasColumnName("last_browser_return_at");
+        builder.Property(item => item.VerifiedExpiryReturnDttm)
+            .HasColumnName("verified_expiry_return_dttm")
+            .HasMaxLength(14);
+        builder.Property(item => item.VerifiedExpiryResultCode)
+            .HasColumnName("verified_expiry_result_code");
+        builder.Property(item => item.VerifiedExpiryPaymentStatus)
+            .HasColumnName("verified_expiry_payment_status");
+        builder.Property(item => item.VerifiedExpiryTextToSign)
+            .HasColumnName("verified_expiry_text_to_sign")
+            .HasMaxLength(CsobVerifiedReturnEvidence.MaximumTextToSignLength);
+        builder.Property(item => item.VerifiedExpirySignature)
+            .HasColumnName("verified_expiry_signature")
+            .HasMaxLength(CsobVerifiedReturnEvidence.MaximumSignatureLength);
+        builder.Property(item => item.VerifiedExpiryObservedAt)
+            .HasColumnName("verified_expiry_observed_at");
         builder.Property(item => item.LastGatewayPaymentStatus)
             .HasColumnName("last_gateway_payment_status");
         builder.Property(item => item.LastResultCode)

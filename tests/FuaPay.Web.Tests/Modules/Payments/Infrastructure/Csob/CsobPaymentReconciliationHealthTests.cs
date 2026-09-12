@@ -147,7 +147,7 @@ public sealed class CsobPaymentReconciliationHealthTests
         ICsobPaymentRecoveryRepository
     {
         public Task<CsobBrowserReturnObservation?> ScheduleFromReturnAsync(
-            string providerReference,
+            CsobVerifiedPaymentReturn verifiedReturn,
             DateTimeOffset observedAt,
             CancellationToken cancellationToken = default) =>
             Task.FromResult<CsobBrowserReturnObservation?>(null);

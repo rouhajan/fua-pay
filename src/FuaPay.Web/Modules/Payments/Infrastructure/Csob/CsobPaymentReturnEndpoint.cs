@@ -29,10 +29,12 @@ public static class CsobPaymentReturnEndpoint
                 (
                     HttpContext context,
                     ICsobPaymentRecoveryScheduler scheduler,
+                    CsobPaymentReturnVerifier verifier,
                     CancellationToken cancellationToken) =>
                     HandleAsync(
                         context,
                         scheduler,
+                        verifier,
                         cancellationToken))
             .AllowAnonymous()
             .RequireRateLimiting(RateLimitPolicy);
@@ -41,15 +43,18 @@ public static class CsobPaymentReturnEndpoint
     public static async Task HandleAsync(
         HttpContext context,
         ICsobPaymentRecoveryScheduler scheduler,
+        CsobPaymentReturnVerifier verifier,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(scheduler);
+        ArgumentNullException.ThrowIfNull(verifier);
 
         context.Response.Headers["Cache-Control"] = "no-store";
         context.Response.Headers["Pragma"] = "no-cache";
 
-        string? payId;
+        IEnumerable<KeyValuePair<string, Microsoft.Extensions.Primitives.StringValues>>
+            parameters;
 
         if (HttpMethods.IsPost(context.Request.Method))
         {
@@ -85,7 +90,7 @@ public static class CsobPaymentReturnEndpoint
                     cancellationToken);
                 var form = QueryHelpers.ParseQuery(
                     Encoding.UTF8.GetString(body));
-                payId = form["payId"].FirstOrDefault();
+                parameters = form;
             }
             catch (RequestBodyTooLargeException)
             {
@@ -111,10 +116,10 @@ public static class CsobPaymentReturnEndpoint
         }
         else
         {
-            payId = context.Request.Query["payId"].FirstOrDefault();
+            parameters = context.Request.Query;
         }
 
-        if (string.IsNullOrWhiteSpace(payId))
+        if (!verifier.TryVerify(parameters, out var verifiedReturn))
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
@@ -125,7 +130,7 @@ public static class CsobPaymentReturnEndpoint
         try
         {
             paymentId = await scheduler.ScheduleReturnAsync(
-                payId,
+                verifiedReturn!,
                 cancellationToken);
         }
         catch (Exception exception)

@@ -1,6 +1,6 @@
 # ČSOB Payment Gateway eAPI 1.9
 
-Status: 2026-09-11
+Status: 2026-09-12
 
 FUA Pay používá ČSOB jako provider adaptér nad interním provider-neutral modelem
 platby. Browserový návrat nikdy není finanční autorita; autoritativní stav se
@@ -22,7 +22,7 @@ stejné provozní TODO neduplikovalo na více místech.
   čitelné účtem služby.
 - GET `echo`: ověřeno proti živému integračnímu prostředí.
 - POST `echo`: implementováno se stejným podpisem, ověřením odpovědi a časovým
-  oknem jako GET; živé integration ověření zatím nebylo provedeno.
+  oknem jako GET; živě ověřeno s `resultCode=0`.
 - Úspěšné integrační dobití kreditu 100 Kč: ověřeno 2026-09-07 a znovu
   2026-09-08.
 - Zrušení zákazníkem na bráně: ověřeno 2026-09-08; lokálně skončilo jako
@@ -47,12 +47,16 @@ lokální detail. FUA Pay nezobrazuje formulář karty a neukládá PAN, CVV/CVC
 expiraci ani 3-D Secure údaje.
 
 Return endpoint přijímá GET nebo malý `application/x-www-form-urlencoded` POST.
-Z browseru používá pouze `payId` jako podnět pro persistovanou reconciliation
-frontu. První return existující naplánovanou položku atomicky přitáhne nejvýše
-na čas pozorování; aktivní lease ani uzavřené recovery stavy znovu neotevírá.
-Částka, identita, účel ani browserový stav nejsou důkazem platby. Browser pouze
-urychluje server-side ověření; background worker vždy znovu volá podepsané
-`payment/status` a teprve jeho ověřený výsledek smí změnit finanční stav.
+Povolí pouze pole eAPI 1.9, odmítne chybějící, duplicitní, nekanonické nebo
+neznámé parametry a ověří jejich podpis v předepsaném pořadí, podpis brány a
+čerstvost `dttm`. Neplatný, pozměněný nebo starý return skončí bez naplánování.
+Ověřený return používá `payId` jen jako podnět pro persistovanou reconciliation
+frontu. Přesná kombinace `resultCode=130`, `paymentStatus=6` se pro stejné
+`payId` uloží jednou jako podpisová evidence; opakování ji nepřepisuje. Aktivní
+lease ani uzavřené recovery stavy return znovu neotevírá. Částka, identita, účel
+ani browserový stav nejsou důkazem platby. Browser pouze urychluje server-side
+ověření; background worker vždy znovu volá podepsané `payment/status` a teprve
+jeho ověřený výsledek smí změnit finanční stav.
 
 Ověřené stavy ČSOB se mapují do interního lifecycle. Úspěšné stavy mohou vstoupit
 pouze do jediné settlement služby; settlement, kredit/job, audit a outbox jsou
@@ -65,7 +69,10 @@ Podepsaná a čerstvá odpověď `payment/status` s přesnou kombinací
 `Expired` bez settlement/kredit/job efektu. Stejná odpověď umí bezpečně uzavřít
 i `Created` platbu pouze tehdy, když její nejasná inicializace obsahuje přesně
 stejnou persistovanou observed provider reference. Stav `6` s `resultCode=0`
-zůstává běžné `Failed`; všechny ostatní nenulové kombinace zůstávají
+zůstává běžné `Failed`, pokud pro stejnou platbu neexistuje durabilní, dříve
+ověřená browser-return evidence `130/6`. Jen v tomto úzkém případě pozdější
+autoritativní serverový status `0/6` potvrdí `Expired`. Return sám nikdy nespouští
+settlement ani finanční změnu. Všechny ostatní nenulové kombinace zůstávají
 `RequiresAttention`.
 
 ## Potvrzené UX poznatky z reálného integračního testu
@@ -89,6 +96,10 @@ přístupu/not-found nebo vyčerpání limitu; continuation link na ČSOB a ruč
 refresh zůstávají dostupné. Jde o post-return UX, nikoli důkaz živého ČSOB
 scénáře ani zdroj finančního rozhodnutí.
 
+Pending-only action container má explicitní `.form-actions[hidden]` pravidlo,
+takže po terminálním výsledku pollingu jeho `display:flex` nepřebije HTML
+`hidden`. Oprava je součástí aktuálního, zatím nenasazeného patchu.
+
 ### Přechod na platební bránu
 
 Po úspěšné nové nebo bezpečně obnovené inicializaci a okamžitém podepsaném
@@ -97,8 +108,8 @@ Po úspěšné nové nebo bezpečně obnovené inicializaci a okamžitém podeps
 `Pending` platbu a znovu ověřuje persistovanou URI stejnou provider hranicí před
 zobrazením odkazu. Browser/form/query vstup cíl redirectu neurčuje.
 
-Staging release `f2c85083c994f657ee70da704413f0c8407b90df` prokázal při
-čerstvém single-click testu přímé CardJob platby `PLT-2026-000005` tento
+Staging revision `768aec26c72bc77ca43d554c8e8bab20f60678b6` prokázala při
+čerstvém single-click testu přímé CardJob platby `PLT-2026-000006` tento
 standardní browserový tok:
 
 ```text
@@ -109,11 +120,10 @@ FUA Pay
 → ČSOB payment-page origin
 ```
 
-První CSP hotfix umožnil Chromu následovat `302` na integrační
-`https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/...`. ČSOB pak
-vrátilo `303` s `Location: https://iplatebnibrana.csob.cz/pay/...`, ale druhou
-navigaci Chrome zablokoval, protože nasazené `form-action` obsahovalo jen
-`'self'` a integrační API origin.
+Chrome následoval `302` na integrační
+`https://iapi.iplatebnibrana.csob.cz/api/v1.9/payment/process/...` a následné
+`303` na `https://iplatebnibrana.csob.cz/pay/...`. Úspěšný návrat se bez ručního
+F5 během několika sekund promítl do právě jedné `Succeeded` platby.
 
 ČSOB browser trust boundary proto při aktivním provideru obsahuje právě dva
 pevné originy pro dané prostředí:
@@ -128,8 +138,8 @@ fail-closed `CsobGatewayConfiguration`; neodvozují se z browser vstupu ani z
 runtime `Location`. Produkční dvojici potvrzuje oficiální ČSOB eAPI dokumentace
 [`payment/process`](https://github.com/csob/paymentgateway/wiki/Basic-Methods#paymentprocess-method),
 která popisuje browserový GET na produkční API a následný `303` na produkční
-payment page. Tato úplná hranice zatím není nasazena, takže nový single-click
-flow ještě není live PASS.
+payment page. Integrační dvojice je nasazena a celý single-click flow je live
+PASS; produkční provoz zůstává vypnutý.
 
 Je správně, že lokální `Pending` záznam může existovat ještě před zadáním karty:
 v té chvíli už byla platba skutečně založena u ČSOB a má `payId`. Opuštěné
@@ -173,8 +183,10 @@ vyžadující pozornost. Žádný z těchto stavů nenabídne nový reverse.
 ## Známé implementační mezery před production readiness
 
 Skutečné ČSOB `payment/reverse` pro plnou CardJob vratku je implementované nad
-provider-neutral persistence, ale živý bankovní aktivační scénář zatím nebyl
-proveden a zůstává nezaškrtnutý v readiness checklistu.
+provider-neutral persistence a živý scénář `resultCode=0`, `paymentStatus=5` byl
+ověřen 2026-09-12. Expired activation scénář se musí po nasazení aktuální opravy
+zopakovat; dosavadní test doběhl na starém runtime jako `Failed`, a proto není
+activation PASS.
 
 Refund není součástí povinného ČSOB production-activation checklistu. Zda má být
 in-app card refund součást první produkční verze FUA Pay, zůstává samostatné

@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-10
+Status: 2026-09-12
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu FUA Pay až k bezpečnému production cutoveru. Stabilní technický kontrakt je
@@ -25,6 +25,12 @@ https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environ
 - [x] Zrušení platby zákazníkem na bráně ověřeno 2026-09-08; lokální stav
       `Cancelled`.
 - [x] Reconciliation worker po deployi `Healthy`; public HTTPS smoke PASS.
+- [x] Staging revision `768aec26c72bc77ca43d554c8e8bab20f60678b6`
+      ověřila celý browser perimeter: CardJob `PLT-2026-000006` přešel jedním
+      kliknutím přes `payment/process` až na platební stránku a úspěšný návrat se
+      bez F5 během několika sekund promítl do právě jedné `Succeeded` platby.
+- [x] Živý `payment/reverse` této platby vrátil podepsané `resultCode=0`,
+      `paymentStatus=5`; provider attempt count byl přesně 1.
 - [ ] Production traffic není aktivní a nesmí být aktivován před dokončením
       zbytku tohoto checklistu.
 
@@ -54,6 +60,10 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
 - [x] Opravit expired lifecycle: oficiální kombinace ČSOB
       `resultCode=130`, `paymentStatus=6` musí bezpečně skončit jako interní
       `Expired`, nikoli `RequiresAttention` jen kvůli nenulovému resultCode.
+      Browser return se nejdřív striktně parsuje a kryptograficky ověří; pouze
+      přesná čerstvá kombinace `130/6` se durabilně uloží jako evidence pro stejné
+      `payId`. Finální přechod smí provést až pozdější podepsaný serverový
+      `payment/status`, který autoritativně potvrdí terminální stav `6`.
 - [x] Reconciliation konfigurace nesmí vyčerpat retry pokusy před
       `PaymentTtlSeconds` + provider/worker rezervou; výchozí konfigurace
       podporuje TTL 900 i 1800 sekund bez lokálního odvozování expirace.
@@ -70,9 +80,12 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
 
 Zaškrtnuté Stage 1 a Stage 2 položky výše označují implementaci a lokální
 automatizované pokrytí. Stage 2 používá owner-scoped read-only status handler a
-bounded polling post-return stavu (2 sekundy, nejvýše 30 pokusů); nejde o živý
-bankovní test. Živé POST echo již bylo ověřeno; bankovní expired scénář zůstává
-samostatně nezaškrtnutý v sekci C, dokud skutečně neproběhne.
+bounded polling post-return stavu (2 sekundy, nejvýše 30 pokusů). Happy-path byl
+živě ověřen na revision `768aec26c72bc77ca43d554c8e8bab20f60678b6` bez ručního
+F5. CSS pravidlo pro `[hidden]` nyní zároveň zajistí, že pending-only CTA po
+terminálním výsledku skutečně zmizí; tento patch zatím nebyl nasazen. Živé POST
+echo již bylo ověřeno; bankovní expired scénář zůstává samostatně nezaškrtnutý v
+sekci C, dokud po nasazení opravy skutečně neproběhne.
 
 Stage 3 ukládá `SettlementReturn` i Reverse attempt jako `InProgress` před
 externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy PUT
@@ -81,8 +94,8 @@ použije původní uložené request ID a po dokončení, zamítnutí nebo při
 nekonzistentním stavu nový reverse nenabídne. Přímá odpověď reverse rozlišuje
 `0/5`, dokumentované `150` s nereverzibilním stavem a všechny ostatní
 fail-closed kombinace; úspěšné statusové recovery `0/8`, `0/9` nebo `0/10`
-je samostatná autoritativní hranice. Lokální automatizované testy neznamenají
-provedení živého reverse; aktivační položka v sekci C proto zůstává otevřená.
+je samostatná autoritativní hranice. Živý reverse scénář byl na stagingu ověřen
+2026-09-12 výsledkem `0/5`.
 
 ### Rozhodnutí, která nejsou automaticky součástí tohoto passu
 
@@ -104,10 +117,13 @@ Podle oficiální wiki upravené 2026-06-30:
 - [x] Payment cancelled by customer: `resultCode=0`, `paymentStatus=3` a
       odpovídající lokální `Cancelled` ověřen uživatelským testem 2026-09-08.
 - [ ] Expired payment: po >=30 min ověřit `resultCode=130`, `paymentStatus=6` a
-      interní `Expired` bez finančního účinku.
-- [ ] Payment reversal: po úspěšné autorizaci zavolat `payment/reverse`, ověřit
+      interní `Expired` bez finančního účinku. CardJob `PLT-2026-000007` s TTL
+      1800 s skutečně přinesl browser return `130/6` po 1807,77 s a následný
+      serverový status `0/6`, ale starý runtime jej uzavřel jako `Failed`; nejde
+      tedy o activation PASS a scénář se musí po nasazení tohoto patchu zopakovat.
+- [x] Payment reversal: po úspěšné autorizaci zavolat `payment/reverse`, ověřit
       HTTP 200, podpis, `resultCode=0`, `paymentStatus=5` a odpovídající lokální
-      stav/return evidence.
+      stav/return evidence; ověřeno 2026-09-12 nad CardJob `PLT-2026-000006`.
 - [ ] V POS Merchant potvrdit provedení všech povinných scénářů a odeslat je ke
       kontrole ČSOB.
 - [ ] Počkat na potvrzení ČSOB, že production environment je aktivovaný.
@@ -117,7 +133,8 @@ Podle oficiální wiki upravené 2026-06-30:
 Tyto scénáře nejsou náhradou bankovního checklistu; ověřují naši aplikaci jako
 celek.
 
-- [ ] Přímá platba zakázky kartou: success -> zakázka uhrazena přesně jednou.
+- [x] Přímá platba zakázky kartou: CardJob `PLT-2026-000006` -> `Succeeded`,
+      zakázka uhrazena přesně jednou; ověřeno 2026-09-12.
 - [ ] Decline/failed scénář: bez kreditu/settlement efektu, srozumitelný stav.
 - [ ] Duplicate browser return: žádný druhý finanční efekt.
 - [ ] Lost browser return: zavřít/odpojit browser; worker z autoritativního

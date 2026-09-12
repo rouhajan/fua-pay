@@ -11,6 +11,7 @@ public sealed class CsobPaymentReconciliationService :
     private readonly ICsobGatewayClient _gatewayClient;
     private readonly IPaymentRepository _paymentRepository;
     private readonly IPaymentInitiationRepository _initiationRepository;
+    private readonly ICsobVerifiedReturnEvidenceReader _returnEvidenceReader;
     private readonly IPaymentSettlementService _settlementService;
     private readonly IApplicationTransaction _transaction;
     private readonly TimeProvider _timeProvider;
@@ -20,6 +21,7 @@ public sealed class CsobPaymentReconciliationService :
         ICsobGatewayClient gatewayClient,
         IPaymentRepository paymentRepository,
         IPaymentInitiationRepository initiationRepository,
+        ICsobVerifiedReturnEvidenceReader returnEvidenceReader,
         IPaymentSettlementService settlementService,
         IApplicationTransaction transaction,
         TimeProvider timeProvider,
@@ -28,6 +30,7 @@ public sealed class CsobPaymentReconciliationService :
         ArgumentNullException.ThrowIfNull(gatewayClient);
         ArgumentNullException.ThrowIfNull(paymentRepository);
         ArgumentNullException.ThrowIfNull(initiationRepository);
+        ArgumentNullException.ThrowIfNull(returnEvidenceReader);
         ArgumentNullException.ThrowIfNull(settlementService);
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(timeProvider);
@@ -36,6 +39,7 @@ public sealed class CsobPaymentReconciliationService :
         _gatewayClient = gatewayClient;
         _paymentRepository = paymentRepository;
         _initiationRepository = initiationRepository;
+        _returnEvidenceReader = returnEvidenceReader;
         _settlementService = settlementService;
         _transaction = transaction;
         _timeProvider = timeProvider;
@@ -142,6 +146,40 @@ public sealed class CsobPaymentReconciliationService :
                 gatewayStatus.ResultCode,
                 gatewayStatus.PaymentStatus,
                 cancellationToken);
+        }
+
+        if (gatewayStatus.PaymentStatus == 6)
+        {
+            var verifiedExpiry =
+                await _returnEvidenceReader.FindVerifiedExpiryAsync(
+                    payment.Id,
+                    normalizedPayId,
+                    cancellationToken);
+
+            if (verifiedExpiry is not null)
+            {
+                if (
+                    verifiedExpiry.ResultCode != 130 ||
+                    verifiedExpiry.PaymentStatus != 6 ||
+                    string.IsNullOrWhiteSpace(
+                        verifiedExpiry.TextToSign) ||
+                    string.IsNullOrWhiteSpace(
+                        verifiedExpiry.Signature))
+                {
+                    throw new CsobPaymentRequiresAttentionException(
+                        "Persistovaná evidence návratu ČSOB není konzistentní; lokální finanční stav zůstává beze změny.",
+                        gatewayStatus.PaymentStatus,
+                        gatewayStatus.ResultCode);
+                }
+
+                return await ChangeTerminalStateAsync(
+                    payment.Id,
+                    normalizedPayId,
+                    PaymentStatus.Expired,
+                    gatewayStatus.ResultCode,
+                    gatewayStatus.PaymentStatus,
+                    cancellationToken);
+            }
         }
 
         return gatewayStatus.PaymentStatus switch

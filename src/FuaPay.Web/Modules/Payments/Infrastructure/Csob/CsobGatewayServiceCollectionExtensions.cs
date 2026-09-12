@@ -70,6 +70,9 @@ public static class CsobGatewayServiceCollectionExtensions
         services.AddScoped<IPaymentReconciliationQueries>(
             provider => provider.GetRequiredService<
                 EfCsobPaymentRecoveryRepository>());
+        services.AddScoped<ICsobVerifiedReturnEvidenceReader>(
+            provider => provider.GetRequiredService<
+                EfCsobPaymentRecoveryRepository>());
         services.TryAddSingleton<CsobPaymentReconciliationHealth>();
 
         if (!configuration.Enabled)
@@ -107,6 +110,7 @@ public static class CsobGatewayServiceCollectionExtensions
         services.AddScoped<ICsobPaymentRecoveryScheduler>(
             provider => provider.GetRequiredService<
                 CsobPaymentRecoveryScheduler>());
+        services.AddSingleton<CsobPaymentReturnVerifier>();
         services.AddScoped<CsobPaymentRecoveryProcessor>();
         services.Replace(
             ServiceDescriptor.Scoped<

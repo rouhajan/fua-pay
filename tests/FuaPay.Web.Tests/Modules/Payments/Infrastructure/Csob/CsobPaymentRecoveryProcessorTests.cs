@@ -349,7 +349,7 @@ public sealed class CsobPaymentRecoveryProcessorTests
         public CompletedCall? Completed { get; private set; }
 
         public Task<CsobBrowserReturnObservation?> ScheduleFromReturnAsync(
-            string providerReference,
+            CsobVerifiedPaymentReturn verifiedReturn,
             DateTimeOffset observedAt,
             CancellationToken cancellationToken = default) =>
             Task.FromResult<CsobBrowserReturnObservation?>(null);

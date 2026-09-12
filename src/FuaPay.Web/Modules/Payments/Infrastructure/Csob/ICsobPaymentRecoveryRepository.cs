@@ -3,7 +3,7 @@ namespace FuaPay.Web.Modules.Payments.Infrastructure.Csob;
 public interface ICsobPaymentRecoveryRepository
 {
     Task<CsobBrowserReturnObservation?> ScheduleFromReturnAsync(
-        string providerReference,
+        CsobVerifiedPaymentReturn verifiedReturn,
         DateTimeOffset observedAt,
         CancellationToken cancellationToken = default);
 
@@ -60,9 +60,18 @@ public interface ICsobPaymentRecoveryRepository
         CancellationToken cancellationToken = default);
 }
 
+public interface ICsobVerifiedReturnEvidenceReader
+{
+    Task<CsobVerifiedReturnEvidence?> FindVerifiedExpiryAsync(
+        Guid paymentId,
+        string providerReference,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record CsobBrowserReturnObservation(
     Guid PaymentId,
-    bool IsFirstObservation);
+    bool IsFirstObservation,
+    bool IsFirstVerifiedExpiryObservation);
 
 public sealed record CsobPaymentRecoveryClaim(
     Guid PaymentId,

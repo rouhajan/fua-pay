@@ -64,6 +64,7 @@ public sealed class CsobGatewaySignatureTests : IDisposable
         Assert.True(signature.Verify(text, gatewaySignature));
         Assert.False(signature.Verify(text + "x", gatewaySignature));
         Assert.False(signature.Verify(text, "not-base64"));
+        Assert.False(signature.Verify(text, Convert.ToBase64String([1, 2, 3])));
     }
 
     public void Dispose()
