@@ -22,6 +22,43 @@ Print cesta nikdy nepoužívá login/JIT službu. Neznámá identita se nevytvo�
 e-mail ani profilové údaje se nepoužijí k párování, role ani profil se nemění a
 resolver nic nezapisuje.
 
+## Stav integrace k 2026-09-13
+
+FUA Pay strana kontraktu je implementovaná a security-hardened. Existují
+endpointy pro `Reserve`, read-only recovery lookup, `ResolutionRequired`,
+`Capture` a `Release`; finanční lifecycle je durabilní, idempotentní a používá
+stejný autoritativní výpočet disponibilního kreditu jako ostatní kreditní cesty.
+
+Tento stav ale neznamená, že je FUA Print end-to-end integrace nasazená. Feature
+je v committed konfiguraci stále defaultně vypnutá a na druhé straně musí být
+nejdřív ověřen skutečný CUPS/IPP lifecycle, zdroj ceny, stabilní `jobUuid`,
+durable recovery journal a způsob získání přesné uživatelské identity, kterou
+kontrakt očekává. Stávající FUA Pay API se kvůli tiskové autentizaci nemá obcházet
+přímým DB přístupem, e-mailem, hostname/MAC identitou ani důvěrou v klientem
+dodaný `ownerId`.
+
+Aktivační pořadí je záměrně konzervativní:
+
+1. read-only audit aktuálního FUA Print runtime a zdrojového kódu;
+2. zachovat stávající CUPS hold a command-broker security boundary, dokud není
+   explicitně nahrazena ověřenou migrací;
+3. opravit na FUA Print straně všechny potvrzené mezery nutné pro bezpečné
+   svázání mutation s očekávaným IPP `job-uuid` a pro durable recovery;
+4. potvrdit, jak FUA Print získá přesné `microsoft-entra + tid + oid`; tiskový
+   PIN/kód se do FUA Pay nepřidává jen jako domněnka;
+5. implementovat FUA Print klienta tohoto API s durable command IDs a recovery
+   podle `jobUuid`;
+6. teprve poté vytvořit jeden `printSourceId`, service credential a zapnout
+   `PrintPayments` na stagingu;
+7. end-to-end acceptance musí pokrýt dostatek/nedostatek kreditu, duplicate
+   request, ztracenou odpověď, restart, jistý úspěch, jisté selhání a nejasný
+   fyzický výsledek bez více než jednoho debitu.
+
+Ruční administrátorské navýšení kreditu je samostatný funding/operations tok a
+není důvod kvůli němu měnit PrintPayments API. FUA Print vždy pracuje se stejným
+aktuálním disponibilním kreditem bez ohledu na to, zda byl kredit dříve získán
+kartou nebo oprávněným administrativním zásahem.
+
 ## Service credential a konfigurace
 
 Feature je v committed konfiguraci defaultně vypnutá. Deployment secret store
