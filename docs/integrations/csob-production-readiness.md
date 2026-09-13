@@ -1,11 +1,13 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-12
+Status: 2026-09-13
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu FUA Pay až k bezpečnému production cutoveru. Stabilní technický kontrakt je
 v [`csob.md`](csob.md); staging deployment evidence je v
-[`../deployment/demo-staging.md`](../deployment/demo-staging.md).
+[`../deployment/demo-staging.md`](../deployment/demo-staging.md). Incident
+2026-09-13 je zachycen v
+[`csob-incident-2026-09-13.md`](csob-incident-2026-09-13.md).
 
 Oficiální ČSOB activation checklist:
 https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environment
@@ -16,7 +18,8 @@ https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environ
 - [x] Merchant public key registrován u ČSOB; request #7778.
 - [x] Merchant private key a integration gateway public key bezpečně nainstalovány
       mimo Git/release.
-- [x] GET `echo`: HTTP 200, validní podpis, `resultCode=0`.
+- [x] GET `echo`: historicky ověřeno HTTP 200, validní podpis, `resultCode=0`.
+- [x] POST `echo`: historicky ověřeno HTTP 200, validní podpis, `resultCode=0`.
 - [x] Staging používá živý ČSOB integration provider; simulované platby jsou
       vypnuté.
 - [x] Úspěšné dobití kreditu 100 Kč ověřeno 2026-09-07.
@@ -31,8 +34,22 @@ https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environ
       bez F5 během několika sekund promítl do právě jedné `Succeeded` platby.
 - [x] Živý `payment/reverse` této platby vrátil podepsané `resultCode=0`,
       `paymentStatus=5`; provider attempt count byl přesně 1.
+- [x] Expiry hardening z PR #44 je v `main` jako
+      `bc868276aead1b350033303ce8e80bc6ce9a5894`; lokální verification,
+      forward-only migrace a staging deployment mechanika prošly.
+- [ ] Live acceptance PR #44 je BLOCKED incidentem 2026-09-13: `payment/init` i
+      signed GET/POST `echo` pro integrační merchant timeoutují bez odpovědi.
+      Stejný `payment/init` timeout byl reprodukován i po code-only rollbacku na
+      předchozí live-accepted release `768aec26...`; malformed POST na stejný
+      `/echo` endpoint dostal HTTP 400 přibližně za 62 ms. Root cause zatím ČSOB
+      nepotvrdila.
 - [ ] Production traffic není aktivní a nesmí být aktivován před dokončením
       zbytku tohoto checklistu.
+
+Aktuální staging runtime je po řízeném code-only rollbacku znovu
+`768aec26c72bc77ca43d554c8e8bab20f60678b6`. Databázové schema se nevracelo a
+zůstává na 19 aplikovaných migracích včetně obou additive migrací PR #44. Tento
+stav je záměrný; detailní evidence je v incident dokumentu.
 
 ## B. Jeden cílený implementační pass před dalšími bankovními testy
 
@@ -82,10 +99,11 @@ Zaškrtnuté Stage 1 a Stage 2 položky výše označují implementaci a lokáln
 automatizované pokrytí. Stage 2 používá owner-scoped read-only status handler a
 bounded polling post-return stavu (2 sekundy, nejvýše 30 pokusů). Happy-path byl
 živě ověřen na revision `768aec26c72bc77ca43d554c8e8bab20f60678b6` bez ručního
-F5. CSS pravidlo pro `[hidden]` nyní zároveň zajistí, že pending-only CTA po
-terminálním výsledku skutečně zmizí; tento patch zatím nebyl nasazen. Živé POST
-echo již bylo ověřeno; bankovní expired scénář zůstává samostatně nezaškrtnutý v
-sekci C, dokud po nasazení opravy skutečně neproběhne.
+F5. CSS pravidlo pro `[hidden]` je v aktuálním `main`; release `bc868276...` byl
+2026-09-13 nasazen, ale incident na `payment/init` zabránil novému end-to-end
+return testu, takže tato konkrétní revize není live-accepted. Historické živé
+GET/POST echo PASS zůstávají validní evidencí implementace; aktuální availability
+je ale od incidentu samostatný externí blocker.
 
 Stage 3 ukládá `SettlementReturn` i Reverse attempt jako `InProgress` před
 externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy PUT
@@ -109,8 +127,9 @@ je samostatná autoritativní hranice. Živý reverse scénář byl na stagingu 
 
 Podle oficiální wiki upravené 2026-06-30:
 
-- [x] GET echo: HTTP 200, validní podpis, `resultCode=0`.
-- [x] POST echo: HTTP 200, validní podpis, `resultCode=0`; živě ověřeno na staging release `b057ecf84f33908bb5c6a20d5389c025a4e712ca`.
+- [x] GET echo: HTTP 200, validní podpis, `resultCode=0`; historicky live PASS.
+- [x] POST echo: HTTP 200, validní podpis, `resultCode=0`; živě ověřeno na
+      staging release `b057ecf84f33908bb5c6a20d5389c025a4e712ca`.
 - [x] Successful authorised payment: integrační testovací karta
       `4000007000010006`, budoucí expirace, CVC `100`; návrat na požadovanou
       stránku ověřen.
@@ -125,6 +144,9 @@ Podle oficiální wiki upravené 2026-06-30:
       podepsaný serverový status persistoval `0/6`; starý runtime skončil jako
       `Failed`, Job zůstal neuhrazený a settlement efekt nevznikl. Nejde o
       activation PASS a scénář se musí po budoucím nasazení opravy zopakovat.
+      Aktuálně je tento scénář BLOCKED incidentem 2026-09-13 a nesmí se znovu
+      spouštět, dokud signed `echo` neprokáže obnovenou dostupnost integration
+      eAPI.
 - [x] Payment reversal: po úspěšné autorizaci zavolat `payment/reverse`, ověřit
       HTTP 200, podpis, `resultCode=0`, `paymentStatus=5` a odpovídající lokální
       stav/return evidence; ověřeno 2026-09-12 nad CardJob `PLT-2026-000006`.
@@ -169,6 +191,16 @@ celek.
 - [ ] canonical HTTPS 200 + redirect smoke;
 - [ ] funkční payment smoke podle scope patchu;
 - [ ] starý release ponechat jako immediate rollback do dokončení acceptance.
+
+### Výsledek gate 2026-09-13 pro `bc868276...`
+
+Artifact, backup, dvě forward-only migrace, instalace, atomická aktivace,
+readiness, worker health, running-executable check a HTTPS smoke prošly. Funkční
+payment smoke neprošel kvůli opakovanému 30sekundovému `payment/init` timeoutu.
+Stejný timeout po rollbacku na `768aec26...` a současné signed echo timeouty
+znamenají, že release není odmítnut jako prokázaná kódová regrese, ale současně
+není live-accepted. Aktivní runtime proto zůstává code-only rollback
+`768aec26...` se schema na 19 migracích, dokud se externí blocker nevyřeší.
 
 ## F. Production cutover až po bankovním schválení
 
