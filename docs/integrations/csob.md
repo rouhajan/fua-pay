@@ -49,11 +49,15 @@ expiraci ani 3-D Secure údaje.
 Return endpoint přijímá GET nebo malý `application/x-www-form-urlencoded` POST.
 Povolí pouze pole eAPI 1.9, odmítne chybějící, duplicitní, nekanonické nebo
 neznámé parametry a ověří jejich podpis v předepsaném pořadí, podpis brány a
-čerstvost `dttm`. Neplatný, pozměněný nebo starý return skončí bez naplánování.
+čerstvost `dttm`. Přijímané okno ±5 minut je vlastní FUA replay-hardening policy,
+nikoli zde tvrzený požadavek ČSOB. Neplatný, pozměněný nebo starý return skončí
+bez naplánování.
 Ověřený return používá `payId` jen jako podnět pro persistovanou reconciliation
 frontu. Přesná kombinace `resultCode=130`, `paymentStatus=6` se pro stejné
-`payId` uloží jednou jako podpisová evidence; opakování ji nepřepisuje. Aktivní
-lease ani uzavřené recovery stavy return znovu neotevírá. Částka, identita, účel
+`payId` uloží jednou jako podpisová evidence; opakování ji nepřepisuje. Nová
+expiry evidence u uzavřeného recovery znovu naplánuje kontrolu. U aktivního lease
+zůstane vlastnictví lease zachováno, ale jeho dokončení pozná novější evidence a
+ponechá položku naplánovanou pro nový autoritativní dotaz. Částka, identita, účel
 ani browserový stav nejsou důkazem platby. Browser pouze urychluje server-side
 ověření; background worker vždy znovu volá podepsané `payment/status` a teprve
 jeho ověřený výsledek smí změnit finanční stav.
@@ -70,10 +74,13 @@ Podepsaná a čerstvá odpověď `payment/status` s přesnou kombinací
 i `Created` platbu pouze tehdy, když její nejasná inicializace obsahuje přesně
 stejnou persistovanou observed provider reference. Stav `6` s `resultCode=0`
 zůstává běžné `Failed`, pokud pro stejnou platbu neexistuje durabilní, dříve
-ověřená browser-return evidence `130/6`. Jen v tomto úzkém případě pozdější
-autoritativní serverový status `0/6` potvrdí `Expired`. Return sám nikdy nespouští
-settlement ani finanční změnu. Všechny ostatní nenulové kombinace zůstávají
-`RequiresAttention`.
+ověřená browser-return evidence `130/6`. Evidence se načítá před novým
+autoritativním dotazem, takže odpověď z dotazu zahájeného před jejím uložením ji
+nemůže zpětně použít jako autoritu. Jen nový podepsaný serverový status `0/6`
+potvrdí `Expired`; úzká oprava z `Failed` navíc vyžaduje durabilní původ právě v
+ČSOB statusu 6 a absenci kreditního, job-payment i return efektu. Return sám
+nikdy nespouští settlement ani finanční změnu. Všechny ostatní nenulové kombinace
+zůstávají `RequiresAttention`.
 
 ## Potvrzené UX poznatky z reálného integračního testu
 

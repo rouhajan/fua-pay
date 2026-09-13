@@ -14,8 +14,10 @@ production readiness je v
 - Alternate URL: `https://fuapay.fa.tul.cz` -> canonical URL.
 - Revision ověřená při poslední live acceptance:
   `768aec26c72bc77ca43d554c8e8bab20f60678b6`.
-- Přesná cesta aktivního a rollback release nebyla při acceptance 2026-09-12
-  znovu zaznamenána; staré cesty níže jsou pouze historická evidence.
+- Aktivní release ověřený 2026-09-12:
+  `/opt/fuapay/releases/768aec26c72bc77ca43d554c8e8bab20f60678b6`.
+- Immediate rollback release ověřený 2026-09-12:
+  `/opt/fuapay/releases/f2c85083c994f657ee70da704413f0c8407b90df`.
 - Service account: `fuapay:fuapay`.
 - Kestrel: `127.0.0.1:5080` behind Nginx.
 - Configuration: `/etc/fuapay/staging.env`.
@@ -49,12 +51,26 @@ Pro expired CardJob `PLT-2026-000007` (job
 `b8e12230-d3ad-4d93-9903-b31e334e1179`, payId `c4f36a6e5988@LI`) bylo mimo
 release v `/etc/fuapay/staging.env` nastaveno
 `Csob__PaymentTtlSeconds=1800`; hodnota byla potvrzena v prostředí běžícího
-procesu. Browser auto-return dorazil po 1807,77 s jako `resultCode=130`,
-`paymentStatus=6`, následný autoritativní serverový `payment/status` však vrátil
-`0/6`. Nasazený runtime bez uchování podepsané return evidence proto platbu
-uzavřel jako `Failed`, bez settlementu, a zakázka zůstala neuhrazená. To není
-activation PASS; přesně tento rozdíl řeší aktuální lokální patch, který zatím
-nebyl nasazen ani živě ověřen.
+procesu. Platba vznikla `2026-09-12 13:56:07.895386 UTC` a browser auto-return
+byl pozorován `2026-09-12 14:26:15.665062 UTC`, tedy po přesně
+`1807.769676` sekundy. Tehdy nasazený endpoint z historického returnu ukládal
+pouze `payId`; browserový `resultCode`, `paymentStatus`, podpis ani celý podepsaný
+payload proto nebyly zachyceny a pro tento konkrétní běh nelze tvrdit, že browser
+vrátil `130/6`. Pozdější autoritativní podepsaný serverový `payment/status`
+persistoval `resultCode=0`, `paymentStatus=6`. Nasazený runtime uzavřel platbu
+jako `Failed`, zakázka zůstala neuhrazená a nevznikl settlement efekt. To není
+activation PASS; aktuální lokální expiry patch není nasazen ani živě ověřen.
+
+## 2026-09-12 release evidence
+
+- Artifact: `fuapay-staging-768aec26c72bc77ca43d554c8e8bab20f60678b6-linux-x64.tar.gz`.
+- SHA-256: `65685702CBE08F61ABC1E9ECDA97C50011FC402798C81C610E3966BD33DA2024`.
+- Velikost: `122976095` bytes.
+- Archive verification: 12 adresářů mode `0770`, 403 běžných souborů mode
+  `0660`, `FuaPay.Web` mode `0750`.
+- Prošly serverová kontrola hashe a velikosti, `gzip`/`tar` kontrola, ownership a
+  modes instalace, aktivace, kontrola přesného běžícího executable, readiness,
+  health reconciliation workeru a veřejný HTTPS smoke.
 
 ## 2026-09-08 PR #35 deployment
 

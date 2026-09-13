@@ -118,9 +118,13 @@ Podle oficiální wiki upravené 2026-06-30:
       odpovídající lokální `Cancelled` ověřen uživatelským testem 2026-09-08.
 - [ ] Expired payment: po >=30 min ověřit `resultCode=130`, `paymentStatus=6` a
       interní `Expired` bez finančního účinku. CardJob `PLT-2026-000007` s TTL
-      1800 s skutečně přinesl browser return `130/6` po 1807,77 s a následný
-      serverový status `0/6`, ale starý runtime jej uzavřel jako `Failed`; nejde
-      tedy o activation PASS a scénář se musí po nasazení tohoto patchu zopakovat.
+      1800 s vznikl `2026-09-12 13:56:07.895386 UTC`; browser auto-return byl
+      pozorován `2026-09-12 14:26:15.665062 UTC`, po `1807.769676` s. Starý
+      endpoint zachytil pouze `payId`, takže historický browserový resultCode,
+      paymentStatus, podpis ani celý podepsaný payload nejsou prokázány. Pozdější
+      podepsaný serverový status persistoval `0/6`; starý runtime skončil jako
+      `Failed`, Job zůstal neuhrazený a settlement efekt nevznikl. Nejde o
+      activation PASS a scénář se musí po budoucím nasazení opravy zopakovat.
 - [x] Payment reversal: po úspěšné autorizaci zavolat `payment/reverse`, ověřit
       HTTP 200, podpis, `resultCode=0`, `paymentStatus=5` a odpovídající lokální
       stav/return evidence; ověřeno 2026-09-12 nad CardJob `PLT-2026-000006`.

@@ -73,6 +73,9 @@ public static class CsobGatewayServiceCollectionExtensions
         services.AddScoped<ICsobVerifiedReturnEvidenceReader>(
             provider => provider.GetRequiredService<
                 EfCsobPaymentRecoveryRepository>());
+        services.AddScoped<ICsobExpiryCorrectionGuard>(
+            provider => provider.GetRequiredService<
+                EfCsobPaymentRecoveryRepository>());
         services.TryAddSingleton<CsobPaymentReconciliationHealth>();
 
         if (!configuration.Enabled)

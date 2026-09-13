@@ -303,11 +303,28 @@ internal sealed class EfPaymentRepository : IPaymentRepository
                 payment.Complete(completedAt);
                 break;
             case PaymentStatus.Failed:
-                payment.Fail(
-                    entity.FailureReason
-                        ?? throw new InvalidDataException(
-                            $"Neúspěšná platba '{entity.Id}' nemá důvod."),
-                    completedAt);
+                var failureReason = entity.FailureReason
+                    ?? throw new InvalidDataException(
+                        $"Neúspěšná platba '{entity.Id}' nemá důvod.");
+
+                if (entity.FailureProvenance is null)
+                {
+                    payment.Fail(failureReason, completedAt);
+                }
+                else if (
+                    entity.FailureProvenance ==
+                        (int)PaymentFailureProvenance.CsobResult0Status6)
+                {
+                    payment.FailFromCsobResult0Status6(
+                        failureReason,
+                        completedAt);
+                }
+                else
+                {
+                    throw new InvalidDataException(
+                        $"Neúspěšná platba '{entity.Id}' má nepodporovaný " +
+                        $"původ selhání '{entity.FailureProvenance}'.");
+                }
                 break;
             case PaymentStatus.Cancelled:
                 payment.Cancel(completedAt);
@@ -337,6 +354,9 @@ internal sealed class EfPaymentRepository : IPaymentRepository
             Status = (int)payment.Status,
             ProviderReference = payment.ProviderReference,
             FailureReason = payment.FailureReason,
+            FailureProvenance = payment.FailureProvenance.HasValue
+                ? (int)payment.FailureProvenance.Value
+                : null,
             CreatedAt = payment.CreatedAt,
             UpdatedAt = payment.UpdatedAt,
             CompletedAt = payment.CompletedAt,

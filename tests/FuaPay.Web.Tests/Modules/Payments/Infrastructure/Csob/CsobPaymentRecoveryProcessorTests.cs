@@ -131,6 +131,34 @@ public sealed class CsobPaymentRecoveryProcessorTests
     }
 
     [Fact]
+    public async Task RunOnceAsync_NewEvidenceDuringClaim_ReportsRescheduled()
+    {
+        var paymentId = Guid.NewGuid();
+        var claim = CreateClaim(paymentId, attemptCount: 0);
+        var repository = new RecordingRecoveryRepository(claim)
+        {
+            Completion = CsobPaymentRecoveryCompletion
+                .RescheduledForNewEvidence
+        };
+        var processor = CreateProcessor(
+            repository,
+            new StubReconciliationService(
+                new CsobPaymentReconciliationResult(
+                    paymentId,
+                    PaymentStatus.Failed,
+                    GatewayPaymentStatus: 6,
+                    GatewayResultCode: 0,
+                    StateChanged: true)),
+            maximumAttempts: 4);
+
+        var result = await processor.RunOnceAsync();
+
+        Assert.Equal(0, result.CompletedCount);
+        Assert.Equal(1, result.RescheduledCount);
+        Assert.Equal(0, result.LostClaimCount);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_UnsupportedVerifiedLifecycle_RequiresAttention()
     {
         var paymentId = Guid.NewGuid();
@@ -338,6 +366,8 @@ public sealed class CsobPaymentRecoveryProcessorTests
 
         public bool TransitionSucceeds { get; set; } = true;
 
+        public CsobPaymentRecoveryCompletion? Completion { get; set; }
+
         public DateTimeOffset? StaleBefore { get; private set; }
 
         public DateTimeOffset? StaleObservedAt { get; private set; }
@@ -437,6 +467,28 @@ public sealed class CsobPaymentRecoveryProcessorTests
                 gatewayPaymentStatus,
                 resultCode);
             return Task.FromResult(TransitionSucceeds);
+        }
+
+        public async Task<CsobPaymentRecoveryCompletion> CompleteClaimAsync(
+            CsobPaymentRecoveryClaim claim,
+            DateTimeOffset attemptedAt,
+            int gatewayPaymentStatus,
+            int resultCode,
+            CancellationToken cancellationToken = default)
+        {
+            await MarkCompletedAsync(
+                claim,
+                attemptedAt,
+                gatewayPaymentStatus,
+                resultCode,
+                cancellationToken);
+
+            if (!TransitionSucceeds)
+            {
+                return CsobPaymentRecoveryCompletion.ClaimLost;
+            }
+
+            return Completion ?? CsobPaymentRecoveryCompletion.Completed;
         }
     }
 

@@ -72,6 +72,39 @@ public sealed class PaymentTests
     }
 
     [Fact]
+    public void CorrectCsobResult0Status6FailureToExpired_RequiresExactProvenanceAndReference()
+    {
+        var payment = CreatePendingCsobPayment();
+        payment.FailFromCsobResult0Status6(
+            "verified status 6",
+            CreatedAt.AddMinutes(1));
+
+        Assert.Throws<InvalidPaymentStateTransitionException>(
+            () => payment.CorrectCsobResult0Status6FailureToExpired(
+                "other-reference",
+                CreatedAt.AddMinutes(2)));
+
+        Assert.True(payment.CorrectCsobResult0Status6FailureToExpired(
+            "pay1234567890",
+            CreatedAt.AddMinutes(2)));
+        Assert.Equal(PaymentStatus.Expired, payment.Status);
+        Assert.Null(payment.FailureReason);
+        Assert.Null(payment.FailureProvenance);
+    }
+
+    [Fact]
+    public void CorrectCsobResult0Status6FailureToExpired_RejectsGenericFailure()
+    {
+        var payment = CreatePendingCsobPayment();
+        payment.Fail("unrelated", CreatedAt.AddMinutes(1));
+
+        Assert.Throws<InvalidPaymentStateTransitionException>(
+            () => payment.CorrectCsobResult0Status6FailureToExpired(
+                payment.ProviderReference!,
+                CreatedAt.AddMinutes(2)));
+    }
+
+    [Fact]
     public void Constructor_RejectsInconsistentJobPurpose()
     {
         Assert.Throws<ArgumentException>(
@@ -102,6 +135,21 @@ public sealed class PaymentTests
     {
         var payment = CreatePayment();
         payment.MarkPending("DEV-123", CreatedAt);
+        return payment;
+    }
+
+    private static Payment CreatePendingCsobPayment()
+    {
+        var payment = new Payment(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            PaymentPurposeType.CreditTopUp,
+            jobId: null,
+            new Money(10_000),
+            PaymentProvider.Csob,
+            CreatedAt,
+            Guid.NewGuid());
+        payment.MarkPending("pay1234567890", CreatedAt);
         return payment;
     }
 }

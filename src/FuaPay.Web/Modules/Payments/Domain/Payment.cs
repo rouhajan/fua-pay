@@ -70,6 +70,8 @@ public sealed class Payment
 
     public string? FailureReason { get; private set; }
 
+    public PaymentFailureProvenance? FailureProvenance { get; private set; }
+
     public DateTimeOffset CreatedAt { get; }
 
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -101,6 +103,7 @@ public sealed class Payment
         UpdatedAt = ValidateChangedAt(completedAt);
         CompletedAt = completedAt;
         FailureReason = null;
+        FailureProvenance = null;
         return true;
     }
 
@@ -133,8 +136,68 @@ public sealed class Payment
 
         Status = PaymentStatus.Failed;
         FailureReason = normalizedReason;
+        FailureProvenance = null;
         UpdatedAt = ValidateChangedAt(failedAt);
         CompletedAt = failedAt;
+        return true;
+    }
+
+    public bool FailFromCsobResult0Status6(
+        string reason,
+        DateTimeOffset failedAt)
+    {
+        if (Status == PaymentStatus.Failed)
+        {
+            if (FailureProvenance !=
+                PaymentFailureProvenance.CsobResult0Status6)
+            {
+                throw new InvalidPaymentStateTransitionException(
+                    Status,
+                    PaymentStatus.Failed);
+            }
+
+            return false;
+        }
+
+        if (Provider != PaymentProvider.Csob)
+        {
+            throw new InvalidOperationException(
+                "Pouze platba poskytovatele ČSOB může nést původ selhání payment/status 6.");
+        }
+
+        var changed = Fail(reason, failedAt);
+        FailureProvenance = PaymentFailureProvenance.CsobResult0Status6;
+        return changed;
+    }
+
+    public bool CorrectCsobResult0Status6FailureToExpired(
+        string providerReference,
+        DateTimeOffset expiredAt)
+    {
+        var normalizedReference = PaymentProviderReference.Normalize(
+            providerReference,
+            nameof(providerReference));
+
+        if (
+            Status != PaymentStatus.Failed ||
+            Provider != PaymentProvider.Csob ||
+            FailureProvenance !=
+                PaymentFailureProvenance.CsobResult0Status6 ||
+            !string.Equals(
+                ProviderReference,
+                normalizedReference,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidPaymentStateTransitionException(
+                Status,
+                PaymentStatus.Expired);
+        }
+
+        Status = PaymentStatus.Expired;
+        FailureReason = null;
+        FailureProvenance = null;
+        UpdatedAt = ValidateChangedAt(expiredAt);
+        CompletedAt = expiredAt;
         return true;
     }
 
@@ -147,6 +210,8 @@ public sealed class Payment
 
         EnsureStatus(PaymentStatus.Pending, PaymentStatus.Expired);
         Status = PaymentStatus.Expired;
+        FailureReason = null;
+        FailureProvenance = null;
         UpdatedAt = ValidateChangedAt(expiredAt);
         CompletedAt = expiredAt;
         return true;
@@ -169,6 +234,8 @@ public sealed class Payment
         }
 
         Status = PaymentStatus.Cancelled;
+        FailureReason = null;
+        FailureProvenance = null;
         UpdatedAt = ValidateChangedAt(cancelledAt);
         CompletedAt = cancelledAt;
         return true;

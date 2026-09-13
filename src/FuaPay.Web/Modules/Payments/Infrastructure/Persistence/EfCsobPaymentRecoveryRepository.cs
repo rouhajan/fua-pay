@@ -1,5 +1,6 @@
 using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Persistence;
+using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
@@ -11,6 +12,7 @@ namespace FuaPay.Web.Modules.Payments.Infrastructure.Persistence;
 internal sealed class EfCsobPaymentRecoveryRepository :
     ICsobPaymentRecoveryRepository,
     ICsobVerifiedReturnEvidenceReader,
+    ICsobExpiryCorrectionGuard,
     IPaymentReconciliationQueries
 {
     private const int MaximumErrorLength = 500;
@@ -80,7 +82,15 @@ internal sealed class EfCsobPaymentRecoveryRepository :
             return null;
         }
 
-        if (payment.Status != (int)PaymentStatus.Pending)
+        var acceptsVerifiedExpiryAfterFailure =
+            verifiedReturn.IsExpired &&
+            payment.Status == (int)PaymentStatus.Failed &&
+            payment.FailureProvenance ==
+                (int)PaymentFailureProvenance.CsobResult0Status6;
+
+        if (
+            payment.Status != (int)PaymentStatus.Pending &&
+            !acceptsVerifiedExpiryAfterFailure)
         {
             return new CsobBrowserReturnObservation(
                 payment.Id,
@@ -184,6 +194,36 @@ internal sealed class EfCsobPaymentRecoveryRepository :
                             verified_expiry_text_to_sign = {expiryTextToSign},
                             verified_expiry_signature = {expirySignature},
                             verified_expiry_observed_at = {expiryObservedAt},
+                            state = CASE
+                                WHEN state IN
+                                (
+                                    {(int)PaymentReconciliationState.Completed},
+                                    {(int)PaymentReconciliationState.RequiresAttention}
+                                )
+                                    THEN {(int)PaymentReconciliationState.Scheduled}
+                                ELSE state
+                            END,
+                            next_attempt_at = CASE
+                                WHEN state IN
+                                (
+                                    {(int)PaymentReconciliationState.Completed},
+                                    {(int)PaymentReconciliationState.RequiresAttention}
+                                )
+                                    THEN {observedAt}
+                                WHEN state = {(int)PaymentReconciliationState.Scheduled}
+                                    THEN LEAST(next_attempt_at, {observedAt})
+                                ELSE next_attempt_at
+                            END,
+                            completed_at = CASE
+                                WHEN state = {(int)PaymentReconciliationState.Completed}
+                                    THEN NULL
+                                ELSE completed_at
+                            END,
+                            last_error = CASE
+                                WHEN state = {(int)PaymentReconciliationState.RequiresAttention}
+                                    THEN NULL
+                                ELSE last_error
+                            END,
                             updated_at = GREATEST(updated_at, {observedAt}),
                             version = version + 1
                         WHERE
@@ -264,6 +304,48 @@ internal sealed class EfCsobPaymentRecoveryRepository :
                 item.VerifiedExpirySignature!,
                 item.VerifiedExpiryObservedAt!.Value))
             .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<bool> IsFinanciallyUntouchedAsync(
+        Guid paymentId,
+        Guid? jobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (paymentId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "ID platby nesmí být prázdné.",
+                nameof(paymentId));
+        }
+
+        if (await _dbContext.CreditMovements
+            .AsNoTracking()
+            .AnyAsync(
+                item => item.OperationId == paymentId,
+                cancellationToken))
+        {
+            return false;
+        }
+
+        if (jobId.HasValue && !await _dbContext.Jobs
+            .AsNoTracking()
+            .AnyAsync(
+                item =>
+                    item.Id == jobId.Value &&
+                    item.PaymentStatus == (int)JobPaymentStatus.Unpaid &&
+                    item.SettlementType == null &&
+                    item.SettlementReferenceId == null &&
+                    item.SettledAt == null,
+                cancellationToken))
+        {
+            return false;
+        }
+
+        return !await _dbContext.SettlementReturns
+            .AsNoTracking()
+            .AnyAsync(
+                item => item.OriginalPaymentId == paymentId,
+                cancellationToken);
     }
 
     public async Task<int> ScheduleLongOpenPaymentsAsync(
@@ -645,7 +727,8 @@ internal sealed class EfCsobPaymentRecoveryRepository :
                     ?? throw new InvalidDataException(
                         $"Leased reconciliation '{entity.PaymentId}' nemá provider reference."),
                 entity.AttemptCount,
-                leaseToken));
+                leaseToken,
+                entity.VerifiedExpiryObservedAt));
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -710,23 +793,67 @@ internal sealed class EfCsobPaymentRecoveryRepository :
             cancellationToken);
     }
 
-    public Task<bool> MarkCompletedAsync(
+    public async Task<bool> MarkCompletedAsync(
+        CsobPaymentRecoveryClaim claim,
+        DateTimeOffset attemptedAt,
+        int gatewayPaymentStatus,
+        int resultCode,
+        CancellationToken cancellationToken = default) =>
+        await CompleteClaimAsync(
+            claim,
+            attemptedAt,
+            gatewayPaymentStatus,
+            resultCode,
+            cancellationToken) != CsobPaymentRecoveryCompletion.ClaimLost;
+
+    public async Task<CsobPaymentRecoveryCompletion> CompleteClaimAsync(
         CsobPaymentRecoveryClaim claim,
         DateTimeOffset attemptedAt,
         int gatewayPaymentStatus,
         int resultCode,
         CancellationToken cancellationToken = default)
     {
-        return TransitionClaimAsync(
-            claim,
-            PaymentReconciliationState.Completed,
-            attemptedAt,
-            attemptedAt,
-            gatewayPaymentStatus,
-            resultCode,
-            error: null,
-            completedAt: attemptedAt,
-            cancellationToken);
+        ValidateClaim(claim);
+        ValidateTimestamp(attemptedAt, nameof(attemptedAt));
+
+        var entity = await _dbContext.CsobPaymentRecoveries
+            .SingleOrDefaultAsync(
+                item =>
+                    item.PaymentId == claim.PaymentId &&
+                    item.State == (int)PaymentReconciliationState.Leased &&
+                    item.LeaseToken == claim.LeaseToken,
+                cancellationToken);
+
+        if (entity is null)
+        {
+            return CsobPaymentRecoveryCompletion.ClaimLost;
+        }
+
+        var evidenceArrivedDuringClaim =
+            entity.VerifiedExpiryObservedAt !=
+                claim.VerifiedExpiryObservedAt;
+
+        entity.State = evidenceArrivedDuringClaim
+            ? (int)PaymentReconciliationState.Scheduled
+            : (int)PaymentReconciliationState.Completed;
+        entity.AttemptCount = checked(entity.AttemptCount + 1);
+        entity.NextAttemptAt = attemptedAt;
+        entity.LeaseToken = null;
+        entity.LeaseExpiresAt = null;
+        entity.LastAttemptAt = attemptedAt;
+        entity.LastGatewayPaymentStatus = gatewayPaymentStatus;
+        entity.LastResultCode = resultCode;
+        entity.LastError = null;
+        entity.UpdatedAt = Max(entity.UpdatedAt, attemptedAt);
+        entity.CompletedAt = evidenceArrivedDuringClaim
+            ? null
+            : attemptedAt;
+        entity.Version = checked(entity.Version + 1);
+
+        await SaveAndClearAsync(cancellationToken);
+        return evidenceArrivedDuringClaim
+            ? CsobPaymentRecoveryCompletion.RescheduledForNewEvidence
+            : CsobPaymentRecoveryCompletion.Completed;
     }
 
     public async Task<IReadOnlyList<PaymentReconciliationAdminItem>> ListOpenAsync(
