@@ -63,7 +63,8 @@ internal sealed class PaymentConfiguration :
                     "ck_payments_failure_consistent",
                     "(status = 4 AND failure_reason IS NOT NULL AND " +
                     "length(btrim(failure_reason)) > 0 AND " +
-                    "(failure_provenance IS NULL OR failure_provenance = 1)) OR " +
+                    "(failure_provenance IS NULL OR " +
+                    "(failure_provenance = 1 AND provider = 2))) OR " +
                     "(status <> 4 AND failure_reason IS NULL AND " +
                     "failure_provenance IS NULL)");
                 table.HasCheckConstraint(

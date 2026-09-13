@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
+using Npgsql;
+
 namespace FuaPay.DatabaseTests;
 
 public sealed class PaymentPersistenceTests :
@@ -240,7 +242,81 @@ public sealed class PaymentPersistenceTests :
         }
     }
 
-    private static Payment CreateTopUpPayment(string reference)
+    [Fact]
+    public async Task Database_EnforcesCsobFailureProvenanceProviderInvariant()
+    {
+        var csobFailure = CreateTopUpPayment(
+            $"CSOB-FAILURE-{Guid.NewGuid():N}",
+            PaymentProvider.Csob);
+        csobFailure.FailFromCsobResult0Status6(
+            "CSOB payment/status returned result code 0 with status 6.",
+            CreatedAt.AddMinutes(1));
+
+        var genericFailure = CreateTopUpPayment(
+            $"DEV-FAILURE-{Guid.NewGuid():N}");
+        genericFailure.Fail(
+            "Generic payment failure.",
+            CreatedAt.AddMinutes(1));
+
+        using var scope = _factory.Services.CreateScope();
+        var repository = scope.ServiceProvider
+            .GetRequiredService<IPaymentRepository>();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+
+        await using var transaction =
+            await dbContext.Database.BeginTransactionAsync();
+
+        try
+        {
+            await repository.AddAsync(csobFailure);
+            await repository.AddAsync(genericFailure);
+
+            var csobProvenance = await dbContext.Database.SqlQuery<int>(
+                    $"""
+                    SELECT COALESCE(failure_provenance, 0)::integer AS "Value"
+                    FROM payments.payments
+                    WHERE id = {csobFailure.Id}
+                    """)
+                .SingleAsync();
+            var genericProvenanceIsNull = await dbContext.Database.SqlQuery<bool>(
+                    $"""
+                    SELECT failure_provenance IS NULL AS "Value"
+                    FROM payments.payments
+                    WHERE id = {genericFailure.Id}
+                    """)
+                .SingleAsync();
+
+            Assert.Equal(
+                (int)PaymentFailureProvenance.CsobResult0Status6,
+                csobProvenance);
+            Assert.True(genericProvenanceIsNull);
+
+            var csobFailureProvenance =
+                (int)PaymentFailureProvenance.CsobResult0Status6;
+
+            var exception = await Assert.ThrowsAsync<PostgresException>(
+                () => dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    UPDATE payments.payments
+                    SET failure_provenance = {csobFailureProvenance}
+                    WHERE id = {genericFailure.Id}
+                    """));
+
+            Assert.Equal(PostgresErrorCodes.CheckViolation, exception.SqlState);
+            Assert.Equal(
+                "ck_payments_failure_consistent",
+                exception.ConstraintName);
+        }
+        finally
+        {
+            await transaction.RollbackAsync();
+        }
+    }
+
+    private static Payment CreateTopUpPayment(
+        string reference,
+        PaymentProvider provider = PaymentProvider.Development)
     {
         var payment = new Payment(
             Guid.NewGuid(),
@@ -248,7 +324,7 @@ public sealed class PaymentPersistenceTests :
             PaymentPurposeType.CreditTopUp,
             jobId: null,
             new Money(50_000),
-            PaymentProvider.Development,
+            provider,
             CreatedAt,
             Guid.NewGuid());
         payment.MarkPending(reference, CreatedAt);

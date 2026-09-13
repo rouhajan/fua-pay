@@ -26,7 +26,7 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                 name: "ck_payments_failure_consistent",
                 schema: "payments",
                 table: "payments",
-                sql: "(status = 4 AND failure_reason IS NOT NULL AND length(btrim(failure_reason)) > 0 AND (failure_provenance IS NULL OR failure_provenance = 1)) OR (status <> 4 AND failure_reason IS NULL AND failure_provenance IS NULL)");
+                sql: "(status = 4 AND failure_reason IS NOT NULL AND length(btrim(failure_reason)) > 0 AND (failure_provenance IS NULL OR (failure_provenance = 1 AND provider = 2))) OR (status <> 4 AND failure_reason IS NULL AND failure_provenance IS NULL)");
         }
 
         /// <inheritdoc />
