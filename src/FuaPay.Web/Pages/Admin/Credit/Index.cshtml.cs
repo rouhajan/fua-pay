@@ -19,15 +19,18 @@ public sealed class IndexModel : PageModel
 
     private readonly ICreditQueries _creditQueries;
     private readonly CreditAdministrationService _administration;
+    private readonly ManualCreditTopUpService _manualTopUps;
     private readonly IAccessUserQueries _accessUserQueries;
 
     public IndexModel(
         ICreditQueries creditQueries,
         CreditAdministrationService administration,
+        ManualCreditTopUpService manualTopUps,
         IAccessUserQueries accessUserQueries)
     {
         _creditQueries = creditQueries;
         _administration = administration;
+        _manualTopUps = manualTopUps;
         _accessUserQueries = accessUserQueries;
     }
 
@@ -39,53 +42,44 @@ public sealed class IndexModel : PageModel
     public IReadOnlyDictionary<Guid, AccessUserOption> MovementOwners { get; private set; } =
         new Dictionary<Guid, AccessUserOption>();
 
-    [BindProperty]
-    [Required]
-    public Guid OwnerId { get; set; }
+    public CreditAdjustmentInput Adjustment { get; private set; } = new();
 
-    [BindProperty]
-    public Guid CommandId { get; set; }
-
-    [BindProperty]
-    [FinancialAmountRange(
-        FinancialAmountKind.CreditAdjustmentAbsolute,
-        ErrorMessage = "Korekce musí být mezi −100 000 Kč a 100 000 Kč.")]
-    public decimal SignedAmountCrowns { get; set; }
-
-    [BindProperty]
-    [Required(ErrorMessage = "Důvod korekce je povinný.")]
-    [StringLength(CreditAdjustmentCommand.ReasonMaxLength)]
-    public string Reason { get; set; } = string.Empty;
+    public ManualCreditTopUpInput ManualTopUp { get; private set; } = new();
 
     public async Task OnGetAsync(
         int offset = 0,
         CancellationToken cancellationToken = default)
     {
-        CommandId = Guid.NewGuid();
+        Adjustment.CommandId = Guid.NewGuid();
+        ManualTopUp.CommandId = Guid.NewGuid();
         await LoadAsync(offset, cancellationToken);
     }
 
     public async Task<IActionResult> OnPostAdjustAsync(
+        CreditAdjustmentInput adjustment,
         CancellationToken cancellationToken = default)
     {
-        if (OwnerId == Guid.Empty)
+        Adjustment = adjustment;
+        ManualTopUp.CommandId = Guid.NewGuid();
+
+        if (adjustment.OwnerId == Guid.Empty)
         {
             ModelState.AddModelError(
-                nameof(OwnerId),
+                $"{nameof(Adjustment)}.{nameof(adjustment.OwnerId)}",
                 "Vyberte uživatele.");
         }
 
-        if (SignedAmountCrowns == 0)
+        if (adjustment.SignedAmountCrowns == 0)
         {
             ModelState.AddModelError(
-                nameof(SignedAmountCrowns),
+                $"{nameof(Adjustment)}.{nameof(adjustment.SignedAmountCrowns)}",
                 "Korekce nesmí být nulová.");
         }
 
-        if (CommandId == Guid.Empty)
+        if (adjustment.CommandId == Guid.Empty)
         {
             ModelState.AddModelError(
-                nameof(CommandId),
+                $"{nameof(Adjustment)}.{nameof(adjustment.CommandId)}",
                 "Identifikátor korekce není platný.");
         }
 
@@ -99,13 +93,13 @@ public sealed class IndexModel : PageModel
         {
             await _administration.AdjustAsync(
                 new CreditAdjustmentCommand(
-                    CommandId,
+                    adjustment.CommandId,
                     User.FindAccessUserId()
                         ?? throw new InvalidOperationException(
                             "Administrátor nemá interní ID."),
-                    OwnerId,
-                    Money.FromCrowns(SignedAmountCrowns),
-                    Reason),
+                    adjustment.OwnerId,
+                    Money.FromCrowns(adjustment.SignedAmountCrowns),
+                    adjustment.Reason),
                 cancellationToken);
 
             TempData["StatusMessage"] =
@@ -120,6 +114,69 @@ public sealed class IndexModel : PageModel
                 exception,
                 "credit.adjust",
                 "Kreditní operaci se nepodařilo dokončit. Obnovte stránku a zkuste to znovu.");
+            await LoadAsync(0, cancellationToken);
+            return Page();
+        }
+    }
+
+    public async Task<IActionResult> OnPostManualTopUpAsync(
+        ManualCreditTopUpInput manualTopUp,
+        CancellationToken cancellationToken = default)
+    {
+        ManualTopUp = manualTopUp;
+        Adjustment.CommandId = Guid.NewGuid();
+
+        var ownerIsEligible =
+            manualTopUp.OwnerId != Guid.Empty &&
+            await _accessUserQueries.IsActiveCustomerAsync(
+                manualTopUp.OwnerId,
+                cancellationToken);
+
+        if (!ownerIsEligible)
+        {
+            ModelState.AddModelError(
+                $"{nameof(ManualTopUp)}.{nameof(manualTopUp.OwnerId)}",
+                "Vyberte aktivního zákazníka.");
+        }
+
+        if (manualTopUp.CommandId == Guid.Empty)
+        {
+            ModelState.AddModelError(
+                $"{nameof(ManualTopUp)}.{nameof(manualTopUp.CommandId)}",
+                "Identifikátor ručního dobití není platný.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            await LoadAsync(0, cancellationToken);
+            return Page();
+        }
+
+        try
+        {
+            await _manualTopUps.TopUpAsync(
+                new ManualCreditTopUpCommand(
+                    manualTopUp.CommandId,
+                    User.FindAccessUserId()
+                        ?? throw new InvalidOperationException(
+                            "Administrátor nemá interní ID."),
+                    manualTopUp.OwnerId,
+                    Money.FromCrowns(manualTopUp.AmountCrowns),
+                    manualTopUp.Note),
+                cancellationToken);
+
+            TempData["StatusMessage"] =
+                "Kredit byl ručně dobit jako nový neměnný pohyb.";
+            return RedirectToPage(new { view = "admin" });
+        }
+        catch (Exception exception) when (
+            PageOperationError.IsExpected(exception))
+        {
+            PageOperationError.Add(
+                this,
+                exception,
+                "credit.manual-topup",
+                "Ruční dobití kreditu se nepodařilo dokončit. Obnovte stránku a zkuste to znovu.");
             await LoadAsync(0, cancellationToken);
             return Page();
         }
@@ -142,5 +199,39 @@ public sealed class IndexModel : PageModel
         MovementOwners = await _accessUserQueries.FindOptionsAsync(
             Movements.Items.Select(item => item.OwnerId),
             cancellationToken);
+    }
+
+    public sealed class CreditAdjustmentInput
+    {
+        public Guid CommandId { get; set; }
+
+        [Required]
+        public Guid OwnerId { get; set; }
+
+        [FinancialAmountRange(
+            FinancialAmountKind.CreditAdjustmentAbsolute,
+            ErrorMessage = "Korekce musí být mezi −100 000 Kč a 100 000 Kč.")]
+        public decimal SignedAmountCrowns { get; set; }
+
+        [Required(ErrorMessage = "Důvod korekce je povinný.")]
+        [StringLength(CreditAdjustmentCommand.ReasonMaxLength)]
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    public sealed class ManualCreditTopUpInput
+    {
+        public Guid CommandId { get; set; }
+
+        [Required]
+        public Guid OwnerId { get; set; }
+
+        [FinancialAmountRange(
+            FinancialAmountKind.ManualCreditTopUp,
+            ErrorMessage = "Dobití musí být vyšší než 0 Kč a nejvýše 100 000 Kč.")]
+        public decimal AmountCrowns { get; set; }
+
+        [Required(ErrorMessage = "Poznámka k dobití je povinná.")]
+        [StringLength(ManualCreditTopUpCommand.NoteMaxLength)]
+        public string Note { get; set; } = string.Empty;
     }
 }

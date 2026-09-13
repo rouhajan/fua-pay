@@ -76,6 +76,53 @@ public sealed class CreditAdjustmentReasonNotAllowedException :
     }
 }
 
+public sealed class ManualCreditTopUpCommandAlreadyExistsException :
+    InvalidOperationException
+{
+    public ManualCreditTopUpCommandAlreadyExistsException(
+        Guid commandId,
+        Exception? innerException = null)
+        : base(
+            $"Příkaz ručního dobití kreditu '{commandId}' již existuje.",
+            innerException)
+    {
+        CommandId = commandId;
+    }
+
+    public Guid CommandId { get; }
+}
+
+public sealed class ManualCreditTopUpCommandConflictException :
+    InvalidOperationException
+{
+    public ManualCreditTopUpCommandConflictException(Guid commandId)
+        : base(
+            $"Příkaz ručního dobití kreditu '{commandId}' byl již použit s jinými daty.")
+    {
+        CommandId = commandId;
+    }
+
+    public Guid CommandId { get; }
+}
+
+public sealed class ManualCreditTopUpAmountNotAllowedException :
+    InvalidOperationException
+{
+    public ManualCreditTopUpAmountNotAllowedException()
+        : base("Částka ručního dobití kreditu je mimo povolený rozsah.")
+    {
+    }
+}
+
+public sealed class ManualCreditTopUpNoteNotAllowedException :
+    InvalidOperationException
+{
+    public ManualCreditTopUpNoteNotAllowedException()
+        : base("Poznámka k ručnímu dobití kreditu není platná.")
+    {
+    }
+}
+
 public sealed class InsufficientAvailablePrintCreditException :
     InvalidOperationException
 {

@@ -9,7 +9,8 @@ výrobní stav zakázky a finanční stav úhrady.
 - tři aplikační role: `Administrator`, `Requester` a `Customer`;
 - jednoduchá pracoviště (`ServiceUnits`) a přiřazení zadavatelů;
 - zakázky od konceptu po dokončení nebo zrušení;
-- kreditní účty, auditované ruční korekce a úhradu zakázky kreditem;
+- kreditní účty, oddělené auditované ruční dobití a korekce a úhradu zakázky
+  kreditem;
 - přímou platbu zakázky a dobití kreditu přes zvoleného poskytovatele;
 - Microsoft Entra OIDC, JIT vytvoření Customer účtu a bezpečné ruční
   propojení existujícího účtu podle `tenant ID + object ID`;
@@ -58,6 +59,7 @@ záměrně opt-in přes `-RunDatabaseTests`; živý ČSOB `echo` přes
 - [Microsoft Entra ID](docs/integrations/entra-id.md)
 - [ČSOB eAPI](docs/integrations/csob.md)
 - [PDF potvrzení o úhradě](docs/features/payment-receipts.md)
+- [Ruční dobití kreditu](docs/features/manual-credit-topups.md)
 - [Databáze a testy](docs/development/database.md)
 - [Produkční konfigurace a provoz](docs/deployment/production-configuration.md)
 - [Release a databázové artefakty](docs/deployment/release-artifacts.md)

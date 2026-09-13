@@ -1,4 +1,5 @@
 using FuaPay.Web.BuildingBlocks.Persistence;
+using FuaPay.Web.Modules.Credits.Application;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -475,6 +476,33 @@ public sealed class PersistenceModelTests
         Assert.Equal(
             300,
             entityType.FindProperty("Reason")!.GetMaxLength());
+        Assert.NotNull(entityType.FindProperty("AcceptedAt"));
+    }
+
+    [Fact]
+    public void ManualCreditTopUpCommands_HaveCommandPrimaryKeyAndPayload()
+    {
+        using var context = CreateContext();
+
+        var entityType = context.Model
+            .GetEntityTypes()
+            .Single(
+                type =>
+                    type.GetSchema() == "credits" &&
+                    type.GetTableName() == "manual_topup_commands");
+
+        Assert.Equal(
+            ["CommandId"],
+            entityType.FindPrimaryKey()!
+                .Properties
+                .Select(property => property.Name)
+                .ToArray());
+        Assert.NotNull(entityType.FindProperty("AdministratorUserId"));
+        Assert.NotNull(entityType.FindProperty("OwnerId"));
+        Assert.NotNull(entityType.FindProperty("AmountMinorUnits"));
+        Assert.Equal(
+            ManualCreditTopUpCommand.NoteMaxLength,
+            entityType.FindProperty("Note")!.GetMaxLength());
         Assert.NotNull(entityType.FindProperty("AcceptedAt"));
     }
 

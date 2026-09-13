@@ -6,6 +6,7 @@ public sealed class FinancialAmountPolicyTests
     [InlineData(FinancialAmountKind.JobPrice, 1, 100_000_000)]
     [InlineData(FinancialAmountKind.CreditTopUp, 1_000, 10_000_000)]
     [InlineData(FinancialAmountKind.CreditAdjustmentAbsolute, 1, 10_000_000)]
+    [InlineData(FinancialAmountKind.ManualCreditTopUp, 1, 10_000_000)]
     public void GetRange_UsesM0Limits(
         FinancialAmountKind kind,
         long minimum,
