@@ -1,38 +1,77 @@
 # Demo / staging deployment
 
-Status: 2026-09-12
+Status: 2026-09-13
 
 Tento soubor popisuje pouze aktuální staging runtime a poslední deployment
 evidence. Kanonické vytváření/installace release artefaktu je v
 [`release-artifacts.md`](release-artifacts.md). Aktuální ČSOB postup až do
 production readiness je v
 [`../integrations/csob-production-readiness.md`](../integrations/csob-production-readiness.md).
+Detailní evidence aktuálního integračního incidentu je v
+[`../integrations/csob-incident-2026-09-13.md`](../integrations/csob-incident-2026-09-13.md).
 
 ## Aktuální runtime
 
 - URL: `https://fuapay.tul.cz`
 - Alternate URL: `https://fuapay.fa.tul.cz` -> canonical URL.
-- Revision ověřená při poslední live acceptance:
+- Git `main`: `bc868276aead1b350033303ce8e80bc6ce9a5894`.
+- Revision ověřená při poslední úspěšné live payment acceptance:
   `768aec26c72bc77ca43d554c8e8bab20f60678b6`.
-- Aktivní release ověřený 2026-09-12:
+- Aktivní release po řízeném code-only rollbacku 2026-09-13:
   `/opt/fuapay/releases/768aec26c72bc77ca43d554c8e8bab20f60678b6`.
-- Immediate rollback release ověřený 2026-09-12:
-  `/opt/fuapay/releases/f2c85083c994f657ee70da704413f0c8407b90df`.
+- Release `bc868276aead1b350033303ce8e80bc6ce9a5894` zůstává nainstalovaný
+  vedle aktivního release; artifact/schema/deployment gate prošel, ale funkční
+  payment acceptance je blokována aktuálním ČSOB integration incidentem.
 - Service account: `fuapay:fuapay`.
 - Kestrel: `127.0.0.1:5080` behind Nginx.
 - Configuration: `/etc/fuapay/staging.env`.
 - Database: `fuapay_demo`.
-- Aktuální počet aplikovaných EF migrací nebyl při acceptance 2026-09-12 znovu
-  zaznamenán.
+- Databáze má po deployi PR #44 19 aplikovaných EF migrací; code-only rollback
+  schema nevracel.
+- Nejnovější migrace jsou
+  `20260913111715_AddCsobExpiryFailureProvenance` a
+  `20260912145956_AddCsobVerifiedExpiryReturnEvidence`.
 - `Database__ApplyMigrationsOnStart=false`.
+- `Csob__PaymentTtlSeconds=1800`.
 - Microsoft Entra login: live and in use.
 - Payment provider: ČSOB integration, Merchant ID `M1EPAY2213`.
 - Simulated payments: disabled.
-- ČSOB reconciliation worker: enabled and healthy.
+- ČSOB reconciliation worker: enabled and po rollbacku `Healthy`.
 - Staging seed data: enabled.
 - Receipt preview mode: enabled.
 - Nginx Basic Authentication: intentionally absent.
 - Production ČSOB traffic and production database workload: not active.
+
+## 2026-09-13 PR #44 deployment a ČSOB integration incident
+
+PR #44 byl mergnut do `main` jako:
+
+`bc868276aead1b350033303ce8e80bc6ce9a5894`
+
+Lokální canonical verification prošla, release artifact byl vytvořen a ověřen,
+před migrací vznikl validovaný PostgreSQL backup a dvě nové forward-only migrace
+byly úspěšně aplikovány. Nový release byl nainstalován vedle aktivního release a
+po atomické aktivaci prošly readiness, reconciliation-worker health, kontrola
+běžícího executable i canonical/alternate HTTPS smoke.
+
+Funkční payment smoke ale dvakrát skončil přibližně po 30 sekundách timeoutem
+ČSOB `POST /api/v1.9/payment/init`. Staging byl proto řízeně vrácen pouze kódem
+na předchozí live-accepted release `768aec26...`; databázové schema se nevracelo.
+Po rollbacku prošly readiness, worker health, running-release check a canonical
+HTTPS 200.
+
+Jeden čerstvý A/B `payment/init` na předchozím release skončil stejným
+30sekundovým timeoutem. Následné signed POST i signed GET `/api/v1.9/echo` se
+stejným merchantem a signing materiálem také opakovaně timeoutovaly bez jediného
+bajtu odpovědi. Naproti tomu úmyslně malformed POST `{}` na stejný `/echo`
+endpoint dostal HTTP 400 přibližně za 62 ms, takže DNS/TCP/TLS i základní HTTP
+endpoint byly ze staging VM dosažitelné.
+
+Aktuální pracovní závěr je externí nebo merchant-specific integrační blocker;
+konkrétní root cause zatím ČSOB nepotvrdila. Další payment-init pokusy se
+nepoužívají jako availability test. Expired activation scénář zůstává BLOCKED a
+není PASS. Kompletní časy, artefakty, rollback a diagnostická evidence jsou v
+[`../integrations/csob-incident-2026-09-13.md`](../integrations/csob-incident-2026-09-13.md).
 
 ## 2026-09-12 live ČSOB acceptance
 
@@ -59,7 +98,9 @@ payload proto nebyly zachyceny a pro tento konkrétní běh nelze tvrdit, že br
 vrátil `130/6`. Pozdější autoritativní podepsaný serverový `payment/status`
 persistoval `resultCode=0`, `paymentStatus=6`. Nasazený runtime uzavřel platbu
 jako `Failed`, zakázka zůstala neuhrazená a nevznikl settlement efekt. To není
-activation PASS; aktuální lokální expiry patch není nasazen ani živě ověřen.
+activation PASS. Oprava expiry lifecycle je v aktuálním `main`, ale její live
+acceptance je po incidentu 2026-09-13 stále blokována a musí se zopakovat až po
+obnovení ČSOB integration eAPI.
 
 ## 2026-09-12 release evidence
 
@@ -211,7 +252,7 @@ stale TODO lists.
 
 ## Previous rollback baseline
 
-Before this deployment staging ran:
+Before the 2026-09-08 deployment staging ran:
 
 - revision `39293d85445bac0654b35bb2984617e273122481`;
 - release `/opt/fuapay/releases/39293d85445b`;
