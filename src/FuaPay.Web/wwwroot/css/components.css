@@ -422,6 +422,10 @@ label small,
   gap: 12px;
 }
 
+.form-actions[hidden] {
+  display: none;
+}
+
 .filter-actions {
   min-height: 42px;
 }

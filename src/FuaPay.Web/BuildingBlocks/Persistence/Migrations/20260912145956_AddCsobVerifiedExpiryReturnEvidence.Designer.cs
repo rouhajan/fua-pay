@@ -3,6 +3,7 @@ using System;
 using FuaPay.Web.BuildingBlocks.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
 {
     [DbContext(typeof(FuaPayDbContext))]
-    partial class FuaPayDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260912145956_AddCsobVerifiedExpiryReturnEvidence")]
+    partial class AddCsobVerifiedExpiryReturnEvidence
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -988,10 +991,6 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("customer_user_id");
 
-                    b.Property<int?>("FailureProvenance")
-                        .HasColumnType("integer")
-                        .HasColumnName("failure_provenance");
-
                     b.Property<string>("FailureReason")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -1065,7 +1064,7 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_payments_customer_not_empty", "customer_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
 
-                            t.HasCheckConstraint("ck_payments_failure_consistent", "(status = 4 AND failure_reason IS NOT NULL AND length(btrim(failure_reason)) > 0 AND (failure_provenance IS NULL OR (failure_provenance = 1 AND provider = 2))) OR (status <> 4 AND failure_reason IS NULL AND failure_provenance IS NULL)");
+                            t.HasCheckConstraint("ck_payments_failure_consistent", "(status = 4 AND failure_reason IS NOT NULL AND length(btrim(failure_reason)) > 0) OR (status <> 4 AND failure_reason IS NULL)");
 
                             t.HasCheckConstraint("ck_payments_id_not_empty", "id <> '00000000-0000-0000-0000-000000000000'::uuid");
 

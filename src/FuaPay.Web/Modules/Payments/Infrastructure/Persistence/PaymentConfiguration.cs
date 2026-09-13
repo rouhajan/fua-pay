@@ -61,7 +61,12 @@ internal sealed class PaymentConfiguration :
                     "(status IN (1, 2) AND completed_at IS NULL) OR (status IN (3, 4, 5, 6) AND completed_at IS NOT NULL)");
                 table.HasCheckConstraint(
                     "ck_payments_failure_consistent",
-                    "(status = 4 AND failure_reason IS NOT NULL AND length(btrim(failure_reason)) > 0) OR (status <> 4 AND failure_reason IS NULL)");
+                    "(status = 4 AND failure_reason IS NOT NULL AND " +
+                    "length(btrim(failure_reason)) > 0 AND " +
+                    "(failure_provenance IS NULL OR " +
+                    "(failure_provenance = 1 AND provider = 2))) OR " +
+                    "(status <> 4 AND failure_reason IS NULL AND " +
+                    "failure_provenance IS NULL)");
                 table.HasCheckConstraint(
                     "ck_payments_provider_reference_consistent",
                     "(status = 1 AND provider_reference IS NULL) OR (status <> 1 AND provider_reference IS NOT NULL AND length(btrim(provider_reference)) > 0)");
@@ -101,6 +106,8 @@ internal sealed class PaymentConfiguration :
         builder.Property(item => item.FailureReason)
             .HasColumnName("failure_reason")
             .HasMaxLength(500);
+        builder.Property(item => item.FailureProvenance)
+            .HasColumnName("failure_provenance");
         builder.Property(item => item.CreatedAt)
             .HasColumnName("created_at")
             .IsRequired();

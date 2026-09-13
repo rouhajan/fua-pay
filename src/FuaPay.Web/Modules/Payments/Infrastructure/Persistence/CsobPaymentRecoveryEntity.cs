@@ -20,6 +20,18 @@ internal sealed class CsobPaymentRecoveryEntity
 
     public DateTimeOffset? LastBrowserReturnAt { get; set; }
 
+    public string? VerifiedExpiryReturnDttm { get; set; }
+
+    public int? VerifiedExpiryResultCode { get; set; }
+
+    public int? VerifiedExpiryPaymentStatus { get; set; }
+
+    public string? VerifiedExpiryTextToSign { get; set; }
+
+    public string? VerifiedExpirySignature { get; set; }
+
+    public DateTimeOffset? VerifiedExpiryObservedAt { get; set; }
+
     public int? LastGatewayPaymentStatus { get; set; }
 
     public int? LastResultCode { get; set; }

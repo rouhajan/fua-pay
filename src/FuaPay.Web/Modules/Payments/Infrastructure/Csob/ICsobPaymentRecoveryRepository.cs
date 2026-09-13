@@ -3,7 +3,7 @@ namespace FuaPay.Web.Modules.Payments.Infrastructure.Csob;
 public interface ICsobPaymentRecoveryRepository
 {
     Task<CsobBrowserReturnObservation?> ScheduleFromReturnAsync(
-        string providerReference,
+        CsobVerifiedPaymentReturn verifiedReturn,
         DateTimeOffset observedAt,
         CancellationToken cancellationToken = default);
 
@@ -58,14 +58,54 @@ public interface ICsobPaymentRecoveryRepository
         int gatewayPaymentStatus,
         int resultCode,
         CancellationToken cancellationToken = default);
+
+    async Task<CsobPaymentRecoveryCompletion> CompleteClaimAsync(
+        CsobPaymentRecoveryClaim claim,
+        DateTimeOffset attemptedAt,
+        int gatewayPaymentStatus,
+        int resultCode,
+        CancellationToken cancellationToken = default) =>
+        await MarkCompletedAsync(
+            claim,
+            attemptedAt,
+            gatewayPaymentStatus,
+            resultCode,
+            cancellationToken)
+            ? CsobPaymentRecoveryCompletion.Completed
+            : CsobPaymentRecoveryCompletion.ClaimLost;
+}
+
+public interface ICsobVerifiedReturnEvidenceReader
+{
+    Task<CsobVerifiedReturnEvidence?> FindVerifiedExpiryAsync(
+        Guid paymentId,
+        string providerReference,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ICsobExpiryCorrectionGuard
+{
+    Task<bool> IsFinanciallyUntouchedAsync(
+        Guid paymentId,
+        Guid? jobId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record CsobBrowserReturnObservation(
     Guid PaymentId,
-    bool IsFirstObservation);
+    bool IsFirstObservation,
+    bool IsFirstVerifiedExpiryObservation);
 
 public sealed record CsobPaymentRecoveryClaim(
     Guid PaymentId,
     string ProviderReference,
     int AttemptCount,
-    Guid LeaseToken);
+    Guid LeaseToken,
+    DateTimeOffset? VerifiedExpiryObservedAt = null);
+
+public enum CsobPaymentRecoveryCompletion
+{
+    ClaimLost = 0,
+    Completed = 1,
+    RescheduledForNewEvidence = 2
+}

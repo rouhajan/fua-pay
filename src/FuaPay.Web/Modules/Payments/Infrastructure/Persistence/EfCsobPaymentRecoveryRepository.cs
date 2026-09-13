@@ -1,5 +1,6 @@
 using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Persistence;
+using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
@@ -10,6 +11,8 @@ namespace FuaPay.Web.Modules.Payments.Infrastructure.Persistence;
 
 internal sealed class EfCsobPaymentRecoveryRepository :
     ICsobPaymentRecoveryRepository,
+    ICsobVerifiedReturnEvidenceReader,
+    ICsobExpiryCorrectionGuard,
     IPaymentReconciliationQueries
 {
     private const int MaximumErrorLength = 500;
@@ -28,14 +31,43 @@ internal sealed class EfCsobPaymentRecoveryRepository :
     }
 
     public async Task<CsobBrowserReturnObservation?> ScheduleFromReturnAsync(
-        string providerReference,
+        CsobVerifiedPaymentReturn verifiedReturn,
         DateTimeOffset observedAt,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(verifiedReturn);
+
         var normalizedReference = CsobPayId.RequireCanonical(
-            providerReference,
-            nameof(providerReference));
+            verifiedReturn.PayId,
+            nameof(verifiedReturn));
         ValidateTimestamp(observedAt, nameof(observedAt));
+
+        var expiryDttm = verifiedReturn.IsExpired
+            ? verifiedReturn.Dttm
+            : null;
+        int? expiryResultCode = verifiedReturn.IsExpired
+            ? verifiedReturn.ResultCode
+            : null;
+        int? expiryPaymentStatus = verifiedReturn.IsExpired
+            ? verifiedReturn.PaymentStatus
+            : null;
+        var expiryTextToSign = verifiedReturn.IsExpired
+            ? verifiedReturn.TextToSign
+            : null;
+        var expirySignature = verifiedReturn.IsExpired
+            ? verifiedReturn.Signature
+            : null;
+        DateTimeOffset? expiryObservedAt = verifiedReturn.IsExpired
+            ? observedAt
+            : null;
+
+        ValidateVerifiedExpiry(
+            expiryDttm,
+            expiryResultCode,
+            expiryPaymentStatus,
+            expiryTextToSign,
+            expirySignature,
+            expiryObservedAt);
 
         var payment = await _dbContext.Payments
             .AsNoTracking()
@@ -50,11 +82,20 @@ internal sealed class EfCsobPaymentRecoveryRepository :
             return null;
         }
 
-        if (payment.Status != (int)PaymentStatus.Pending)
+        var acceptsVerifiedExpiryAfterFailure =
+            verifiedReturn.IsExpired &&
+            payment.Status == (int)PaymentStatus.Failed &&
+            payment.FailureProvenance ==
+                (int)PaymentFailureProvenance.CsobResult0Status6;
+
+        if (
+            payment.Status != (int)PaymentStatus.Pending &&
+            !acceptsVerifiedExpiryAfterFailure)
         {
             return new CsobBrowserReturnObservation(
                 payment.Id,
-                IsFirstObservation: false);
+                IsFirstObservation: false,
+                IsFirstVerifiedExpiryObservation: false);
         }
 
         var inserted = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
@@ -70,6 +111,12 @@ internal sealed class EfCsobPaymentRecoveryRepository :
                 lease_expires_at,
                 last_attempt_at,
                 last_browser_return_at,
+                verified_expiry_return_dttm,
+                verified_expiry_result_code,
+                verified_expiry_payment_status,
+                verified_expiry_text_to_sign,
+                verified_expiry_signature,
+                verified_expiry_observed_at,
                 last_gateway_payment_status,
                 last_result_code,
                 last_error,
@@ -89,6 +136,12 @@ internal sealed class EfCsobPaymentRecoveryRepository :
                 NULL,
                 NULL,
                 {observedAt},
+                {expiryDttm},
+                {expiryResultCode},
+                {expiryPaymentStatus},
+                {expiryTextToSign},
+                {expirySignature},
+                {expiryObservedAt},
                 NULL,
                 NULL,
                 NULL,
@@ -102,6 +155,8 @@ internal sealed class EfCsobPaymentRecoveryRepository :
             cancellationToken);
 
         var firstObservation = inserted == 1;
+        var firstVerifiedExpiryObservation =
+            firstObservation && verifiedReturn.IsExpired;
 
         if (!firstObservation)
         {
@@ -125,6 +180,61 @@ internal sealed class EfCsobPaymentRecoveryRepository :
                 cancellationToken);
 
             firstObservation = updated == 1;
+
+            if (verifiedReturn.IsExpired)
+            {
+                var evidenceUpdated =
+                    await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                        UPDATE payments.csob_payment_reconciliation
+                        SET
+                            verified_expiry_return_dttm = {expiryDttm},
+                            verified_expiry_result_code = {expiryResultCode},
+                            verified_expiry_payment_status = {expiryPaymentStatus},
+                            verified_expiry_text_to_sign = {expiryTextToSign},
+                            verified_expiry_signature = {expirySignature},
+                            verified_expiry_observed_at = {expiryObservedAt},
+                            state = CASE
+                                WHEN state IN
+                                (
+                                    {(int)PaymentReconciliationState.Completed},
+                                    {(int)PaymentReconciliationState.RequiresAttention}
+                                )
+                                    THEN {(int)PaymentReconciliationState.Scheduled}
+                                ELSE state
+                            END,
+                            next_attempt_at = CASE
+                                WHEN state IN
+                                (
+                                    {(int)PaymentReconciliationState.Completed},
+                                    {(int)PaymentReconciliationState.RequiresAttention}
+                                )
+                                    THEN {observedAt}
+                                WHEN state = {(int)PaymentReconciliationState.Scheduled}
+                                    THEN LEAST(next_attempt_at, {observedAt})
+                                ELSE next_attempt_at
+                            END,
+                            completed_at = CASE
+                                WHEN state = {(int)PaymentReconciliationState.Completed}
+                                    THEN NULL
+                                ELSE completed_at
+                            END,
+                            last_error = CASE
+                                WHEN state = {(int)PaymentReconciliationState.RequiresAttention}
+                                    THEN NULL
+                                ELSE last_error
+                            END,
+                            updated_at = GREATEST(updated_at, {observedAt}),
+                            version = version + 1
+                        WHERE
+                            payment_id = {payment.Id}
+                            AND provider_reference = {normalizedReference}
+                            AND verified_expiry_return_dttm IS NULL;
+                        """,
+                        cancellationToken);
+
+                firstVerifiedExpiryObservation = evidenceUpdated == 1;
+            }
         }
 
         if (!firstObservation)
@@ -159,7 +269,83 @@ internal sealed class EfCsobPaymentRecoveryRepository :
         _dbContext.ChangeTracker.Clear();
         return new CsobBrowserReturnObservation(
             payment.Id,
-            IsFirstObservation: firstObservation);
+            IsFirstObservation: firstObservation,
+            IsFirstVerifiedExpiryObservation:
+                firstVerifiedExpiryObservation);
+    }
+
+    public async Task<CsobVerifiedReturnEvidence?> FindVerifiedExpiryAsync(
+        Guid paymentId,
+        string providerReference,
+        CancellationToken cancellationToken = default)
+    {
+        if (paymentId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "ID platby nesmí být prázdné.",
+                nameof(paymentId));
+        }
+
+        var normalizedReference = CsobPayId.RequireCanonical(
+            providerReference,
+            nameof(providerReference));
+
+        return await _dbContext.CsobPaymentRecoveries
+            .AsNoTracking()
+            .Where(item =>
+                item.PaymentId == paymentId &&
+                item.ProviderReference == normalizedReference &&
+                item.VerifiedExpiryReturnDttm != null)
+            .Select(item => new CsobVerifiedReturnEvidence(
+                item.VerifiedExpiryReturnDttm!,
+                item.VerifiedExpiryResultCode!.Value,
+                item.VerifiedExpiryPaymentStatus!.Value,
+                item.VerifiedExpiryTextToSign!,
+                item.VerifiedExpirySignature!,
+                item.VerifiedExpiryObservedAt!.Value))
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<bool> IsFinanciallyUntouchedAsync(
+        Guid paymentId,
+        Guid? jobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (paymentId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "ID platby nesmí být prázdné.",
+                nameof(paymentId));
+        }
+
+        if (await _dbContext.CreditMovements
+            .AsNoTracking()
+            .AnyAsync(
+                item => item.OperationId == paymentId,
+                cancellationToken))
+        {
+            return false;
+        }
+
+        if (jobId.HasValue && !await _dbContext.Jobs
+            .AsNoTracking()
+            .AnyAsync(
+                item =>
+                    item.Id == jobId.Value &&
+                    item.PaymentStatus == (int)JobPaymentStatus.Unpaid &&
+                    item.SettlementType == null &&
+                    item.SettlementReferenceId == null &&
+                    item.SettledAt == null,
+                cancellationToken))
+        {
+            return false;
+        }
+
+        return !await _dbContext.SettlementReturns
+            .AsNoTracking()
+            .AnyAsync(
+                item => item.OriginalPaymentId == paymentId,
+                cancellationToken);
     }
 
     public async Task<int> ScheduleLongOpenPaymentsAsync(
@@ -541,7 +727,8 @@ internal sealed class EfCsobPaymentRecoveryRepository :
                     ?? throw new InvalidDataException(
                         $"Leased reconciliation '{entity.PaymentId}' nemá provider reference."),
                 entity.AttemptCount,
-                leaseToken));
+                leaseToken,
+                entity.VerifiedExpiryObservedAt));
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -606,23 +793,67 @@ internal sealed class EfCsobPaymentRecoveryRepository :
             cancellationToken);
     }
 
-    public Task<bool> MarkCompletedAsync(
+    public async Task<bool> MarkCompletedAsync(
+        CsobPaymentRecoveryClaim claim,
+        DateTimeOffset attemptedAt,
+        int gatewayPaymentStatus,
+        int resultCode,
+        CancellationToken cancellationToken = default) =>
+        await CompleteClaimAsync(
+            claim,
+            attemptedAt,
+            gatewayPaymentStatus,
+            resultCode,
+            cancellationToken) != CsobPaymentRecoveryCompletion.ClaimLost;
+
+    public async Task<CsobPaymentRecoveryCompletion> CompleteClaimAsync(
         CsobPaymentRecoveryClaim claim,
         DateTimeOffset attemptedAt,
         int gatewayPaymentStatus,
         int resultCode,
         CancellationToken cancellationToken = default)
     {
-        return TransitionClaimAsync(
-            claim,
-            PaymentReconciliationState.Completed,
-            attemptedAt,
-            attemptedAt,
-            gatewayPaymentStatus,
-            resultCode,
-            error: null,
-            completedAt: attemptedAt,
-            cancellationToken);
+        ValidateClaim(claim);
+        ValidateTimestamp(attemptedAt, nameof(attemptedAt));
+
+        var entity = await _dbContext.CsobPaymentRecoveries
+            .SingleOrDefaultAsync(
+                item =>
+                    item.PaymentId == claim.PaymentId &&
+                    item.State == (int)PaymentReconciliationState.Leased &&
+                    item.LeaseToken == claim.LeaseToken,
+                cancellationToken);
+
+        if (entity is null)
+        {
+            return CsobPaymentRecoveryCompletion.ClaimLost;
+        }
+
+        var evidenceArrivedDuringClaim =
+            entity.VerifiedExpiryObservedAt !=
+                claim.VerifiedExpiryObservedAt;
+
+        entity.State = evidenceArrivedDuringClaim
+            ? (int)PaymentReconciliationState.Scheduled
+            : (int)PaymentReconciliationState.Completed;
+        entity.AttemptCount = checked(entity.AttemptCount + 1);
+        entity.NextAttemptAt = attemptedAt;
+        entity.LeaseToken = null;
+        entity.LeaseExpiresAt = null;
+        entity.LastAttemptAt = attemptedAt;
+        entity.LastGatewayPaymentStatus = gatewayPaymentStatus;
+        entity.LastResultCode = resultCode;
+        entity.LastError = null;
+        entity.UpdatedAt = Max(entity.UpdatedAt, attemptedAt);
+        entity.CompletedAt = evidenceArrivedDuringClaim
+            ? null
+            : attemptedAt;
+        entity.Version = checked(entity.Version + 1);
+
+        await SaveAndClearAsync(cancellationToken);
+        return evidenceArrivedDuringClaim
+            ? CsobPaymentRecoveryCompletion.RescheduledForNewEvidence
+            : CsobPaymentRecoveryCompletion.Completed;
     }
 
     public async Task<IReadOnlyList<PaymentReconciliationAdminItem>> ListOpenAsync(
@@ -767,6 +998,12 @@ internal sealed class EfCsobPaymentRecoveryRepository :
             LeaseExpiresAt = null,
             LastAttemptAt = null,
             LastBrowserReturnAt = null,
+            VerifiedExpiryReturnDttm = null,
+            VerifiedExpiryResultCode = null,
+            VerifiedExpiryPaymentStatus = null,
+            VerifiedExpiryTextToSign = null,
+            VerifiedExpirySignature = null,
+            VerifiedExpiryObservedAt = null,
             LastGatewayPaymentStatus = null,
             LastResultCode = null,
             LastError = error,
@@ -853,6 +1090,49 @@ internal sealed class EfCsobPaymentRecoveryRepository :
             throw new ArgumentException(
                 "Čas nesmí být prázdný.",
                 parameterName);
+        }
+    }
+
+    private static void ValidateVerifiedExpiry(
+        string? dttm,
+        int? resultCode,
+        int? paymentStatus,
+        string? textToSign,
+        string? signature,
+        DateTimeOffset? observedAt)
+    {
+        var isAbsent =
+            dttm is null &&
+            resultCode is null &&
+            paymentStatus is null &&
+            textToSign is null &&
+            signature is null &&
+            observedAt is null;
+
+        if (isAbsent)
+        {
+            return;
+        }
+
+        if (
+            dttm is null ||
+            dttm.Length != 14 ||
+            !dttm.All(char.IsAsciiDigit) ||
+            resultCode != 130 ||
+            paymentStatus != 6 ||
+            string.IsNullOrWhiteSpace(textToSign) ||
+            textToSign.Length >
+                CsobVerifiedReturnEvidence.MaximumTextToSignLength ||
+            string.IsNullOrWhiteSpace(signature) ||
+            signature.Length >
+                CsobVerifiedReturnEvidence.MaximumSignatureLength ||
+            signature.Any(char.IsWhiteSpace) ||
+            observedAt is null ||
+            observedAt == default)
+        {
+            throw new ArgumentException(
+                "Ověřená expiry evidence ČSOB není konzistentní.",
+                nameof(dttm));
         }
     }
 

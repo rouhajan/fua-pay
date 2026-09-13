@@ -22,6 +22,8 @@ internal sealed class PaymentEntity
 
     public string? FailureReason { get; set; }
 
+    public int? FailureProvenance { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }

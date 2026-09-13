@@ -1,6 +1,6 @@
 # Demo / staging deployment
 
-Status: 2026-09-08
+Status: 2026-09-12
 
 Tento soubor popisuje pouze aktuální staging runtime a poslední deployment
 evidence. Kanonické vytváření/installace release artefaktu je v
@@ -12,14 +12,18 @@ production readiness je v
 
 - URL: `https://fuapay.tul.cz`
 - Alternate URL: `https://fuapay.fa.tul.cz` -> canonical URL.
-- Revision: `a638cad732b210a2f949f12c05ecdf84a2bce7a8`.
-- Active release: `/opt/fuapay/releases/a638cad732b2`.
-- Immediate rollback release: `/opt/fuapay/releases/39293d85445b`.
+- Revision ověřená při poslední live acceptance:
+  `768aec26c72bc77ca43d554c8e8bab20f60678b6`.
+- Aktivní release ověřený 2026-09-12:
+  `/opt/fuapay/releases/768aec26c72bc77ca43d554c8e8bab20f60678b6`.
+- Immediate rollback release ověřený 2026-09-12:
+  `/opt/fuapay/releases/f2c85083c994f657ee70da704413f0c8407b90df`.
 - Service account: `fuapay:fuapay`.
 - Kestrel: `127.0.0.1:5080` behind Nginx.
 - Configuration: `/etc/fuapay/staging.env`.
 - Database: `fuapay_demo`.
-- EF Core migrations: 17.
+- Aktuální počet aplikovaných EF migrací nebyl při acceptance 2026-09-12 znovu
+  zaznamenán.
 - `Database__ApplyMigrationsOnStart=false`.
 - Microsoft Entra login: live and in use.
 - Payment provider: ČSOB integration, Merchant ID `M1EPAY2213`.
@@ -29,6 +33,44 @@ production readiness je v
 - Receipt preview mode: enabled.
 - Nginx Basic Authentication: intentionally absent.
 - Production ČSOB traffic and production database workload: not active.
+
+## 2026-09-12 live ČSOB acceptance
+
+Na staging revision `768aec26c72bc77ca43d554c8e8bab20f60678b6` prošel čerstvý
+single-click CardJob `PLT-2026-000006` z FUA Pay přes integrační
+`payment/process` origin a následný payment-page origin. Nebyl pozorován CSP
+`form-action` blok. Po úspěšném browser returnu bounded polling bez ručního F5
+během několika sekund zobrazil právě jednu `Succeeded` platbu a právě jeden
+odpovídající payment/job efekt.
+
+Následný živý `payment/reverse` stejné platby prošel s ověřeným
+`resultCode=0`, `paymentStatus=5` a provider attempt count 1.
+
+Pro expired CardJob `PLT-2026-000007` (job
+`22803461-65ba-46e9-adfa-4578bf71982f`, payment
+`b8e12230-d3ad-4d93-9903-b31e334e1179`, payId `c4f36a6e5988@LI`) bylo mimo
+release v `/etc/fuapay/staging.env` nastaveno
+`Csob__PaymentTtlSeconds=1800`; hodnota byla potvrzena v prostředí běžícího
+procesu. Platba vznikla `2026-09-12 13:56:07.895386 UTC` a browser auto-return
+byl pozorován `2026-09-12 14:26:15.665062 UTC`, tedy po přesně
+`1807.769676` sekundy. Tehdy nasazený endpoint z historického returnu ukládal
+pouze `payId`; browserový `resultCode`, `paymentStatus`, podpis ani celý podepsaný
+payload proto nebyly zachyceny a pro tento konkrétní běh nelze tvrdit, že browser
+vrátil `130/6`. Pozdější autoritativní podepsaný serverový `payment/status`
+persistoval `resultCode=0`, `paymentStatus=6`. Nasazený runtime uzavřel platbu
+jako `Failed`, zakázka zůstala neuhrazená a nevznikl settlement efekt. To není
+activation PASS; aktuální lokální expiry patch není nasazen ani živě ověřen.
+
+## 2026-09-12 release evidence
+
+- Artifact: `fuapay-staging-768aec26c72bc77ca43d554c8e8bab20f60678b6-linux-x64.tar.gz`.
+- SHA-256: `65685702CBE08F61ABC1E9ECDA97C50011FC402798C81C610E3966BD33DA2024`.
+- Velikost: `122976095` bytes.
+- Archive verification: 12 adresářů mode `0770`, 403 běžných souborů mode
+  `0660`, `FuaPay.Web` mode `0750`.
+- Prošly serverová kontrola hashe a velikosti, `gzip`/`tar` kontrola, ownership a
+  modes instalace, aktivace, kontrola přesného běžícího executable, readiness,
+  health reconciliation workeru a veřejný HTTPS smoke.
 
 ## 2026-09-08 PR #35 deployment
 
@@ -153,17 +195,15 @@ Customer-cancelled top-up:
 - the attempt ended locally as `Cancelled` / „Zrušená“;
 - no credit was added.
 
-The successful return exposed one UX gap: the detail page can load before the
-asynchronous reconciliation worker finishes, so it initially remained
-`Pending` and the new credit appeared only after manual F5. The financial model
-is correct because browser return only schedules authoritative server-side
-reconciliation; the UI should be improved with bounded asynchronous status
-refresh instead of requiring a full-page reload.
+Historický úspěšný návrat odhalil UX mezeru: detail se načetl dříve, než doběhl
+asynchronní reconciliation worker, takže nový stav a kredit byly vidět až po
+ručním F5. Finanční model zůstal správně serverový. Tento problém později vyřešil
+bounded polling lokálního status endpointu a live acceptance 2026-09-12 jej
+ověřila bez F5.
 
-Current payment UX also inserts an internal detail page between successful
-`payment/init` and `payment/process`. The agreed target is direct redirect to the
-ČSOB process URI while retaining Details as a recovery path for existing
-`Pending` attempts.
+Historický payment UX také vkládal interní detail mezi úspěšný `payment/init` a
+`payment/process`. Přímý redirect s detailem jako recovery cestou byl následně
+implementován a live acceptance 2026-09-12 jej ověřila.
 
 These UX/lifecycle items and the remaining production-readiness gaps are tracked
 only in `docs/integrations/csob-production-readiness.md` to avoid duplicated
@@ -179,6 +219,5 @@ Before this deployment staging ran:
   `2a3ad32ae7291ea58e51406fd267543b514eeda9ddf95cdb65b6b312032ba46d`;
 - artifact size `122839371` bytes.
 
-That release remains the immediate rollback target until the current ČSOB
-acceptance work is closed. Older deployment evidence remains available in Git
-history; it is intentionally not duplicated in this current-state document.
+Tento záznam je pouze historický baseline. Aktuální rollback target musí být při
+dalším deployi znovu ověřen na serveru; nesmí se odvozovat z této staré sekce.

@@ -71,6 +71,54 @@ public sealed class PaymentReconciliationPersistenceTests :
     }
 
     [Fact]
+    public async Task ScheduleFromReturnAsync_ConcurrentVerifiedExpiryIsDurableAndHasNoPaymentEffect()
+    {
+        var payment = CreatePendingPayment("payexpiry00001");
+        var verifiedReturn = CreateVerifiedExpiryReturn(
+            payment.ProviderReference!);
+
+        try
+        {
+            await AddPaymentAsync(payment);
+
+            var observations = await Task.WhenAll(
+                Enumerable.Range(0, 8)
+                    .Select(_ => ScheduleVerifiedReturnAsync(
+                        verifiedReturn,
+                        CreatedAt.AddMinutes(31))));
+
+            Assert.Equal(
+                1,
+                observations.Count(item =>
+                    item?.IsFirstVerifiedExpiryObservation == true));
+
+            using var scope = _factory.Services.CreateScope();
+            var evidence = await scope.ServiceProvider
+                .GetRequiredService<ICsobVerifiedReturnEvidenceReader>()
+                .FindVerifiedExpiryAsync(
+                    payment.Id,
+                    payment.ProviderReference!);
+
+            Assert.NotNull(evidence);
+            Assert.Equal(130, evidence.ResultCode);
+            Assert.Equal(6, evidence.PaymentStatus);
+            Assert.Equal(verifiedReturn.Dttm, evidence.Dttm);
+            Assert.Equal(verifiedReturn.TextToSign, evidence.TextToSign);
+            Assert.Equal(verifiedReturn.Signature, evidence.Signature);
+
+            var persistedPayment = await scope.ServiceProvider
+                .GetRequiredService<IPaymentRepository>()
+                .FindByIdAsync(payment.Id);
+
+            Assert.Equal(PaymentStatus.Pending, persistedPayment?.Status);
+        }
+        finally
+        {
+            await DeletePaymentAsync(payment.Id);
+        }
+    }
+
+    [Fact]
     public async Task ClaimDueAsync_LeaseBlocksSecondWorkerAndCanBeReclaimedAfterExpiry()
     {
         var payment = CreatePendingPayment("paylease000001");
@@ -429,7 +477,8 @@ public sealed class PaymentReconciliationPersistenceTests :
                 () => verifyScope.ServiceProvider
                     .GetRequiredService<ICsobPaymentRecoveryRepository>()
                     .ScheduleFromReturnAsync(
-                        secondPayment.ProviderReference!,
+                        CreateVerifiedReturn(
+                            secondPayment.ProviderReference!),
                         CreatedAt.AddMinutes(2)));
         }
         finally
@@ -825,9 +874,50 @@ public sealed class PaymentReconciliationPersistenceTests :
         return await scope.ServiceProvider
             .GetRequiredService<ICsobPaymentRecoveryRepository>()
             .ScheduleFromReturnAsync(
-                providerReference,
+                CreateVerifiedReturn(providerReference),
                 observedAt);
     }
+
+    private async Task<CsobBrowserReturnObservation?>
+        ScheduleVerifiedReturnAsync(
+            CsobVerifiedPaymentReturn verifiedReturn,
+            DateTimeOffset observedAt)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider
+            .GetRequiredService<ICsobPaymentRecoveryRepository>()
+            .ScheduleFromReturnAsync(
+                verifiedReturn,
+                observedAt);
+    }
+
+    private static CsobVerifiedPaymentReturn CreateVerifiedReturn(
+        string providerReference) =>
+        new(
+            providerReference,
+            "20260814110000",
+            0,
+            "OK",
+            3,
+            AuthCode: null,
+            MerchantData: null,
+            StatusDetail: null,
+            $"{providerReference}|20260814110000|0|OK|3",
+            "signature");
+
+    private static CsobVerifiedPaymentReturn CreateVerifiedExpiryReturn(
+        string providerReference) =>
+        new(
+            providerReference,
+            "20260814113100",
+            130,
+            "Session expired",
+            6,
+            AuthCode: null,
+            MerchantData: "AQIDBA==",
+            StatusDetail: null,
+            $"{providerReference}|20260814113100|130|Session expired|6|AQIDBA==",
+            "signature");
 
     private async Task<IReadOnlyList<CsobPaymentRecoveryClaim>> ClaimAsync(
         DateTimeOffset now,

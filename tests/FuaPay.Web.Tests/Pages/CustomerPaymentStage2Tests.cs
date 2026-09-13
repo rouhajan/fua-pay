@@ -434,6 +434,23 @@ public sealed class CustomerPaymentStage2Tests
     }
 
     [Fact]
+    public void PendingOnlyFormActions_HiddenAttributeOverridesFlexLayout()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(
+                FindRepositoryRoot(),
+                "src",
+                "FuaPay.Web",
+                "wwwroot",
+                "css",
+                "components.css"),
+            Encoding.UTF8);
+
+        Assert.Contains(".form-actions[hidden]", source, StringComparison.Ordinal);
+        Assert.Contains("display: none;", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DetailsPage_LoadsSelfHostedPollingAndKeepsManualRefresh()
     {
         var source = File.ReadAllText(

@@ -26,7 +26,7 @@ public sealed class CsobPaymentRecoverySchedulerTests
         var results = await Task.WhenAll(
             Enumerable.Range(0, 8)
                 .Select(_ => scheduler.ScheduleReturnAsync(
-                    " pay1234567890 ")));
+                    CreateVerifiedReturn())));
 
         Assert.All(results, result => Assert.Equal(paymentId, result));
         Assert.Equal(8, repository.CallCount);
@@ -50,16 +50,17 @@ public sealed class CsobPaymentRecoverySchedulerTests
         public int CallCount => _callCount;
 
         public Task<CsobBrowserReturnObservation?> ScheduleFromReturnAsync(
-            string providerReference,
+            CsobVerifiedPaymentReturn verifiedReturn,
             DateTimeOffset observedAt,
             CancellationToken cancellationToken = default)
         {
-            Assert.Equal("pay1234567890", providerReference);
+            Assert.Equal("pay1234567890", verifiedReturn.PayId);
             var call = Interlocked.Increment(ref _callCount);
             return Task.FromResult<CsobBrowserReturnObservation?>(
                 new CsobBrowserReturnObservation(
                     _paymentId,
-                    IsFirstObservation: call == 1));
+                    IsFirstObservation: call == 1,
+                    IsFirstVerifiedExpiryObservation: false));
         }
 
         public Task<int> ScheduleLongOpenPaymentsAsync(
@@ -137,6 +138,19 @@ public sealed class CsobPaymentRecoverySchedulerTests
             return Task.CompletedTask;
         }
     }
+
+    private static CsobVerifiedPaymentReturn CreateVerifiedReturn() =>
+        new(
+            "pay1234567890",
+            "20260814140000",
+            0,
+            "OK",
+            3,
+            AuthCode: null,
+            MerchantData: null,
+            StatusDetail: null,
+            "pay1234567890|20260814140000|0|OK|3",
+            "signature");
 
     private sealed class FixedTimeProvider : TimeProvider
     {

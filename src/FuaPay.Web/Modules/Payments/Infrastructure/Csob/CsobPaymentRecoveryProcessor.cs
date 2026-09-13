@@ -152,24 +152,21 @@ public sealed class CsobPaymentRecoveryProcessor
                     cancellationToken);
             }
 
-            var completed = await TransitionWithAuditAsync(
-                ct => _repository.MarkCompletedAsync(
-                    claim,
-                    attemptedAt,
-                    result.GatewayPaymentStatus,
-                    result.GatewayResultCode,
-                    ct),
-                CreateAuditEntry(
-                    claim.PaymentId,
-                    "payment.reconciliation.completed",
-                    $"Reconciliation platby {claim.PaymentId} skončila " +
-                    $"ověřeným stavem ČSOB {result.GatewayPaymentStatus}.",
-                    attemptedAt),
+            var completion = await CompleteClaimWithAuditAsync(
+                claim,
+                attemptedAt,
+                result.GatewayPaymentStatus,
+                result.GatewayResultCode,
                 cancellationToken);
 
-            return completed
-                ? CsobPaymentRecoveryDisposition.Completed
-                : CsobPaymentRecoveryDisposition.ClaimLost;
+            return completion switch
+            {
+                CsobPaymentRecoveryCompletion.Completed =>
+                    CsobPaymentRecoveryDisposition.Completed,
+                CsobPaymentRecoveryCompletion.RescheduledForNewEvidence =>
+                    CsobPaymentRecoveryDisposition.Rescheduled,
+                _ => CsobPaymentRecoveryDisposition.ClaimLost
+            };
         }
         catch (CsobPaymentRequiresAttentionException exception)
         {
@@ -359,6 +356,60 @@ public sealed class CsobPaymentRecoveryProcessor
         catch (RecoveryClaimLostException)
         {
             return false;
+        }
+    }
+
+    private async Task<CsobPaymentRecoveryCompletion>
+        CompleteClaimWithAuditAsync(
+            CsobPaymentRecoveryClaim claim,
+            DateTimeOffset attemptedAt,
+            int gatewayPaymentStatus,
+            int resultCode,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _transaction.ExecuteAsync(
+                async ct =>
+                {
+                    var completion = await _repository.CompleteClaimAsync(
+                        claim,
+                        attemptedAt,
+                        gatewayPaymentStatus,
+                        resultCode,
+                        ct);
+
+                    if (completion == CsobPaymentRecoveryCompletion.ClaimLost)
+                    {
+                        throw new RecoveryClaimLostException();
+                    }
+
+                    var rescheduled = completion ==
+                        CsobPaymentRecoveryCompletion
+                            .RescheduledForNewEvidence;
+                    await _auditTrail.WriteAsync(
+                        CreateAuditEntry(
+                            claim.PaymentId,
+                            rescheduled
+                                ? "payment.reconciliation.evidence-recheck-scheduled"
+                                : "payment.reconciliation.completed",
+                            rescheduled
+                                ? $"Nová ověřená expiry evidence pro platbu " +
+                                  $"{claim.PaymentId} vyžaduje další serverové " +
+                                  "ověření ČSOB."
+                                : $"Reconciliation platby {claim.PaymentId} " +
+                                  $"skončila ověřeným stavem ČSOB " +
+                                  $"{gatewayPaymentStatus}.",
+                            attemptedAt),
+                        ct);
+
+                    return completion;
+                },
+                cancellationToken);
+        }
+        catch (RecoveryClaimLostException)
+        {
+            return CsobPaymentRecoveryCompletion.ClaimLost;
         }
     }
 
