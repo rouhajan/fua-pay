@@ -99,9 +99,7 @@ public sealed class ManualCreditTopUpService
         }
 
         var acceptedAt = _timeProvider.GetUtcNow();
-        var description =
-            $"Ruční dobití kreditu: {command.Note} " +
-            $"(provedl {command.AdministratorUserId}, příkaz {command.CommandId})";
+        const string description = "Ruční dobití kreditu";
 
         _commandRepository.Stage(command, acceptedAt);
 

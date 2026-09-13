@@ -27,7 +27,12 @@ public sealed class ManualCreditTopUpServiceTests
         Assert.Equal(new Money(2_500), movement.BalanceAfter);
         Assert.Equal(movement.BalanceAfter, fixture.Accounts.Account.Balance);
         Assert.Equal(CreditMovementType.Credit, result.MovementType);
-        Assert.Contains("Ruční dobití kreditu", result.Description);
+        Assert.Equal("Ruční dobití kreditu", result.Description);
+        Assert.DoesNotContain(command.Note, result.Description);
+        Assert.DoesNotContain(
+            command.AdministratorUserId.ToString(),
+            result.Description);
+        Assert.DoesNotContain(command.CommandId.ToString(), result.Description);
         Assert.DoesNotContain("Administrativní korekce", result.Description);
 
         var persisted = Assert.IsType<PersistedManualCreditTopUpCommand>(
@@ -43,6 +48,7 @@ public sealed class ManualCreditTopUpServiceTests
         Assert.Equal("credit.manual-topup", audit.Action);
         Assert.Equal(fixture.AdministratorId, audit.ActorUserId);
         Assert.Equal(fixture.OwnerId.ToString(), audit.EntityId);
+        Assert.Contains(command.Note, audit.Description);
     }
 
     [Fact]
