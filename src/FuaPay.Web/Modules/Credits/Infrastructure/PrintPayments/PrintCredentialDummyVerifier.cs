@@ -2,7 +2,8 @@ using FuaPay.Web.Modules.Credits.Application;
 
 namespace FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
 
-public sealed class PrintCredentialDummyVerifier
+internal sealed class PrintCredentialDummyVerifier :
+    IPreparedPrintCredentialHash
 {
     public PrintCredentialDummyVerifier(
         PrintCredentialSecurityConfiguration configuration,
@@ -11,10 +12,10 @@ public sealed class PrintCredentialDummyVerifier
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(hasher);
 
-        Hash = configuration.Enabled
+        Value = configuration.Enabled
             ? hasher.Hash("000000")
             : string.Empty;
     }
 
-    public string Hash { get; }
+    public string Value { get; }
 }

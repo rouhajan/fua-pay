@@ -18,7 +18,7 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                 columns: table => new
                 {
                     owner_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    normalized_email = table.Column<string>(type: "character varying(320)", maxLength: 320, nullable: false),
+                    normalized_email = table.Column<string>(type: "character varying(320)", maxLength: 320, nullable: false, collation: "C"),
                     code_hash = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     changed_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
@@ -28,7 +28,7 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_credits_print_credentials", x => x.owner_id);
-                    table.CheckConstraint("ck_credits_print_credentials_email_normalized", "normalized_email = lower(btrim(normalized_email)) AND length(normalized_email) > 0");
+                    table.CheckConstraint("ck_credits_print_credentials_email_normalized", "normalized_email = translate(btrim(normalize(normalized_email, NFKC), ' '), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') AND length(normalized_email) > 0");
                     table.CheckConstraint("ck_credits_print_credentials_changed_at_valid", "changed_at >= created_at");
                     table.CheckConstraint("ck_credits_print_credentials_owner_id_not_empty", "owner_id <> '00000000-0000-0000-0000-000000000000'::uuid");
                     table.CheckConstraint("ck_credits_print_credentials_revoked_at_valid", "revoked_at IS NULL OR revoked_at = changed_at");

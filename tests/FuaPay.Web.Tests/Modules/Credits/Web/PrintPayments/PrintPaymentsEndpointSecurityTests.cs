@@ -5,9 +5,13 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Tests.Testing;
 
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace FuaPay.Web.Tests.Modules.Credits.Web.PrintPayments;
 
@@ -61,6 +65,40 @@ public sealed class PrintPaymentsEndpointSecurityTests
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal("print_credentials_disabled", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task CredentialReserve_WhenLimiterCannotRecordFailureReturns429()
+    {
+        using var baseFactory = CreateEnabledFactory();
+        using var factory = baseFactory.WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(
+                services =>
+                {
+                    services.RemoveAll<IPrintCredentialAttemptLimiter>();
+                    services.AddSingleton<IPrintCredentialAttemptLimiter>(
+                        new SaturatedAttemptLimiter());
+                }));
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/print-payments/reservations/by-credential",
+            new
+            {
+                email = "student@tul.cz",
+                printCode = "invalid",
+                reserveCommandId = Guid.NewGuid(),
+                jobUuid = $"urn:uuid:{Guid.NewGuid():D}",
+                amountMinorUnits = 100,
+                currency = "CZK"
+            });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal(
+            "print_credential_rate_limited",
+            await ReadCodeAsync(response));
     }
 
     [Fact]
@@ -375,5 +413,19 @@ public sealed class PrintPaymentsEndpointSecurityTests
         return document.RootElement
             .GetProperty("code")
             .GetString()!;
+    }
+
+    private sealed class SaturatedAttemptLimiter :
+        IPrintCredentialAttemptLimiter
+    {
+        public bool IsBlocked(
+            Guid printSourceId,
+            string? normalizedEmail,
+            DateTimeOffset now) => false;
+
+        public bool TryRecordFailure(
+            Guid printSourceId,
+            string? normalizedEmail,
+            DateTimeOffset now) => false;
     }
 }

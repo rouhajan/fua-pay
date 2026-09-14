@@ -1,6 +1,5 @@
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.Modules.Credits.Domain;
-using FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
 
 namespace FuaPay.Web.Modules.Credits.Application;
 
@@ -16,7 +15,7 @@ public sealed class PrintCredentialReservationService
     public PrintCredentialReservationService(
         IPrintCredentialRepository credentials,
         IPrintCodeHasher hasher,
-        PrintCredentialDummyVerifier dummyVerifier,
+        IPreparedPrintCredentialHash preparedDummyHash,
         IPrintCredentialAttemptLimiter attemptLimiter,
         PrintReservationService reservations,
         TimeProvider timeProvider)
@@ -26,7 +25,7 @@ public sealed class PrintCredentialReservationService
         _attemptLimiter = attemptLimiter;
         _reservations = reservations;
         _timeProvider = timeProvider;
-        _unknownCredentialHash = dummyVerifier.Hash;
+        _unknownCredentialHash = preparedDummyHash.Value;
     }
 
     public async Task<PrintReservationResult> ReserveAsync(

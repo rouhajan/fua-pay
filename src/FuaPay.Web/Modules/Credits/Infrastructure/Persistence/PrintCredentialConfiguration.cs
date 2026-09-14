@@ -26,7 +26,7 @@ internal sealed class PrintCredentialConfiguration :
                     "owner_id <> '00000000-0000-0000-0000-000000000000'::uuid");
                 table.HasCheckConstraint(
                     "ck_credits_print_credentials_email_normalized",
-                    "normalized_email = lower(btrim(normalized_email)) AND length(normalized_email) > 0");
+                    "normalized_email = translate(btrim(normalize(normalized_email, NFKC), ' '), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') AND length(normalized_email) > 0");
                 table.HasCheckConstraint(
                     "ck_credits_print_credentials_changed_at_valid",
                     "changed_at >= created_at");
@@ -46,6 +46,7 @@ internal sealed class PrintCredentialConfiguration :
         builder.Property(item => item.NormalizedEmail)
             .HasColumnName("normalized_email")
             .HasMaxLength(PrintCredentialEmail.MaximumLength)
+            .UseCollation("C")
             .IsRequired();
         builder.Property(item => item.CodeHash)
             .HasColumnName("code_hash")

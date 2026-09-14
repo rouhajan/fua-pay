@@ -547,6 +547,7 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(320)
                         .HasColumnType("character varying(320)")
+                        .UseCollation("C")
                         .HasColumnName("normalized_email");
 
                     b.Property<DateTimeOffset?>("RevokedAt")
@@ -572,7 +573,7 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_credits_print_credentials_changed_at_valid", "changed_at >= created_at");
 
-                            t.HasCheckConstraint("ck_credits_print_credentials_email_normalized", "normalized_email = lower(btrim(normalized_email)) AND length(normalized_email) > 0");
+                            t.HasCheckConstraint("ck_credits_print_credentials_email_normalized", "normalized_email = translate(btrim(normalize(normalized_email, NFKC), ' '), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') AND length(normalized_email) > 0");
 
                             t.HasCheckConstraint("ck_credits_print_credentials_owner_id_not_empty", "owner_id <> '00000000-0000-0000-0000-000000000000'::uuid");
 

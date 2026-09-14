@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net.Mail;
 using System.Text;
 
@@ -12,10 +11,20 @@ public static class PrintCredentialEmail
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
 
-        var normalized = value
-            .Trim()
+        var characters = value
             .Normalize(NormalizationForm.FormKC)
-            .ToLower(CultureInfo.InvariantCulture);
+            .Trim(' ')
+            .ToCharArray();
+
+        for (var index = 0; index < characters.Length; index++)
+        {
+            if (characters[index] is >= 'A' and <= 'Z')
+            {
+                characters[index] = (char)(characters[index] + ('a' - 'A'));
+            }
+        }
+
+        var normalized = new string(characters);
 
         if (
             normalized.Length > MaximumLength ||

@@ -69,6 +69,13 @@ při rozporu selže. Současný dokument je on-demand potvrzení o evidované ú
 ne perzistentní účetní/daňový doklad. Preview účetní údaje a DPH jsou popsány v
 [PDF potvrzení o úhradě](features/payment-receipts.md).
 
+`Credits` také vlastní volitelnou persistentní PrintCredentials hranici. Service
+bearer autentizuje FUA Print; zákazníkem spravovaný e-mailový tiskový credential
+smí pouze převést ověřený požadavek do existujícího print-reservation lifecycle.
+Nevytváří Access účet ani druhý ledger a při každém použití fail-closed ověřuje
+aktuálního vlastníka a roli Customer. Původní Print Payments cesta přes stabilní
+Entra `tid + oid` zůstává samostatná a beze změny.
+
 ## Webová bezpečnostní hranice
 
 Razor Pages používají fallback autorizaci, antiforgery tokeny na změnových

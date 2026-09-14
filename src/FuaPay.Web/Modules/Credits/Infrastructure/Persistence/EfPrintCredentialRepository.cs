@@ -68,7 +68,11 @@ internal sealed class EfPrintCredentialRepository : IPrintCredentialRepository
                     ) AS "IsCustomer"
                 FROM access.users AS candidate
                 WHERE candidate.email IS NOT NULL
-                  AND lower(normalize(btrim(candidate.email), NFKC)) = {normalizedEmail}
+                  AND translate(
+                          btrim(normalize(candidate.email, NFKC), ' '),
+                          'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                          'abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+                      = {normalizedEmail} COLLATE "C"
                 LIMIT 2
                 """)
             .ToArrayAsync(cancellationToken);
@@ -97,7 +101,11 @@ internal sealed class EfPrintCredentialRepository : IPrintCredentialRepository
             SELECT count(*)::bigint AS "Value"
             FROM access.users AS candidate
             WHERE candidate.email IS NOT NULL
-              AND lower(normalize(btrim(candidate.email), NFKC)) = {normalizedEmail}
+              AND translate(
+                      btrim(normalize(candidate.email, NFKC), ' '),
+                      'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                      'abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+                  = {normalizedEmail} COLLATE "C"
             """).SingleAsync(cancellationToken);
     }
 

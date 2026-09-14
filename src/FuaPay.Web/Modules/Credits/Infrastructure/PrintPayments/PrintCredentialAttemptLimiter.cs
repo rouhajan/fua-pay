@@ -26,6 +26,28 @@ internal sealed class PrintCredentialAttemptLimiter :
         }
     }
 
+    internal int SourceEntryCount
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _sourceCounters.Count;
+            }
+        }
+    }
+
+    internal int EmailEntryCount
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _emailCounters.Count;
+            }
+        }
+    }
+
     public bool IsBlocked(
         Guid printSourceId,
         string? normalizedEmail,
@@ -75,17 +97,29 @@ internal sealed class PrintCredentialAttemptLimiter :
                 return false;
             }
 
+            if (
+                !CanRecordNewKey(
+                    _sourceCounters,
+                    sourceKey,
+                    MaximumSourceEntries) ||
+                emailKey is not null &&
+                !CanRecordNewKey(
+                    _emailCounters,
+                    emailKey,
+                    MaximumEmailEntries))
+            {
+                return false;
+            }
+
             Increment(
                 _sourceCounters,
                 sourceKey,
-                MaximumSourceEntries,
                 now);
             if (emailKey is not null)
             {
                 Increment(
                     _emailCounters,
                     emailKey,
-                    MaximumEmailEntries,
                     now);
             }
 
@@ -103,7 +137,6 @@ internal sealed class PrintCredentialAttemptLimiter :
     private static void Increment(
         Dictionary<string, Counter> counters,
         string key,
-        int maximumEntries,
         DateTimeOffset now)
     {
         if (counters.TryGetValue(key, out var counter))
@@ -112,17 +145,14 @@ internal sealed class PrintCredentialAttemptLimiter :
             return;
         }
 
-        if (counters.Count >= maximumEntries)
-        {
-            var oldest = counters
-                .OrderBy(pair => pair.Value.ExpiresAt)
-                .ThenBy(pair => pair.Key, StringComparer.Ordinal)
-                .First();
-            counters.Remove(oldest.Key);
-        }
-
         counters.Add(key, new Counter(1, now + Window));
     }
+
+    private static bool CanRecordNewKey(
+        IReadOnlyDictionary<string, Counter> counters,
+        string key,
+        int maximumEntries) =>
+        counters.ContainsKey(key) || counters.Count < maximumEntries;
 
     private void RemoveExpired(DateTimeOffset now)
     {

@@ -15,8 +15,8 @@ public sealed class PrintCredentialDummyVerifierTests
             Configuration(enabled: true),
             hasher);
 
-        Assert.Equal("dummy-hash", verifier.Hash);
-        Assert.Equal("dummy-hash", verifier.Hash);
+        Assert.Equal("dummy-hash", verifier.Value);
+        Assert.Equal("dummy-hash", verifier.Value);
         Assert.Equal(1, hasher.HashCalls);
     }
 
@@ -28,7 +28,7 @@ public sealed class PrintCredentialDummyVerifierTests
             Configuration(enabled: false),
             hasher);
 
-        Assert.Empty(verifier.Hash);
+        Assert.Empty(verifier.Value);
         Assert.Equal(0, hasher.HashCalls);
     }
 

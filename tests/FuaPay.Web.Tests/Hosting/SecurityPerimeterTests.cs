@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Access.Web;
+using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Tests.Testing;
 
 using Microsoft.AspNetCore.Antiforgery;
@@ -426,6 +427,60 @@ public sealed class SecurityPerimeterTests :
     }
 
     [Fact]
+    public async Task DisabledPrintCredentialPage_ReturnsNotFoundWithoutPepperOrHashing()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací zákazník",
+            "student@tul.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Customer]);
+        var sessionQueries = new RecordingAccessSessionQueries(session);
+        var hasher = new CountingPrintCodeHasher();
+        using var baseFactory = new ConfiguredWebApplicationFactory(
+            Environments.Development,
+            new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:FuaPay"] =
+                    "Host=localhost;Database=unused;" +
+                    "Username=unused;Password=unused",
+                ["PrintCredentials:Enabled"] = "false"
+            });
+        using var configuredFactory = baseFactory.WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(
+                services =>
+                {
+                    services.RemoveAll<IAccessSessionQueries>();
+                    services.AddSingleton<IAccessSessionQueries>(
+                        sessionQueries);
+                    services.RemoveAll<IPrintCodeHasher>();
+                    services.AddSingleton<IPrintCodeHasher>(hasher);
+                }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var protectedTicket = cookieOptions.TicketDataFormat.Protect(ticket);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}={protectedTicket}");
+        using var response = await client.GetAsync(
+            "/Customer/PrintCredential");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(1, sessionQueries.CallCount);
+        Assert.Equal(0, hasher.HashCalls);
+        Assert.Equal(0, hasher.VerifyCalls);
+    }
+
+    [Fact]
     public void StagingSecurityCookies_UseSecurePolicies()
     {
         using var stagingFactory =
@@ -780,6 +835,25 @@ public sealed class SecurityPerimeterTests :
             LastUserId = userId;
             Interlocked.Increment(ref _callCount);
             return Task.FromResult(_snapshot);
+        }
+    }
+
+    private sealed class CountingPrintCodeHasher : IPrintCodeHasher
+    {
+        public int HashCalls { get; private set; }
+
+        public int VerifyCalls { get; private set; }
+
+        public string Hash(string printCode)
+        {
+            HashCalls++;
+            return "unused";
+        }
+
+        public bool Verify(string hash, string printCode)
+        {
+            VerifyCalls++;
+            return false;
         }
     }
 }

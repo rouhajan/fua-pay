@@ -26,7 +26,7 @@ povoleno výhradně v credential cestě a pouze proti zvláštní tabulce
 `credits.print_credentials`; obyčejný profilový index `access.users.email` není
 považován za unikátní autentizační klíč.
 
-## Stav integrace k 2026-09-13
+## Stav integrace k 2026-09-14
 
 FUA Pay strana kontraktu je implementovaná a security-hardened. Existují
 endpointy pro `Reserve`, read-only recovery lookup, `ResolutionRequired`,
@@ -95,7 +95,10 @@ vypnuté. `PrintPayments__Enabled=true` samo o sobě pepper nevyžaduje a zachov
 původní API. `PrintCredentials__Enabled=true` vyžaduje zapnuté PrintPayments a
 platný pepper; jinak aplikace fail-closed zastaví startup. Vypnutá credential
 feature nezobrazuje zákaznickou navigaci/formulář a credential reserve vrací
-`404 print_credentials_disabled` bez ověřování e-mailu nebo PINu.
+`404 print_credentials_disabled` bez ověřování e-mailu nebo PINu. Tento `404`
+vzniká až po úspěšné autentizaci service beareru FUA Print; chybějící nebo
+neplatný bearer skončí dříve na hranici služby jako
+`401 service_authentication_failed`.
 
 Pepper tiskových kódů je samostatný deployment secret FUA Pay. Nesmí být sdílen
 s FUA Print ani s učebnovými počítači. Při zapnutých PrintCredentials chybějící,
@@ -181,13 +184,23 @@ service credentialu. Endpoint pak deleguje na
 }
 ```
 
-Také tato cesta nejprve vyžaduje service bearer credential. E-mail se ořízne,
-Unicode normalizuje do FormKC/NFKC a porovnává malými písmeny. Stejnou NFKC a
-lower normalizaci používá PostgreSQL lookup Access profilu. Musí existovat právě
-jeden aktivní tiskový credential a právě jeden odpovídající aktuální Access
-profil; jeho vlastník musí být stále aktivní efektivní `Customer`. Neznámý
-e-mail, chybný kód, zneplatněný/nenastavený credential, neaktivní vlastník a
-nejednoznačný profil selžou bez rezervace stejnou odpovědí
+Také tato cesta nejprve vyžaduje service bearer credential. Kanonizace e-mailu
+má v aplikaci, PostgreSQL lookupu i invariantu `credits.print_credentials`
+stejnou deterministickou definici: Unicode FormKC/NFKC, odstranění pouze znaků
+U+0020 SPACE z obou konců a převod pouze ASCII `A`–`Z` na `a`–`z`. Ostatní
+Unicode znaky včetně jejich velikosti zůstávají beze změny. PostgreSQL používá
+explicitní `C` kolaci, takže identitu neurčuje locale databáze. Full-width ASCII
+se díky NFKC sjednotí; nepodporovaná ne-ASCII case-ekvivalence se nehádá a selže
+uzavřeně.
+
+Musí existovat právě jeden aktivní tiskový credential a právě jeden odpovídající
+aktuální Access profil; jeho ID musí být uloženým vlastníkem a vlastník musí být
+stále aktivní efektivní `Customer`. Profilový e-mail je synchronizovatelný a
+měnitelný: po změně, odstranění nebo přeřazení adresy jinému účtu autentizace
+uspěje jen tehdy, když se aktuální profil pod stejnou kanonizací stále vyhodnotí
+jednoznačně k uloženému vlastníkovi. Stará, přeřazená nebo nejednoznačná adresa
+selže uzavřeně. Neznámý e-mail, chybný kód, zneplatněný/nenastavený credential,
+neaktivní vlastník a nejednoznačný profil selžou bez rezervace stejnou odpovědí
 `401 print_credential_authentication_failed`.
 
 Kromě obecného limitu 120/min/IP platí pro credential cestu minutové in-memory
@@ -196,7 +209,10 @@ neúspěšných pokusů pro normalizovaný e-mail + `printSourceId`. Úspěšné
 počty nezvyšují. Překročení vrací `429 print_credential_rate_limited`; nejde o
 trvalý account lockout. Zastaralé klíče expirují a počet source i e-mailových
 klíčů má pevný horní limit, takže náhodné adresy nemohou neomezeně zvětšovat
-paměť procesu.
+paměť procesu. Po odstranění expirovaných položek se existující živý klíč dál
+počítá běžně. Je-li příslušná kapacita plná, nový klíč žádnou živou položku
+nevytěsní: aktuální neúspěšná autentizace fail-closed vrátí `429` a existující
+blokace zůstávají v platnosti do své normální expirace.
 
 Po ověření se sestaví stejný `ReservePrintCreditCommand` a ihned se volá
 `PrintReservationService`; nevzniká druhý ledger, Payment ani idempotency model.
@@ -259,7 +275,8 @@ Business a validační chyby jsou `application/problem+json` se stabilním polem
 - `401`: `service_authentication_failed`;
 - `401`: `print_credential_authentication_failed` (credential reserve);
 - `429`: `print_credential_rate_limited` (credential reserve);
-- `404`: `print_credentials_disabled` (credential reserve feature je vypnutá);
+- `404`: `print_credentials_disabled` (credential reserve feature je vypnutá;
+  pouze po úspěšné service autentizaci);
 - `400`: `invalid_request`, `invalid_job_uuid`, `invalid_amount`,
   `unsupported_currency`, `invalid_identity`;
 - `403`: `user_not_eligible`;

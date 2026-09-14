@@ -73,6 +73,7 @@ trvalý přes restarty i nasazení; jeho ztráta nebo rotace zneplatní všechny
 existující tiskové PIN verifiery. Bezpečný provozní postup je credential feature
 vypnout, nastavit nový pepper a vyžádat od zákazníků nové nastavení PINu. Tento
 dokument neprohlašuje credential feature za nasazenou na stagingu ani v produkci.
+Plaintext PIN ani pepper se nesmějí zapisovat do aplikačního logu nebo auditu.
 
 Doklady zůstávají v Production vypnuté, dokud nejsou účetní údaje a pravidlo
 DPH schválené. Při zapnutí musí být `PreviewMode=false`, nesmí zůstat preview

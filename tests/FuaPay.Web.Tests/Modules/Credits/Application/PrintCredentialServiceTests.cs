@@ -107,7 +107,9 @@ public sealed class PrintCredentialServiceTests
     [Theory]
     [InlineData(" Student@TUL.CZ ", "student@tul.cz")]
     [InlineData("student@tul.cz", "student@tul.cz")]
-    public void EmailNormalizationIsCaseInsensitiveAndTrimmed(string value, string expected)
+    public void EmailNormalizationFoldsAsciiCaseAndTrimsAsciiSpace(
+        string value,
+        string expected)
     {
         Assert.Equal(expected, PrintCredentialEmail.Normalize(value));
     }
@@ -120,6 +122,17 @@ public sealed class PrintCredentialServiceTests
         string expected)
     {
         Assert.Equal(expected, PrintCredentialEmail.Normalize(value));
+    }
+
+    [Fact]
+    public void EmailNormalizationPreservesNonAsciiCase()
+    {
+        Assert.Equal(
+            "Žluťoučký@tul.cz",
+            PrintCredentialEmail.Normalize("Žluťoučký@TUL.CZ"));
+        Assert.NotEqual(
+            PrintCredentialEmail.Normalize("Žluťoučký@tul.cz"),
+            PrintCredentialEmail.Normalize("žluťoučký@tul.cz"));
     }
 
     [Fact]

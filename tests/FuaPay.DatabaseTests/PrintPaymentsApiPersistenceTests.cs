@@ -849,6 +849,8 @@ public sealed class PrintPaymentsApiPersistenceTests :
         {
             using var factory = CreateApiFactory();
             await SetPrintCodeAsync(factory, user.UserId, "123456");
+            var storedEmail = await ReadStoredPrintCredentialEmailAsync(
+                user.UserId);
             using var client = CreateClient(factory, SourceACredential);
 
             using var response = await client.PostAsJsonAsync(
@@ -861,6 +863,59 @@ public sealed class PrintPaymentsApiPersistenceTests :
                     1));
 
             _ = await ReadReservationAsync(response);
+            Assert.Equal("student@tul.cz", storedEmail.NormalizedEmail);
+            Assert.True(storedEmail.SatisfiesCanonicalRule);
+            Assert.Equal("C", storedEmail.CollationName);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(user.UserId);
+        }
+    }
+
+    [Fact]
+    public async Task ByCredential_NonAsciiCaseIsPreservedAndComparedExactly()
+    {
+        var user = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: 100,
+            email: "Žák@TUL.CZ");
+
+        try
+        {
+            using var factory = CreateApiFactory();
+            await SetPrintCodeAsync(factory, user.UserId, "123456");
+            var storedEmail = await ReadStoredPrintCredentialEmailAsync(
+                user.UserId);
+            using var client = CreateClient(factory, SourceACredential);
+
+            using var exactCaseResponse = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    "Žák@tul.cz",
+                    "123456",
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    1));
+            _ = await ReadReservationAsync(exactCaseResponse);
+
+            using var differentCaseResponse = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    "žák@tul.cz",
+                    "123456",
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    1));
+            await AssertProblemAsync(
+                differentCaseResponse,
+                HttpStatusCode.Unauthorized,
+                "print_credential_authentication_failed");
+
+            Assert.Equal("Žák@tul.cz", storedEmail.NormalizedEmail);
+            Assert.True(storedEmail.SatisfiesCanonicalRule);
+            Assert.Equal("C", storedEmail.CollationName);
         }
         finally
         {
@@ -1290,6 +1345,38 @@ public sealed class PrintPaymentsApiPersistenceTests :
             .SingleAsync();
     }
 
+    private async Task<StoredPrintCredentialEmail>
+        ReadStoredPrintCredentialEmailAsync(Guid ownerId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+
+        return await dbContext.Database.SqlQuery<StoredPrintCredentialEmail>(
+            $"""
+            SELECT
+                normalized_email AS "NormalizedEmail",
+                (
+                    normalized_email = translate(
+                        btrim(normalize(normalized_email, NFKC), ' '),
+                        'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                        'abcdefghijklmnopqrstuvwxyz')
+                ) AS "SatisfiesCanonicalRule",
+                (
+                    SELECT coll.collname
+                    FROM pg_attribute AS attr
+                    JOIN pg_collation AS coll
+                      ON coll.oid = attr.attcollation
+                    WHERE attr.attrelid =
+                            'credits.print_credentials'::regclass
+                      AND attr.attname = 'normalized_email'
+                ) AS "CollationName"
+            FROM credits.print_credentials
+            WHERE owner_id = {ownerId}
+            """)
+            .SingleAsync();
+    }
+
     private async Task<int> CountReservationAuditAsync(
         Guid ownerId,
         string action)
@@ -1397,6 +1484,11 @@ public sealed class PrintPaymentsApiPersistenceTests :
         int UserCount,
         int AccountCount,
         int ReservationCount);
+
+    private sealed record StoredPrintCredentialEmail(
+        string NormalizedEmail,
+        bool SatisfiesCanonicalRule,
+        string CollationName);
 
     private sealed class TwoCallBarrier
     {
