@@ -75,6 +75,10 @@ var csobReconciliationConfiguration =
         csobGatewayConfiguration);
 var printPaymentsConfiguration =
     PrintPaymentsConfiguration.Resolve(builder.Configuration);
+var printCredentialSecurityConfiguration =
+    PrintCredentialSecurityConfiguration.Resolve(
+        builder.Configuration,
+        printPaymentsConfiguration.Enabled);
 
 var receiptConfiguration =
     ReceiptConfiguration.Resolve(
@@ -86,6 +90,7 @@ var receiptConfiguration =
 builder.Services.AddSingleton(
     new DevelopmentSignInAvailability(
         runtimeFeatures.InteractiveTestSignInEnabled));
+builder.Services.AddSingleton(printCredentialSecurityConfiguration);
 
 var dataProtection =
     builder.Services

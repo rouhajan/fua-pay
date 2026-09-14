@@ -14,6 +14,7 @@ public sealed class AccessNavigationTests
             {
                 "Přehled",
                 "Kredit",
+                "Tiskový kód",
                 "Platby",
                 "Zakázky",
                 "Nápověda"
@@ -65,6 +66,7 @@ public sealed class AccessNavigationTests
     [InlineData("/Customer/Payments/CreateTopUp", "Kredit")]
     [InlineData("/Customer/Payments/Index", "Platby")]
     [InlineData("/Customer/Payments/Details", "Platby")]
+    [InlineData("/Customer/PrintCredential/Index", "Tiskový kód")]
     public void FindActive_CustomerPaymentPages_SelectExpectedItem(
         string currentPage,
         string expectedLabel)

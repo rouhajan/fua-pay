@@ -39,6 +39,9 @@ public sealed class FuaPayDbContext : DbContext
     internal DbSet<PrintReservationEntity> PrintReservations =>
         Set<PrintReservationEntity>();
 
+    internal DbSet<PrintCredentialEntity> PrintCredentials =>
+        Set<PrintCredentialEntity>();
+
     internal DbSet<CreditReturnHoldEntity> CreditReturnHolds =>
         Set<CreditReturnHoldEntity>();
 

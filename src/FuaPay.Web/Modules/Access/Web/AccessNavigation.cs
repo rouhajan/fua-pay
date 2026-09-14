@@ -16,6 +16,7 @@ public static class AccessNavigation
         [
             new("Přehled", "/Index", IsOverview: true),
             new("Kredit", "/Customer/Credit/Index", "/Customer/Credit"),
+            new("Tiskový kód", "/Customer/PrintCredential/Index", "/Customer/PrintCredential"),
             new("Platby", "/Customer/Payments/Index", "/Customer/Payments"),
             new("Zakázky", "/Customer/Jobs/Index", "/Customer/Jobs"),
             new("Nápověda", "/Help", "/Help")

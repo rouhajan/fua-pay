@@ -17,6 +17,28 @@ public sealed class PrintPaymentsEndpointSecurityTests
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
 
     [Fact]
+    public async Task CredentialReserve_WithoutServiceCredentialReturnsStable401()
+    {
+        using var factory = CreateEnabledFactory();
+        using var client = CreateClient(factory);
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/print-payments/reservations/by-credential",
+            new
+            {
+                email = "student@tul.cz",
+                printCode = "123456",
+                reserveCommandId = Guid.NewGuid(),
+                jobUuid = $"urn:uuid:{Guid.NewGuid():D}",
+                amountMinorUnits = 100,
+                currency = "CZK"
+            });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("service_authentication_failed", await ReadCodeAsync(response));
+    }
+
+    [Fact]
     public async Task Endpoint_WithoutServiceCredentialReturnsStable401()
     {
         using var factory = CreateEnabledFactory();
@@ -109,6 +131,33 @@ public sealed class PrintPaymentsEndpointSecurityTests
         using var response = await client.PostAsync(
             "/api/print-payments/reservations",
             content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_request", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task CredentialReserve_ClientSuppliedOwnerIdIsRejected()
+    {
+        using var factory = CreateEnabledFactory();
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+        var body = $$"""
+            {
+              "email": "student@tul.cz",
+              "printCode": "123456",
+              "reserveCommandId": "{{Guid.NewGuid():D}}",
+              "jobUuid": "urn:uuid:{{Guid.NewGuid():D}}",
+              "amountMinorUnits": 100,
+              "currency": "CZK",
+              "ownerId": "{{Guid.NewGuid():D}}"
+            }
+            """;
+
+        using var response = await client.PostAsync(
+            "/api/print-payments/reservations/by-credential",
+            new StringContent(body, Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("invalid_request", await ReadCodeAsync(response));
@@ -265,6 +314,8 @@ public sealed class PrintPaymentsEndpointSecurityTests
                     "Host=localhost;Database=unused;" +
                     "Username=unused;Password=unused",
                 ["PrintPayments:Enabled"] = "true",
+                ["PrintCredentials:PepperBase64"] =
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                 ["PrintPayments:Sources:0:PrintSourceId"] =
                     Guid.NewGuid().ToString("D"),
                 ["PrintPayments:Sources:0:CredentialSha256"] =

@@ -46,13 +46,32 @@ public sealed class PrintReservationService
     {
         ArgumentNullException.ThrowIfNull(command);
 
+        return await ReserveAuthenticatedAsync(
+            _ => Task.FromResult(command),
+            cancellationToken);
+    }
+
+    public async Task<PrintReservationResult> ReserveAuthenticatedAsync(
+        Func<CancellationToken, Task<ReservePrintCreditCommand>> commandFactory,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandFactory);
+
+        ReservePrintCreditCommand? command = null;
+
         try
         {
             return await _transaction.ExecuteAsync(
-                ct => ReserveInsideTransactionAsync(command, ct),
+                async ct =>
+                {
+                    command = await commandFactory(ct);
+                    ArgumentNullException.ThrowIfNull(command);
+                    return await ReserveInsideTransactionAsync(command, ct);
+                },
                 cancellationToken);
         }
         catch (PrintReservationReserveCommandAlreadyExistsException exception)
+            when (command is not null)
         {
             return await ResolveConcurrentUniqueConflictAsync(
                 command,
@@ -60,6 +79,7 @@ public sealed class PrintReservationService
                 cancellationToken);
         }
         catch (PrintReservationPrintJobAlreadyExistsException exception)
+            when (command is not null)
         {
             return await ResolveConcurrentUniqueConflictAsync(
                 command,

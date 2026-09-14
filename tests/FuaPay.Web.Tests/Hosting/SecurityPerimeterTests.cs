@@ -376,6 +376,56 @@ public sealed class SecurityPerimeterTests :
     }
 
     [Fact]
+    public async Task PrintCredentialPost_WithoutAntiforgeryToken_ReturnsBadRequest()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací zákazník",
+            "student@tul.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Customer]);
+        var sessionQueries = new RecordingAccessSessionQueries(session);
+        using var configuredFactory =
+            _factory.WithWebHostBuilder(
+                builder => builder.ConfigureTestServices(
+                    services =>
+                    {
+                        services.RemoveAll<IAccessSessionQueries>();
+                        services.AddSingleton<IAccessSessionQueries>(sessionQueries);
+                    }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var protectedTicket = cookieOptions.TicketDataFormat.Protect(ticket);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}={protectedTicket}");
+        using var content = new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["Input.PrintCode"] = "123456",
+                ["Input.Confirmation"] = "123456",
+                ["ownerId"] = Guid.NewGuid().ToString()
+            });
+
+        using var response = await client.PostAsync(
+            "/Customer/PrintCredential?handler=Set",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, sessionQueries.CallCount);
+        Assert.Equal(session.UserId, sessionQueries.LastUserId);
+    }
+
+    [Fact]
     public void StagingSecurityCookies_UseSecurePolicies()
     {
         using var stagingFactory =

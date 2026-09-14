@@ -11,9 +11,11 @@ using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Access.Infrastructure.Entra;
 using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.Credits.Domain;
 using FuaPay.Web.Modules.Credits.Web.PrintPayments;
 
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -451,9 +453,274 @@ public sealed class PrintPaymentsApiPersistenceTests :
         }
     }
 
+    [Fact]
+    public async Task ByCredential_UsesCanonicalReservationAndPersistentCodeLifecycle()
+    {
+        const string email = "persistent-print@example.cz";
+        const string firstCode = "123456";
+        const string changedCode = "654321";
+        var user = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: 1_000,
+            email: email);
+
+        try
+        {
+            using var factory = CreateApiFactory();
+            await SetPrintCodeAsync(factory, user.UserId, firstCode);
+            using var client = CreateClient(factory, SourceACredential);
+            var commandId = Guid.NewGuid();
+            var jobUuid = $"urn:uuid:{Guid.NewGuid():D}";
+            var request = CredentialReserveRequest(
+                " PERSISTENT-PRINT@EXAMPLE.CZ ",
+                firstCode,
+                commandId,
+                jobUuid,
+                400);
+
+            using var response = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                request);
+            var reserved = await ReadReservationAsync(response);
+            using var replayResponse = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                request);
+            var replay = await ReadReservationAsync(replayResponse);
+
+            Assert.Equal(reserved, replay);
+            var state = await ReadFinancialStateAsync(user.UserId);
+            Assert.Equal(1_000, state.BalanceMinorUnits);
+            Assert.Equal(1, state.MovementCount);
+            Assert.Equal(1, state.ReservationCount);
+            Assert.Equal(400, state.BlockingMinorUnits);
+            await AssertPrintCodeAbsentFromPersistenceAsync(user.UserId, firstCode);
+
+            using var insufficientResponse = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    email,
+                    firstCode,
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    700));
+            await AssertProblemAsync(
+                insufficientResponse,
+                HttpStatusCode.Conflict,
+                "insufficient_credit");
+            Assert.Equal(
+                1,
+                (await ReadFinancialStateAsync(user.UserId)).ReservationCount);
+
+            using var captureResponse = await client.PostAsJsonAsync(
+                $"/api/print-payments/reservations/{reserved.ReservationId:D}/capture",
+                new { terminalCommandId = Guid.NewGuid() });
+            var captured = await ReadReservationAsync(captureResponse);
+            Assert.Equal("Captured", captured.Status);
+            var capturedState = await ReadFinancialStateAsync(user.UserId);
+            Assert.Equal(600, capturedState.BalanceMinorUnits);
+            Assert.Equal(2, capturedState.MovementCount);
+            Assert.Equal(1, capturedState.ReservationCount);
+            Assert.Equal(0, capturedState.BlockingMinorUnits);
+
+            await SetPrintCodeAsync(factory, user.UserId, changedCode);
+            using var oldCodeResponse = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    email,
+                    firstCode,
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    100));
+            await AssertProblemAsync(
+                oldCodeResponse,
+                HttpStatusCode.Unauthorized,
+                "print_credential_authentication_failed");
+
+            using var changedCodeResponse = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    email,
+                    changedCode,
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    100));
+            _ = await ReadReservationAsync(changedCodeResponse);
+
+            await RevokePrintCodeAsync(factory, user.UserId);
+            using var revokedResponse = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    email,
+                    changedCode,
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    100));
+            await AssertProblemAsync(
+                revokedResponse,
+                HttpStatusCode.Unauthorized,
+                "print_credential_authentication_failed");
+        }
+        finally
+        {
+            await DeleteScenarioAsync(user.UserId);
+        }
+    }
+
+    [Fact]
+    public async Task ByCredential_UnknownEmailAndWrongCodeAreIndistinguishable()
+    {
+        const string email = "generic-failure@example.cz";
+        var user = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: 1_000,
+            email: email);
+
+        try
+        {
+            using var factory = CreateApiFactory();
+            await SetPrintCodeAsync(factory, user.UserId, "123456");
+            using var client = CreateClient(factory, SourceACredential);
+
+            using var wrongCode = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    email,
+                    "000000",
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    100));
+            using var unknownEmail = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    "unknown@example.cz",
+                    "000000",
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    100));
+
+            Assert.Equal(wrongCode.StatusCode, unknownEmail.StatusCode);
+            Assert.Equal(
+                await wrongCode.Content.ReadAsStringAsync(),
+                await unknownEmail.Content.ReadAsStringAsync());
+            Assert.Equal(0, (await ReadFinancialStateAsync(user.UserId)).ReservationCount);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(user.UserId);
+        }
+    }
+
+    [Fact]
+    public async Task ByCredential_ReservationAndConcurrentRevocationAreSerialized()
+    {
+        const string email = "credential-race@example.cz";
+        const string printCode = "123456";
+        var user = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: 1_000,
+            email: email);
+        var gate = new CredentialRaceGate();
+
+        try
+        {
+            using var factory = CreateCredentialRaceApiFactory(gate);
+            await SetPrintCodeAsync(factory, user.UserId, printCode);
+            using var client = CreateClient(factory, SourceACredential);
+            var requestTask = client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    email,
+                    printCode,
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    100));
+
+            await gate.AuthenticationLocked.WaitAsync(TimeSpan.FromSeconds(30));
+            var revokeTask = RevokePrintCodeAsync(factory, user.UserId);
+            await gate.RevocationBlocked.WaitAsync(TimeSpan.FromSeconds(30));
+
+            Assert.False(revokeTask.IsCompleted);
+            gate.ReleaseAuthentication();
+
+            using var response = await requestTask;
+            _ = await ReadReservationAsync(response);
+            await revokeTask;
+
+            using var revokedResponse = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    email,
+                    printCode,
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    100));
+            await AssertProblemAsync(
+                revokedResponse,
+                HttpStatusCode.Unauthorized,
+                "print_credential_authentication_failed");
+            Assert.Equal(
+                1,
+                (await ReadFinancialStateAsync(user.UserId)).ReservationCount);
+        }
+        finally
+        {
+            gate.ReleaseAuthentication();
+            await DeleteScenarioAsync(user.UserId);
+        }
+    }
+
     private WebApplicationFactory<Program> CreateApiFactory()
     {
         return new ApiWebApplicationFactory();
+    }
+
+    private static WebApplicationFactory<Program> CreateCredentialRaceApiFactory(
+        CredentialRaceGate gate)
+    {
+        return new ApiWebApplicationFactory().WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(
+                services =>
+                {
+                    var descriptor = Assert.Single(
+                        services,
+                        item => item.ServiceType ==
+                            typeof(IPrintCredentialRepository));
+
+                    services.Remove(descriptor);
+                    services.AddScoped<IPrintCredentialRepository>(
+                        provider => new CoordinatingPrintCredentialRepository(
+                            CreateOriginalPrintCredentialRepository(
+                                provider,
+                                descriptor),
+                            gate));
+                }));
+    }
+
+    private static IPrintCredentialRepository CreateOriginalPrintCredentialRepository(
+        IServiceProvider provider,
+        ServiceDescriptor descriptor)
+    {
+        if (descriptor.ImplementationInstance is
+            IPrintCredentialRepository instance)
+        {
+            return instance;
+        }
+
+        if (descriptor.ImplementationFactory is not null)
+        {
+            return (IPrintCredentialRepository)
+                descriptor.ImplementationFactory(provider);
+        }
+
+        return (IPrintCredentialRepository)
+            ActivatorUtilities.CreateInstance(
+                provider,
+                descriptor.ImplementationType
+                    ?? throw new InvalidOperationException(
+                        "The original print-credential repository has no implementation."));
     }
 
     private static IReadOnlyDictionary<string, string?> ApiSettings()
@@ -461,6 +728,8 @@ public sealed class PrintPaymentsApiPersistenceTests :
         return new Dictionary<string, string?>
         {
             ["PrintPayments:Enabled"] = "true",
+            ["PrintCredentials:PepperBase64"] =
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             ["PrintPayments:Sources:0:PrintSourceId"] =
                 SourceAId.ToString("D"),
             ["PrintPayments:Sources:0:CredentialSha256"] =
@@ -567,6 +836,65 @@ public sealed class PrintPaymentsApiPersistenceTests :
             amountMinorUnits,
             currency = "CZK"
         };
+    }
+
+    private static object CredentialReserveRequest(
+        string email,
+        string printCode,
+        Guid reserveCommandId,
+        string jobUuid,
+        long amountMinorUnits) =>
+        new
+        {
+            email,
+            printCode,
+            reserveCommandId,
+            jobUuid,
+            amountMinorUnits,
+            currency = "CZK"
+        };
+
+    private static async Task SetPrintCodeAsync(
+        WebApplicationFactory<Program> factory,
+        Guid ownerId,
+        string printCode)
+    {
+        using var scope = factory.Services.CreateScope();
+        await scope.ServiceProvider
+            .GetRequiredService<PrintCredentialService>()
+            .SetAsync(ownerId, printCode, printCode);
+    }
+
+    private static async Task RevokePrintCodeAsync(
+        WebApplicationFactory<Program> factory,
+        Guid ownerId)
+    {
+        using var scope = factory.Services.CreateScope();
+        await scope.ServiceProvider
+            .GetRequiredService<PrintCredentialService>()
+            .RevokeAsync(ownerId);
+    }
+
+    private async Task AssertPrintCodeAbsentFromPersistenceAsync(
+        Guid ownerId,
+        string printCode)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<FuaPayDbContext>();
+        var leaked = await dbContext.Database.SqlQuery<int>(
+            $"""
+            SELECT (
+                EXISTS (
+                    SELECT 1 FROM credits.print_credentials
+                    WHERE owner_id = {ownerId}
+                      AND code_hash LIKE {'%' + printCode + '%'})
+                OR EXISTS (
+                    SELECT 1 FROM audit.events
+                    WHERE actor_user_id = {ownerId}
+                      AND description LIKE {'%' + printCode + '%'})
+            )::integer AS "Value"
+            """).SingleAsync();
+        Assert.Equal(0, leaked);
     }
 
     private static async Task<PrintPaymentReservationResponse>
@@ -726,6 +1054,8 @@ public sealed class PrintPaymentsApiPersistenceTests :
             )
             """);
         _ = await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"DELETE FROM credits.print_credentials WHERE owner_id = {userId}");
+        _ = await dbContext.Database.ExecuteSqlInterpolatedAsync(
             $"DELETE FROM credits.accounts WHERE owner_id = {userId}");
         _ = await dbContext.Database.ExecuteSqlInterpolatedAsync(
             $"""
@@ -763,6 +1093,107 @@ public sealed class PrintPaymentsApiPersistenceTests :
         int UserCount,
         int AccountCount,
         int ReservationCount);
+
+    private sealed class CredentialRaceGate
+    {
+        private readonly TaskCompletionSource _authenticationLocked =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseAuthentication =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _revocationBlocked =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task AuthenticationLocked => _authenticationLocked.Task;
+
+        public Task RevocationBlocked => _revocationBlocked.Task;
+
+        public bool IsHoldingAuthentication =>
+            _authenticationLocked.Task.IsCompleted &&
+            !_releaseAuthentication.Task.IsCompleted;
+
+        public async Task HoldAuthenticationAsync(
+            CancellationToken cancellationToken)
+        {
+            _authenticationLocked.TrySetResult();
+            await _releaseAuthentication.Task.WaitAsync(cancellationToken);
+        }
+
+        public void RevocationIsBlocked() =>
+            _revocationBlocked.TrySetResult();
+
+        public void ReleaseAuthentication() =>
+            _releaseAuthentication.TrySetResult();
+    }
+
+    private sealed class CoordinatingPrintCredentialRepository :
+        IPrintCredentialRepository
+    {
+        private static readonly TimeSpan BlockingObservation =
+            TimeSpan.FromMilliseconds(250);
+
+        private readonly IPrintCredentialRepository _inner;
+        private readonly CredentialRaceGate _gate;
+
+        public CoordinatingPrintCredentialRepository(
+            IPrintCredentialRepository inner,
+            CredentialRaceGate gate)
+        {
+            _inner = inner;
+            _gate = gate;
+        }
+
+        public Task<PrintCredential?> FindByOwnerAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken = default) =>
+            _inner.FindByOwnerAsync(ownerId, cancellationToken);
+
+        public async Task<PrintCredentialAuthenticationCandidate?>
+            FindAuthenticationCandidateAsync(
+                string normalizedEmail,
+                CancellationToken cancellationToken = default)
+        {
+            var candidate = await _inner.FindAuthenticationCandidateAsync(
+                normalizedEmail,
+                cancellationToken);
+            await _gate.HoldAuthenticationAsync(cancellationToken);
+            return candidate;
+        }
+
+        public Task<long> CountAccessUsersByNormalizedEmailAsync(
+            string normalizedEmail,
+            CancellationToken cancellationToken = default) =>
+            _inner.CountAccessUsersByNormalizedEmailAsync(
+                normalizedEmail,
+                cancellationToken);
+
+        public void Add(PrintCredential credential) =>
+            _inner.Add(credential);
+
+        public async Task SaveAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (!_gate.IsHoldingAuthentication)
+            {
+                await _inner.SaveAsync(cancellationToken);
+                return;
+            }
+
+            var saveTask = _inner.SaveAsync(cancellationToken);
+            var completed = await Task.WhenAny(
+                saveTask,
+                Task.Delay(BlockingObservation, cancellationToken));
+
+            if (completed == saveTask)
+            {
+                await saveTask;
+                throw new InvalidOperationException(
+                    "Credential revocation was not blocked by authentication.");
+            }
+
+            _gate.RevocationIsBlocked();
+            await saveTask;
+        }
+    }
 
     private sealed class ApiWebApplicationFactory :
         WebApplicationFactory<Program>

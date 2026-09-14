@@ -1,5 +1,6 @@
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Infrastructure.Persistence;
+using FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -19,6 +20,8 @@ public static class CreditsModule
         services.AddScoped<CreditAdministrationService>();
         services.AddScoped<ManualCreditTopUpService>();
         services.AddScoped<PrintReservationService>();
+        services.AddScoped<PrintCredentialService>();
+        services.AddScoped<PrintCredentialReservationService>();
         services.AddScoped<CreditReturnHoldService>();
         services.AddScoped<
             ICreditQueries,
@@ -35,6 +38,13 @@ public static class CreditsModule
         services.AddScoped<
             IPrintReservationRepository,
             EfPrintReservationRepository>();
+        services.AddScoped<
+            IPrintCredentialRepository,
+            EfPrintCredentialRepository>();
+        services.AddSingleton<IPrintCodeHasher, PrintCodeHasher>();
+        services.AddSingleton<
+            IPrintCredentialAttemptLimiter,
+            PrintCredentialAttemptLimiter>();
         services.AddScoped<
             ICreditAvailabilityRepository,
             EfCreditAvailabilityRepository>();
