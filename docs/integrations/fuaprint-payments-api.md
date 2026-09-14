@@ -18,7 +18,7 @@ Identita služby a identita studenta jsou dvě různé hranice:
 - původní reserve cesta používá přesný stabilní Microsoft Entra klíč
   `provider + tid + oid`;
 - alternativní reserve cesta používá zákazníkem předem nastavenou dvojici
-  normalizovaný univerzitní e-mail + trvalý šestimístný tiskový kód.
+  kanonizovaný aktuální e-mail Access profilu + trvalý šestimístný tiskový kód.
 
 Print cesta nikdy nepoužívá login/JIT službu. Neznámá identita se nevytvoří,
 role ani profil se nemění a resolver nic nezapisuje. E-mailové párování je
@@ -202,6 +202,14 @@ jednoznačně k uloženému vlastníkovi. Stará, přeřazená nebo nejednoznač
 selže uzavřeně. Neznámý e-mail, chybný kód, zneplatněný/nenastavený credential,
 neaktivní vlastník a nejednoznačný profil selžou bez rezervace stejnou odpovědí
 `401 print_credential_authentication_failed`.
+
+Access e-mail je volitelný a tato feature sama nemá `@tul.cz` ani jiný doménový
+allowlist. Nastavení nebo změna credentialu vyžaduje použitelný jednoznačný
+aktuální e-mail uložený v Access profilu a synchronizovaný z ověřeného Entra
+profilu. Ztráta této způsobilosti nemění stabilního interního vlastníka:
+aktivní `Customer` proto může existující aktivní credential vždy zneplatnit i
+při chybějícím, neplatném, změněném nebo nejednoznačném aktuálním e-mailu. UI
+nezobrazuje uložený starý e-mail jako aktuální identitu.
 
 Kromě obecného limitu 120/min/IP platí pro credential cestu minutové in-memory
 hranice 30 **neúspěšných** pokusů pro serverem určený `printSourceId` a 6

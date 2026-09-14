@@ -154,8 +154,48 @@ public sealed class PrintCredentialServiceTests
             hasher,
             changedIdentity).GetAsync(OwnerId);
 
-        Assert.Equal("changed@tul.cz", view.Email);
-        Assert.False(view.IsConfigured);
+        Assert.Equal("changed@tul.cz", view.CurrentEmail);
+        Assert.True(view.CanConfigure);
+        Assert.True(view.HasActiveCredential);
+        Assert.False(view.IsActiveForCurrentEmail);
+    }
+
+    [Fact]
+    public async Task ActiveCustomerCanRevokeWhenCurrentEmailIsMissing()
+    {
+        var repository = new FakeRepository();
+        var audit = new RecordingAuditTrail();
+        var hasher = CreateHasher(1);
+        await CreateService(repository, audit, hasher, Customer())
+            .SetAsync(OwnerId, "123456", "123456");
+
+        await CreateService(
+                repository,
+                audit,
+                hasher,
+                Customer() with { Email = null })
+            .RevokeAsync(OwnerId);
+
+        Assert.False(Assert.Single(repository.Credentials).IsActive);
+        Assert.Contains(
+            audit.Entries,
+            entry => entry.Action == "print-credential.revoked");
+    }
+
+    [Fact]
+    public async Task ActiveCustomerCanRevokeWhenCurrentEmailIsAmbiguous()
+    {
+        var repository = new FakeRepository();
+        var audit = new RecordingAuditTrail();
+        var hasher = CreateHasher(1);
+        await CreateService(repository, audit, hasher, Customer())
+            .SetAsync(OwnerId, "123456", "123456");
+        repository.MatchingAccessUserCount = 2;
+
+        await CreateService(repository, audit, hasher, Customer())
+            .RevokeAsync(OwnerId);
+
+        Assert.False(Assert.Single(repository.Credentials).IsActive);
     }
 
     [Fact]

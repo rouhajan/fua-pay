@@ -21,46 +21,73 @@
     @if (Model.Credential is null)
     {
         <div class="message-box is-error">
-            Tiskový kód nelze nastavit, protože váš účet nemá jednoznačný synchronizovaný univerzitní e-mail.
+            Tiskový credential není pro tento účet dostupný.
         </div>
     }
     else
     {
+        @if (!Model.Credential.CanConfigure)
+        {
+            <div class="message-box is-error">
+                Tiskový kód nelze nastavit ani použít, protože aktuální e-mail v profilu FUA Pay chybí, není použitelný nebo není jednoznačný.
+                @if (Model.Credential.HasActiveCredential)
+                {
+                    <text>Již uložený aktivní kód můžete bezpečně zneplatnit níže.</text>
+                }
+            </div>
+        }
+
         <section class="data-panel">
             <div class="data-panel-header">
                 <div>
-                    <h2>@(Model.Credential.IsConfigured ? "Změnit tiskový kód" : "Nastavit tiskový kód")</h2>
+                    <h2>@(Model.Credential.IsActiveForCurrentEmail ? "Změnit tiskový kód" : "Nastavit tiskový kód")</h2>
                     <span>Kód zůstává platný, dokud jej nezměníte nebo nezneplatníte.</span>
                 </div>
             </div>
 
             <dl class="detail-grid">
                 <div>
-                    <dt>Tiskový e-mail</dt>
-                    <dd>@Model.Credential.Email</dd>
+                    <dt>Aktuální e-mail profilu FUA Pay</dt>
+                    <dd>@(Model.Credential.CanConfigure ? Model.Credential.CurrentEmail : "Není k dispozici pro nastavení")</dd>
                 </div>
                 <div>
                     <dt>Stav</dt>
-                    <dd>@(Model.Credential.IsConfigured ? "Aktivní" : "Nenastaven")</dd>
+                    <dd>
+                        @if (Model.Credential.IsActiveForCurrentEmail)
+                        {
+                            <text>Aktivní pro aktuální e-mail profilu</text>
+                        }
+                        else if (Model.Credential.HasActiveCredential)
+                        {
+                            <text>Aktivní uložený kód; pro aktuální profil není použitelný</text>
+                        }
+                        else
+                        {
+                            <text>Nenastaven</text>
+                        }
+                    </dd>
                 </div>
             </dl>
 
-            <form method="post" asp-page-handler="Set" class="stacked-form">
-                <div asp-validation-summary="ModelOnly" class="validation-summary"></div>
-                <div class="form-field">
-                    <label asp-for="Input.PrintCode">Nový šestimístný kód</label>
-                    <input asp-for="Input.PrintCode" inputmode="numeric" autocomplete="new-password" maxlength="6" />
-                    <span asp-validation-for="Input.PrintCode"></span>
-                </div>
-                <div class="form-field">
-                    <label asp-for="Input.Confirmation">Kód znovu</label>
-                    <input asp-for="Input.Confirmation" inputmode="numeric" autocomplete="new-password" maxlength="6" />
-                    <span asp-validation-for="Input.Confirmation"></span>
-                </div>
-                <button type="submit" class="primary-action-button">Uložit tiskový kód</button>
-            </form>
+            @if (Model.Credential.CanConfigure)
+            {
+                <form method="post" asp-page-handler="Set" class="stacked-form">
+                    <div asp-validation-summary="ModelOnly" class="validation-summary"></div>
+                    <div class="form-field">
+                        <label asp-for="Input.PrintCode">Nový šestimístný kód</label>
+                        <input asp-for="Input.PrintCode" inputmode="numeric" autocomplete="new-password" maxlength="6" />
+                        <span asp-validation-for="Input.PrintCode"></span>
+                    </div>
+                    <div class="form-field">
+                        <label asp-for="Input.Confirmation">Kód znovu</label>
+                        <input asp-for="Input.Confirmation" inputmode="numeric" autocomplete="new-password" maxlength="6" />
+                        <span asp-validation-for="Input.Confirmation"></span>
+                    </div>
+                    <button type="submit" class="primary-action-button">Uložit tiskový kód</button>
+                </form>
+            }
 
-            @if (Model.Credential.IsConfigured)
+            @if (Model.Credential.HasActiveCredential)
             {
                 <form method="post" asp-page-handler="Revoke" class="stacked-form">
                     <button type="submit" class="text-button">Zneplatnit tiskový kód</button>
@@ -72,7 +99,7 @@
     <section class="data-panel">
         <div class="data-panel-header"><h2>Jak tisk funguje</h2></div>
         <p>
-            Při každém tisku zadáte ve FUA Print svůj univerzitní e-mail a tento kód.
+            Při každém tisku zadáte ve FUA Print aktuální e-mail uložený v profilu FUA Pay a tento kód.
             Kód není heslem do FUA Pay, nepředstavuje peníze a po tisku se nespotřebuje.
             Po změně přestane předchozí kód okamžitě platit. Před každým tiskem není nutné navštěvovat FUA Pay.
         </p>

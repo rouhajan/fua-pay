@@ -27,14 +27,16 @@ public sealed record PrintCredentialAuthenticationCandidate(
     bool IsEligible);
 
 public sealed record PrintCredentialView(
-    string Email,
-    bool IsConfigured,
+    string? CurrentEmail,
+    bool CanConfigure,
+    bool HasActiveCredential,
+    bool IsActiveForCurrentEmail,
     DateTimeOffset? ChangedAt);
 
 public sealed class PrintCredentialUnavailableException : Exception
 {
     public PrintCredentialUnavailableException()
-        : base("The current customer has no unambiguous trusted printing e-mail.")
+        : base("The current customer cannot manage a printing credential.")
     {
     }
 }

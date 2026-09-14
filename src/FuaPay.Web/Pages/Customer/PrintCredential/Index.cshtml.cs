@@ -76,7 +76,7 @@ public sealed class IndexModel : PageModel
         {
             ModelState.AddModelError(
                 string.Empty,
-                "Tiskový kód nelze nastavit bez jednoznačného univerzitního e-mailu.");
+                "Tiskový kód nelze nastavit bez použitelného jednoznačného aktuálního e-mailu v profilu FUA Pay.");
             await LoadAsync(cancellationToken);
             return Page();
         }

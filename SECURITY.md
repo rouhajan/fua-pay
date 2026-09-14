@@ -29,6 +29,11 @@ trvalý šestimístný tiskový kód potom autentizuje pouze použití kreditu p
 Tato cesta účet Access nevytváří, neslučuje ani do něj uživatele nepřihlašuje.
 Při každém použití znovu fail-closed ověří, že aktuální Access profil odpovídá
 jednoznačně uloženému vlastníkovi a že vlastník je stále aktivní Customer.
+E-mail je v Access profilu volitelný a PrintCredentials neimplementují doménový
+allowlist. Nastavení nebo změna kódu vyžaduje použitelný a jednoznačný aktuální
+profilový e-mail synchronizovaný z ověřeného Entra profilu. Jeho ztráta, změna
+nebo nejednoznačnost zablokuje credential autentizaci, ale aktivní Customer může
+svůj již uložený credential podle stabilního interního `UserId` vždy zneplatnit.
 
 FUA Pay ukládá:
 

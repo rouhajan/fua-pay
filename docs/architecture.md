@@ -73,8 +73,11 @@ ne perzistentní účetní/daňový doklad. Preview účetní údaje a DPH jsou 
 bearer autentizuje FUA Print; zákazníkem spravovaný e-mailový tiskový credential
 smí pouze převést ověřený požadavek do existujícího print-reservation lifecycle.
 Nevytváří Access účet ani druhý ledger a při každém použití fail-closed ověřuje
-aktuálního vlastníka a roli Customer. Původní Print Payments cesta přes stabilní
-Entra `tid + oid` zůstává samostatná a beze změny.
+aktuálního vlastníka, volitelný aktuální e-mail Access profilu a roli Customer.
+Ztráta použitelnosti nebo jednoznačnosti e-mailu zablokuje nastavení a každý
+e-mailový drift zablokuje autentizaci starého credentialu, ne však jeho
+zneplatnění vlastníkem podle interního `UserId`. Původní Print Payments cesta
+přes stabilní Entra `tid + oid` zůstává samostatná a beze změny.
 
 ## Webová bezpečnostní hranice
 

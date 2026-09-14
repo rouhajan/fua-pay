@@ -837,6 +837,62 @@ public sealed class PrintPaymentsApiPersistenceTests :
     }
 
     [Fact]
+    public async Task PrintCredentialManagement_RevokeWithMissingEmailReleasesOldAddressWithoutFinancialEffect()
+    {
+        const string originalEmail = "recoverable-revoke@example.cz";
+        var originalOwner = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: 100,
+            email: originalEmail);
+        SeededUser? replacementOwner = null;
+
+        try
+        {
+            using var factory = CreateApiFactory();
+            await SetPrintCodeAsync(factory, originalOwner.UserId, "111111");
+            var financialStateBefore = await ReadFinancialStateAsync(
+                originalOwner.UserId);
+            await ChangeAccessEmailAsync(originalOwner.UserId, null);
+
+            await RevokePrintCodeAsync(factory, originalOwner.UserId);
+
+            Assert.True(await IsPrintCredentialRevokedAsync(
+                originalOwner.UserId));
+            Assert.Equal(
+                financialStateBefore,
+                await ReadFinancialStateAsync(originalOwner.UserId));
+
+            replacementOwner = await SeedUserAsync(
+                customer: true,
+                blocked: false,
+                balanceMinorUnits: null,
+                email: originalEmail);
+            await SetPrintCodeAsync(
+                factory,
+                replacementOwner.UserId,
+                "222222");
+
+            using var scope = factory.Services.CreateScope();
+            var candidate = await scope.ServiceProvider
+                .GetRequiredService<IPrintCredentialRepository>()
+                .FindAuthenticationCandidateAsync(originalEmail);
+            Assert.NotNull(candidate);
+            Assert.Equal(replacementOwner.UserId, candidate.OwnerId);
+            Assert.True(candidate.IsEligible);
+        }
+        finally
+        {
+            if (replacementOwner is not null)
+            {
+                await DeleteScenarioAsync(replacementOwner.UserId);
+            }
+
+            await DeleteScenarioAsync(originalOwner.UserId);
+        }
+    }
+
+    [Fact]
     public async Task ByCredential_UnicodeCompatibilityNormalizationMatchesPostgresLookup()
     {
         var user = await SeedUserAsync(
@@ -1225,13 +1281,28 @@ public sealed class PrintPaymentsApiPersistenceTests :
 
     private async Task ChangeAccessEmailAsync(
         Guid ownerId,
-        string email)
+        string? email)
     {
         using var scope = _factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider
             .GetRequiredService<FuaPayDbContext>();
         _ = await dbContext.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE access.users SET email = {email} WHERE id = {ownerId}");
+    }
+
+    private async Task<bool> IsPrintCredentialRevokedAsync(Guid ownerId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+
+        return await dbContext.Database.SqlQuery<bool>(
+            $"""
+            SELECT (revoked_at IS NOT NULL) AS "Value"
+            FROM credits.print_credentials
+            WHERE owner_id = {ownerId}
+            """)
+            .SingleAsync();
     }
 
     private async Task AssertPrintCodeAbsentFromPersistenceAsync(

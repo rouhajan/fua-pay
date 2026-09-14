@@ -37,23 +37,25 @@ public sealed class PrintCredentialService
         Guid ownerId,
         CancellationToken cancellationToken = default)
     {
-        var identity = await GetEligibleIdentityAsync(ownerId, cancellationToken);
-        var normalizedEmail = PrintCredentialEmail.Normalize(identity.Email!);
-
-        if (await _repository.CountAccessUsersByNormalizedEmailAsync(
-                normalizedEmail,
-                cancellationToken) != 1)
-        {
-            throw new PrintCredentialUnavailableException();
-        }
-
+        var identity = await GetActiveCustomerAsync(ownerId, cancellationToken);
         var credential = await _repository.FindByOwnerAsync(ownerId, cancellationToken);
+        var hasUsableEmail = PrintCredentialEmail.TryNormalize(
+            identity.Email,
+            out var normalizedEmail);
+        var canConfigure = hasUsableEmail &&
+            await _repository.CountAccessUsersByNormalizedEmailAsync(
+                normalizedEmail,
+                cancellationToken) == 1;
+        var hasActiveCredential = credential?.IsActive == true;
 
         return new PrintCredentialView(
-            identity.Email!,
-            credential?.IsActive == true &&
+            canConfigure ? identity.Email : null,
+            canConfigure,
+            hasActiveCredential,
+            canConfigure &&
+                hasActiveCredential &&
                 string.Equals(
-                    credential.NormalizedEmail,
+                    credential!.NormalizedEmail,
                     normalizedEmail,
                     StringComparison.Ordinal),
             credential?.ChangedAt);
@@ -78,8 +80,13 @@ public sealed class PrintCredentialService
         await ExecuteManagementAsync(
             async ct =>
             {
-                var identity = await GetEligibleIdentityAsync(ownerId, ct);
-                var normalizedEmail = PrintCredentialEmail.Normalize(identity.Email!);
+                var identity = await GetActiveCustomerAsync(ownerId, ct);
+                if (!PrintCredentialEmail.TryNormalize(
+                        identity.Email,
+                        out var normalizedEmail))
+                {
+                    throw new PrintCredentialUnavailableException();
+                }
 
                 if (await _repository.CountAccessUsersByNormalizedEmailAsync(normalizedEmail, ct) != 1)
                 {
@@ -126,7 +133,7 @@ public sealed class PrintCredentialService
         await ExecuteManagementAsync(
             async ct =>
             {
-                _ = await GetEligibleIdentityAsync(ownerId, ct);
+                _ = await GetActiveCustomerAsync(ownerId, ct);
                 var credential = await _repository.FindByOwnerAsync(ownerId, ct);
 
                 if (credential?.IsActive != true)
@@ -177,7 +184,7 @@ public sealed class PrintCredentialService
         }
     }
 
-    private async Task<AccessSessionSnapshot> GetEligibleIdentityAsync(
+    private async Task<AccessSessionSnapshot> GetActiveCustomerAsync(
         Guid ownerId,
         CancellationToken cancellationToken)
     {
@@ -191,8 +198,7 @@ public sealed class PrintCredentialService
         if (
             identity is null ||
             identity.Status != AccessUserStatus.Active ||
-            !identity.Roles.Contains(AccessRole.Customer) ||
-            !PrintCredentialEmail.TryNormalize(identity.Email, out _))
+            !identity.Roles.Contains(AccessRole.Customer))
         {
             throw new PrintCredentialUnavailableException();
         }
