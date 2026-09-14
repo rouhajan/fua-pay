@@ -68,13 +68,16 @@ public sealed class FinancialCommandPageTests
         var model = new CreditIndexModel(
             new EmptyCreditQueries(),
             administration: null!,
+            manualTopUps: null!,
             new EmptyAccessUserQueries());
 
         await model.OnGetAsync();
-        var renderedCommandId = model.CommandId;
+        var adjustmentCommandId = model.Adjustment.CommandId;
+        var manualTopUpCommandId = model.ManualTopUp.CommandId;
 
-        Assert.NotEqual(Guid.Empty, renderedCommandId);
-        Assert.Equal(renderedCommandId, model.CommandId);
+        Assert.NotEqual(Guid.Empty, adjustmentCommandId);
+        Assert.NotEqual(Guid.Empty, manualTopUpCommandId);
+        Assert.NotEqual(adjustmentCommandId, manualTopUpCommandId);
     }
 
     private sealed class NullPaymentRepository : IPaymentRepository

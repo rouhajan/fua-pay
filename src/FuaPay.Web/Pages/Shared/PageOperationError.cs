@@ -39,6 +39,10 @@ public static class PageOperationError
             CreditAdjustmentCommandConflictException or
             CreditAdjustmentAmountNotAllowedException or
             CreditAdjustmentReasonNotAllowedException or
+            ManualCreditTopUpCommandAlreadyExistsException or
+            ManualCreditTopUpCommandConflictException or
+            ManualCreditTopUpAmountNotAllowedException or
+            ManualCreditTopUpNoteNotAllowedException or
             InsufficientCreditException or
             DuplicateCreditOperationException or
             JobNotFoundException or
@@ -165,6 +169,12 @@ public static class PageOperationError
                 "Částka korekce je mimo povolený rozsah.",
             CreditAdjustmentReasonNotAllowedException =>
                 "Důvod korekce není platný.",
+            ManualCreditTopUpCommandConflictException =>
+                "Tento příkaz ručního dobití byl už použit s jinými daty. Obnovte stránku.",
+            ManualCreditTopUpAmountNotAllowedException =>
+                "Částka ručního dobití musí být kladná a v povoleném rozsahu.",
+            ManualCreditTopUpNoteNotAllowedException =>
+                "Poznámka k ručnímu dobití není platná.",
             PaymentCreationRequestConflictException =>
                 "Tento požadavek na dobití byl už použit s jinými daty. Obnovte stránku.",
             PaymentAmountNotAllowedException =>
@@ -195,6 +205,7 @@ public static class PageOperationError
             AccessIdentityConcurrencyException or
             CreditAccountConcurrencyException or
             CreditAdjustmentCommandAlreadyExistsException or
+            ManualCreditTopUpCommandAlreadyExistsException or
             JobConcurrencyException or
             PaymentConcurrencyException or
             SettlementReturnConcurrencyException or

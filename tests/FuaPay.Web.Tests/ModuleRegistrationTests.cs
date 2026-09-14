@@ -221,6 +221,18 @@ public sealed class ModuleRegistrationTests
             descriptor =>
                 descriptor.ServiceType ==
                     typeof(IPrintReservationRepository));
+
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(ManualCreditTopUpService));
+
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IManualCreditTopUpCommandRepository));
     }
     [Fact]
     public void AddAccessModule_RegistersAdministrationAndQueries()

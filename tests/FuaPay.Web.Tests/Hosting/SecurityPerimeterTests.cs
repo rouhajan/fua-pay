@@ -264,6 +264,118 @@ public sealed class SecurityPerimeterTests :
     }
 
     [Fact]
+    public async Task ManualCreditTopUpPost_ByCustomerIsDeniedBeforeHandler()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací zákazník",
+            "customer@example.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Customer]);
+        var sessionQueries =
+            new RecordingAccessSessionQueries(session);
+        using var configuredFactory =
+            _factory.WithWebHostBuilder(
+                builder => builder.ConfigureTestServices(
+                    services =>
+                    {
+                        services.RemoveAll<IAccessSessionQueries>();
+                        services.AddSingleton<IAccessSessionQueries>(
+                            sessionQueries);
+                    }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<
+                IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var protectedTicket = cookieOptions.TicketDataFormat.Protect(ticket);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}={protectedTicket}");
+        using var content = new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["ManualTopUp.CommandId"] = Guid.NewGuid().ToString(),
+                ["ManualTopUp.OwnerId"] = session.UserId.ToString(),
+                ["ManualTopUp.AmountCrowns"] = "100",
+                ["ManualTopUp.Note"] = "Unauthorized attempt"
+            });
+
+        using var response = await client.PostAsync(
+            "/Admin/Credit?handler=ManualTopUp",
+            content);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.StartsWith(
+            "/?ReturnUrl=%2FAdmin%2FCredit",
+            response.Headers.Location?.PathAndQuery,
+            StringComparison.Ordinal);
+        Assert.Equal(1, sessionQueries.CallCount);
+        Assert.Equal(session.UserId, sessionQueries.LastUserId);
+    }
+
+    [Fact]
+    public async Task ManualCreditTopUpPost_WithoutAntiforgeryToken_ReturnsBadRequest()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací administrátor",
+            "admin@example.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Admin]);
+        var sessionQueries =
+            new RecordingAccessSessionQueries(session);
+        using var configuredFactory =
+            _factory.WithWebHostBuilder(
+                builder => builder.ConfigureTestServices(
+                    services =>
+                    {
+                        services.RemoveAll<IAccessSessionQueries>();
+                        services.AddSingleton<IAccessSessionQueries>(
+                            sessionQueries);
+                    }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<
+                IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var protectedTicket = cookieOptions.TicketDataFormat.Protect(ticket);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}={protectedTicket}");
+        using var content = new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["ManualTopUp.CommandId"] = Guid.NewGuid().ToString(),
+                ["ManualTopUp.OwnerId"] = Guid.NewGuid().ToString(),
+                ["ManualTopUp.AmountCrowns"] = "100",
+                ["ManualTopUp.Note"] = "Missing antiforgery token"
+            });
+
+        using var response = await client.PostAsync(
+            "/Admin/Credit?handler=ManualTopUp",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, sessionQueries.CallCount);
+        Assert.Equal(session.UserId, sessionQueries.LastUserId);
+    }
+
+    [Fact]
     public void StagingSecurityCookies_UseSecurePolicies()
     {
         using var stagingFactory =

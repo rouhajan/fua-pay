@@ -46,6 +46,10 @@ public sealed class FuaPayDbContext : DbContext
         CreditAdjustmentCommands =>
             Set<CreditAdjustmentCommandEntity>();
 
+    internal DbSet<ManualCreditTopUpCommandEntity>
+        ManualCreditTopUpCommands =>
+            Set<ManualCreditTopUpCommandEntity>();
+
     internal DbSet<JobEntity> Jobs =>
         Set<JobEntity>();
 

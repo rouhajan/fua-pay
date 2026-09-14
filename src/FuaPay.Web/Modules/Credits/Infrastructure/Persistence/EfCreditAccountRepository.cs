@@ -166,6 +166,18 @@ internal sealed class EfCreditAccountRepository :
         catch (DbUpdateException exception)
             when (IsUniqueViolation(
                 exception,
+                ManualCreditTopUpCommandConfiguration
+                    .PrimaryKeyConstraint))
+        {
+            _dbContext.ChangeTracker.Clear();
+
+            throw new ManualCreditTopUpCommandAlreadyExistsException(
+                operationId ?? Guid.Empty,
+                exception);
+        }
+        catch (DbUpdateException exception)
+            when (IsUniqueViolation(
+                exception,
                 CreditAccountConfiguration.OwnerUniqueConstraint))
         {
             _dbContext.ChangeTracker.Clear();
@@ -285,6 +297,20 @@ internal sealed class EfCreditAccountRepository :
             _dbContext.ChangeTracker.Clear();
 
             throw new CreditAdjustmentCommandAlreadyExistsException(
+                newMovements.Length == 1
+                    ? newMovements[0].OperationId
+                    : Guid.Empty,
+                exception);
+        }
+        catch (DbUpdateException exception)
+            when (IsUniqueViolation(
+                exception,
+                ManualCreditTopUpCommandConfiguration
+                    .PrimaryKeyConstraint))
+        {
+            _dbContext.ChangeTracker.Clear();
+
+            throw new ManualCreditTopUpCommandAlreadyExistsException(
                 newMovements.Length == 1
                     ? newMovements[0].OperationId
                     : Guid.Empty,

@@ -10,8 +10,8 @@ Existují přesně tři role:
 
 - `Customer` vidí jen vlastní kredit, zakázky a platby;
 - `Requester` vytváří a řídí zakázky pouze v přiřazených pracovištích;
-- `Administrator` spravuje uživatele, role, pracoviště, přiřazení a auditované
-  korekce kreditu.
+- `Administrator` spravuje uživatele, role, pracoviště, přiřazení a oddělené
+  auditované ruční dobití a korekce kreditu.
 
 Každý aktivní účet má základní roli Customer. Requester a Administrator jsou
 doplňková oprávnění. Aktuální stav účtu a rolí se při chráněných požadavcích
@@ -41,6 +41,12 @@ neměnnou posloupnost pohybů a nezáporný zůstatek. Stabilní ID operací,
 unikátní databázové indexy, optimistic concurrency a transakce chrání před
 opakovaným nebo souběžným účinkem.
 
+Ruční dobití administrátorem je kladná provozní cesta financování stejného
+kanonického kreditního zůstatku. Není platbou přes poskytovatele ani korekcí.
+Administrativní korekce zůstává samostatná operace se znaménkem `+/-` určená
+pro skutečné opravy. Podrobnosti popisuje dokument
+[Ruční dobití kreditu](features/manual-credit-topups.md).
+
 Platba má jediný účel: `CreditTopUp` nebo přímou úhradu jedné zakázky.
 Provider pouze inicializuje a ověřuje platbu; lokální kredit či zakázku mění
 jediná settlement služba. Browserový návrat je pouze podnět k serverovému
@@ -51,7 +57,7 @@ ověření.
 - `Access`: uživatelé, externí identity, role a relace;
 - `ServiceUnits`: pracoviště a přiřazení Requesterů;
 - `Jobs`: zakázky, čísla, výrobní a finanční stav;
-- `Credits`: účty, pohyby a administrativní korekce;
+- `Credits`: účty, pohyby, ruční dobití a administrativní korekce;
 - `Payments`: provider-neutral platby, inicializace, ČSOB a reconciliation;
 - `Receipts`: read-only sestavení a PDF potvrzení již ověřené úhrady zakázky;
 - `Audit`, `Notifications`, `Reporting`: auditní události, transakční outbox

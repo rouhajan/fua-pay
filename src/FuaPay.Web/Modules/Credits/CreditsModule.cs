@@ -17,6 +17,7 @@ public static class CreditsModule
         services.AddScoped<CreditAvailabilityService>();
         services.AddScoped<CreditService>();
         services.AddScoped<CreditAdministrationService>();
+        services.AddScoped<ManualCreditTopUpService>();
         services.AddScoped<PrintReservationService>();
         services.AddScoped<CreditReturnHoldService>();
         services.AddScoped<
@@ -28,6 +29,9 @@ public static class CreditsModule
         services.AddScoped<
             ICreditAdjustmentCommandRepository,
             EfCreditAdjustmentCommandRepository>();
+        services.AddScoped<
+            IManualCreditTopUpCommandRepository,
+            EfManualCreditTopUpCommandRepository>();
         services.AddScoped<
             IPrintReservationRepository,
             EfPrintReservationRepository>();

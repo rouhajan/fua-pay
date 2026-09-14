@@ -30,8 +30,10 @@ public sealed class FinancialAmountRangeAttributeTests
                 nameof(JobInputModel.PriceCrowns));
             var topUp = GetRange<CreateTopUpModel>(
                 nameof(CreateTopUpModel.AmountCrowns));
-            var correction = GetRange<CreditIndexModel>(
-                nameof(CreditIndexModel.SignedAmountCrowns));
+            var correction = GetRange<CreditIndexModel.CreditAdjustmentInput>(
+                nameof(CreditIndexModel.CreditAdjustmentInput.SignedAmountCrowns));
+            var manualTopUp = GetRange<CreditIndexModel.ManualCreditTopUpInput>(
+                nameof(CreditIndexModel.ManualCreditTopUpInput.AmountCrowns));
 
             Assert.True(jobPrice.IsValid(0.01m));
             Assert.False(jobPrice.IsValid(0m));
@@ -39,6 +41,8 @@ public sealed class FinancialAmountRangeAttributeTests
             Assert.False(topUp.IsValid(9.99m));
             Assert.True(correction.IsValid(-100000m));
             Assert.False(correction.IsValid(-100000.01m));
+            Assert.True(manualTopUp.IsValid(0.01m));
+            Assert.False(manualTopUp.IsValid(0m));
         }
         finally
         {
