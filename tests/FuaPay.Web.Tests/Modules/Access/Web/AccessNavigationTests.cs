@@ -7,7 +7,9 @@ public sealed class AccessNavigationTests
     [Fact]
     public void For_Customer_ReturnsCustomerNavigation()
     {
-        var items = AccessNavigation.For(AccessView.Customer);
+        var items = AccessNavigation.For(
+            AccessView.Customer,
+            printCredentialsEnabled: true);
 
         Assert.Equal(
             new[]
@@ -22,6 +24,16 @@ public sealed class AccessNavigationTests
             items.Select(item => item.Label));
 
         Assert.Single(items, item => item.IsOverview);
+    }
+
+    [Fact]
+    public void For_CustomerWhenPrintCredentialsDisabledOmitsCredentialPage()
+    {
+        var items = AccessNavigation.For(AccessView.Customer);
+
+        Assert.DoesNotContain(
+            items,
+            item => item.Page == "/Customer/PrintCredential/Index");
     }
 
     [Fact]
@@ -73,7 +85,11 @@ public sealed class AccessNavigationTests
     {
         var active = AccessNavigation.FindActive(
             AccessView.Customer,
-            currentPage);
+            currentPage,
+            printCredentialsEnabled:
+                currentPage.StartsWith(
+                    "/Customer/PrintCredential",
+                    StringComparison.Ordinal));
 
         Assert.NotNull(active);
         Assert.Equal(expectedLabel, active.Label);

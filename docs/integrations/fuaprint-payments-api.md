@@ -70,6 +70,7 @@ nastaví například:
 
 ```text
 PrintPayments__Enabled=true
+PrintCredentials__Enabled=true
 PrintCredentials__PepperBase64=<base64 alespoň 32 náhodných bytů>
 PrintPayments__Sources__0__PrintSourceId=<non-empty GUID>
 PrintPayments__Sources__0__CredentialSha256=<64 hexadecimal characters>
@@ -89,12 +90,24 @@ selže jako `401 service_authentication_failed`. Při zapnuté feature zastaví
 startup prázdný source seznam, prázdný nebo neplatný GUID, jiný než 64znakový
 hexadecimální digest a duplicitní source ID nebo digest.
 
+Persistentní tiskové credentialy mají samostatný přepínač a jsou defaultně
+vypnuté. `PrintPayments__Enabled=true` samo o sobě pepper nevyžaduje a zachovává
+původní API. `PrintCredentials__Enabled=true` vyžaduje zapnuté PrintPayments a
+platný pepper; jinak aplikace fail-closed zastaví startup. Vypnutá credential
+feature nezobrazuje zákaznickou navigaci/formulář a credential reserve vrací
+`404 print_credentials_disabled` bez ověřování e-mailu nebo PINu.
+
 Pepper tiskových kódů je samostatný deployment secret FUA Pay. Nesmí být sdílen
-s FUA Print ani s učebnovými počítači. Při zapnutém PrintPayments chybějící,
+s FUA Print ani s učebnovými počítači. Při zapnutých PrintCredentials chybějící,
 neplatný nebo kratší než 32bytový pepper zastaví startup. Kód se před pomalým
 ASP.NET Core password hasherem předzpracuje HMAC-SHA-256 s pepperem. V databázi
 je pouze náhodně solený verifier; plaintext, verifier ani pepper se nezapisují do
 auditu nebo logu.
+
+Pepper musí být uložen mimo Git i release artefakt a musí stabilně přežít
+restarty i nasazení dalších verzí. Jeho ztráta nebo rotace zneplatní všechny
+existující verifiery. Bezpečná obnova není pokus o zpětné získání PINů, ale
+vyžádání nového nastavení tiskového PINu od zákazníků.
 
 Bezpečný základ pro vytvoření 256bitového tokenu a digestu na důvěryhodném
 administračním stroji je:
@@ -169,7 +182,8 @@ service credentialu. Endpoint pak deleguje na
 ```
 
 Také tato cesta nejprve vyžaduje service bearer credential. E-mail se ořízne,
-Unicode normalizuje do FormKC a porovnává malými písmeny. Musí existovat právě
+Unicode normalizuje do FormKC/NFKC a porovnává malými písmeny. Stejnou NFKC a
+lower normalizaci používá PostgreSQL lookup Access profilu. Musí existovat právě
 jeden aktivní tiskový credential a právě jeden odpovídající aktuální Access
 profil; jeho vlastník musí být stále aktivní efektivní `Customer`. Neznámý
 e-mail, chybný kód, zneplatněný/nenastavený credential, neaktivní vlastník a
@@ -177,16 +191,24 @@ nejednoznačný profil selžou bez rezervace stejnou odpovědí
 `401 print_credential_authentication_failed`.
 
 Kromě obecného limitu 120/min/IP platí pro credential cestu minutové in-memory
-hranice 30 pokusů pro zdrojovou IP + `printSourceId` a 6 pokusů pro normalizovaný
-e-mail + `printSourceId`. Překročení vrací `429 print_credential_rate_limited`.
-Nejde o trvalý account lockout.
+hranice 30 **neúspěšných** pokusů pro serverem určený `printSourceId` a 6
+neúspěšných pokusů pro normalizovaný e-mail + `printSourceId`. Úspěšné tisky tyto
+počty nezvyšují. Překročení vrací `429 print_credential_rate_limited`; nejde o
+trvalý account lockout. Zastaralé klíče expirují a počet source i e-mailových
+klíčů má pevný horní limit, takže náhodné adresy nemohou neomezeně zvětšovat
+paměť procesu.
 
 Po ověření se sestaví stejný `ReservePrintCreditCommand` a ihned se volá
-`PrintReservationService.ReserveAsync`; nevzniká druhý ledger, Payment ani
-idempotency model. Stejný `reserveCommandId` se stejným efektivním payloadem po
-ztracené odpovědi vrátí tutéž rezervaci, konfliktní replay zůstává konfliktem a
-stejný `jobUuid` nemůže vytvořit dvě rezervace. Tiskový kód se úspěchem
-nespotřebuje.
+`PrintReservationService`; nevzniká druhý ledger, Payment ani idempotency model.
+Konfliktní replay zůstává konfliktem a stejný `jobUuid` nemůže vytvořit dvě
+rezervace. Tiskový kód se úspěchem nespotřebuje.
+
+Po ztracené nebo nejednoznačné reserve odpovědi FUA Print nejprve provede
+autentizovaný `GET /api/print-payments/reservations?jobUuid=...`. Pokud rezervace
+existuje, použije její stav. Jen když bezpečný recovery kontrakt prokáže, že
+rezervace commitnuta nebyla, smí zopakovat tutéž reserve operaci se zachovaným
+`reserveCommandId` a `jobUuid`. Přímý replay se starým PINem není garantován,
+pokud zákazník mezitím PIN změnil nebo zneplatnil.
 
 ## Nastavení zákazníkem a zamýšlený tok
 
@@ -237,6 +259,7 @@ Business a validační chyby jsou `application/problem+json` se stabilním polem
 - `401`: `service_authentication_failed`;
 - `401`: `print_credential_authentication_failed` (credential reserve);
 - `429`: `print_credential_rate_limited` (credential reserve);
+- `404`: `print_credentials_disabled` (credential reserve feature je vypnutá);
 - `400`: `invalid_request`, `invalid_job_uuid`, `invalid_amount`,
   `unsupported_currency`, `invalid_identity`;
 - `403`: `user_not_eligible`;

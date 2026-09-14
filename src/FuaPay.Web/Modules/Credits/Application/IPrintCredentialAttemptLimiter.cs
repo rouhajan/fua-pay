@@ -2,9 +2,13 @@ namespace FuaPay.Web.Modules.Credits.Application;
 
 public interface IPrintCredentialAttemptLimiter
 {
-    bool TryAcquire(
+    bool IsBlocked(
         Guid printSourceId,
-        string sourceAddress,
-        string normalizedEmail,
+        string? normalizedEmail,
+        DateTimeOffset now);
+
+    bool TryRecordFailure(
+        Guid printSourceId,
+        string? normalizedEmail,
         DateTimeOffset now);
 }

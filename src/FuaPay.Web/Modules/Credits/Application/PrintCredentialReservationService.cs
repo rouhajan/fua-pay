@@ -1,5 +1,6 @@
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.Modules.Credits.Domain;
+using FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
 
 namespace FuaPay.Web.Modules.Credits.Application;
 
@@ -15,6 +16,7 @@ public sealed class PrintCredentialReservationService
     public PrintCredentialReservationService(
         IPrintCredentialRepository credentials,
         IPrintCodeHasher hasher,
+        PrintCredentialDummyVerifier dummyVerifier,
         IPrintCredentialAttemptLimiter attemptLimiter,
         PrintReservationService reservations,
         TimeProvider timeProvider)
@@ -24,12 +26,11 @@ public sealed class PrintCredentialReservationService
         _attemptLimiter = attemptLimiter;
         _reservations = reservations;
         _timeProvider = timeProvider;
-        _unknownCredentialHash = hasher.Hash("000000");
+        _unknownCredentialHash = dummyVerifier.Hash;
     }
 
     public async Task<PrintReservationResult> ReserveAsync(
         Guid printSourceId,
-        string sourceAddress,
         string email,
         string printCode,
         string jobUuid,
@@ -37,20 +38,27 @@ public sealed class PrintCredentialReservationService
         Guid reserveCommandId,
         CancellationToken cancellationToken = default)
     {
-        if (
-            !PrintCredentialEmail.TryNormalize(email, out var normalizedEmail) ||
-            !PrintCodePolicy.IsValid(printCode))
-        {
-            throw new PrintCredentialAuthenticationFailedException();
-        }
+        var hasNormalizedEmail = PrintCredentialEmail.TryNormalize(
+            email,
+            out var normalizedEmail);
+        var attemptedEmail = hasNormalizedEmail
+            ? normalizedEmail
+            : null;
+        var now = _timeProvider.GetUtcNow();
 
-        if (!_attemptLimiter.TryAcquire(
+        if (_attemptLimiter.IsBlocked(
                 printSourceId,
-                sourceAddress,
-                normalizedEmail,
-                _timeProvider.GetUtcNow()))
+                attemptedEmail,
+                now))
         {
             throw new PrintCredentialRateLimitExceededException();
+        }
+
+        if (!hasNormalizedEmail || !PrintCodePolicy.IsValid(printCode))
+        {
+            throw AuthenticationFailureAfterRecording(
+                printSourceId,
+                attemptedEmail);
         }
 
         return await _reservations.ReserveAuthenticatedAsync(
@@ -65,7 +73,9 @@ public sealed class PrintCredentialReservationService
 
                 if (!verified || candidate?.IsEligible != true)
                 {
-                    throw new PrintCredentialAuthenticationFailedException();
+                    throw AuthenticationFailureAfterRecording(
+                        printSourceId,
+                        normalizedEmail);
                 }
 
                 return new ReservePrintCreditCommand(
@@ -76,5 +86,20 @@ public sealed class PrintCredentialReservationService
                     reserveCommandId);
             },
             cancellationToken);
+    }
+
+    private Exception AuthenticationFailureAfterRecording(
+        Guid printSourceId,
+        string? normalizedEmail)
+    {
+        if (!_attemptLimiter.TryRecordFailure(
+                printSourceId,
+                normalizedEmail,
+                _timeProvider.GetUtcNow()))
+        {
+            throw new PrintCredentialRateLimitExceededException();
+        }
+
+        return new PrintCredentialAuthenticationFailedException();
     }
 }

@@ -55,8 +55,15 @@ public static class PrintPaymentsEndpoint
 
     private static async Task<IResult> ReserveByCredentialAsync(
         HttpContext context,
-        PrintCredentialReservationService credentialReservationService)
+        PrintCredentialSecurityConfiguration configuration)
     {
+        if (!configuration.Enabled)
+        {
+            return Problem(
+                StatusCodes.Status404NotFound,
+                "print_credentials_disabled");
+        }
+
         var body = await ReadBodyAsync<ReservePrintPaymentByCredentialRequest>(context);
 
         if (!body.IsValid || body.Value is null)
@@ -95,9 +102,10 @@ public static class PrintPaymentsEndpoint
 
         try
         {
+            var credentialReservationService = context.RequestServices
+                .GetRequiredService<PrintCredentialReservationService>();
             var reservation = await credentialReservationService.ReserveAsync(
                 context.User.GetRequiredPrintSourceId(),
-                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 request.Email,
                 request.PrintCode,
                 jobUuid,
@@ -612,6 +620,7 @@ public static class PrintPaymentsEndpoint
             "invalid_identity" => "The user identity is invalid.",
             "print_credential_authentication_failed" => "The printing credential is invalid.",
             "print_credential_rate_limited" => "Too many printing credential attempts.",
+            "print_credentials_disabled" => "Printing credentials are disabled.",
             "identity_not_linked" => "The identity is not linked.",
             "user_not_eligible" => "The user is not eligible.",
             "reservation_not_found" => "The reservation was not found.",

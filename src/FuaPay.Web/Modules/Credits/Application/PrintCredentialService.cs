@@ -8,6 +8,8 @@ namespace FuaPay.Web.Modules.Credits.Application;
 
 public sealed class PrintCredentialService
 {
+    private const int MaximumManagementAttempts = 3;
+
     private readonly IAccessSessionQueries _accessQueries;
     private readonly IPrintCredentialRepository _repository;
     private readonly IPrintCodeHasher _hasher;
@@ -73,7 +75,7 @@ public sealed class PrintCredentialService
             throw new ArgumentException("Print-code confirmation does not match.", nameof(confirmation));
         }
 
-        _ = await _transaction.ExecuteAsync(
+        await ExecuteManagementAsync(
             async ct =>
             {
                 var identity = await GetEligibleIdentityAsync(ownerId, ct);
@@ -84,9 +86,9 @@ public sealed class PrintCredentialService
                     throw new PrintCredentialUnavailableException();
                 }
 
-                var now = _timeProvider.GetUtcNow();
                 var hash = _hasher.Hash(printCode);
                 var credential = await _repository.FindByOwnerAsync(ownerId, ct);
+                var now = _timeProvider.GetUtcNow();
                 var action = credential is null || !credential.IsActive
                     ? "print-credential.configured"
                     : "print-credential.changed";
@@ -121,7 +123,7 @@ public sealed class PrintCredentialService
         Guid ownerId,
         CancellationToken cancellationToken = default)
     {
-        _ = await _transaction.ExecuteAsync(
+        await ExecuteManagementAsync(
             async ct =>
             {
                 _ = await GetEligibleIdentityAsync(ownerId, ct);
@@ -145,6 +147,34 @@ public sealed class PrintCredentialService
                 return true;
             },
             cancellationToken);
+    }
+
+    private async Task ExecuteManagementAsync(
+        Func<CancellationToken, Task<bool>> operation,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= MaximumManagementAttempts; attempt++)
+        {
+            try
+            {
+                _ = await _transaction.ExecuteAsync(
+                    operation,
+                    cancellationToken);
+                return;
+            }
+            catch (PrintCredentialConcurrencyException)
+                when (attempt < MaximumManagementAttempts)
+            {
+            }
+            catch (PrintCredentialConcurrencyException)
+            {
+                throw new PrintCredentialUnavailableException();
+            }
+            catch (PrintCredentialEmailConflictException)
+            {
+                throw new PrintCredentialUnavailableException();
+            }
+        }
     }
 
     private async Task<AccessSessionSnapshot> GetEligibleIdentityAsync(

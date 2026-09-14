@@ -11,6 +11,8 @@ internal sealed class PrintCredentialConfiguration :
 {
     internal const string NormalizedEmailUniqueConstraint =
         "ux_credits_print_credentials_normalized_email";
+    internal const string OwnerPrimaryKey =
+        "pk_credits_print_credentials";
 
     public void Configure(EntityTypeBuilder<PrintCredentialEntity> builder)
     {
@@ -37,7 +39,7 @@ internal sealed class PrintCredentialConfiguration :
             });
 
         builder.HasKey(item => item.OwnerId)
-            .HasName("pk_credits_print_credentials");
+            .HasName(OwnerPrimaryKey);
         builder.Property(item => item.OwnerId)
             .HasColumnName("owner_id")
             .ValueGeneratedNever();

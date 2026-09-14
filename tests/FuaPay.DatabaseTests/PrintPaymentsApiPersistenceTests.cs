@@ -12,6 +12,7 @@ using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Access.Infrastructure.Entra;
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
+using FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
 using FuaPay.Web.Modules.Credits.Web.PrintPayments;
 
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -454,7 +455,7 @@ public sealed class PrintPaymentsApiPersistenceTests :
     }
 
     [Fact]
-    public async Task ByCredential_UsesCanonicalReservationAndPersistentCodeLifecycle()
+    public async Task ByCredential_RecoveryLookupSurvivesPinChangeAndUsesCanonicalLifecycle()
     {
         const string email = "persistent-print@example.cz";
         const string firstCode = "123456";
@@ -483,12 +484,6 @@ public sealed class PrintPaymentsApiPersistenceTests :
                 "/api/print-payments/reservations/by-credential",
                 request);
             var reserved = await ReadReservationAsync(response);
-            using var replayResponse = await client.PostAsJsonAsync(
-                "/api/print-payments/reservations/by-credential",
-                request);
-            var replay = await ReadReservationAsync(replayResponse);
-
-            Assert.Equal(reserved, replay);
             var state = await ReadFinancialStateAsync(user.UserId);
             Assert.Equal(1_000, state.BalanceMinorUnits);
             Assert.Equal(1, state.MovementCount);
@@ -524,16 +519,17 @@ public sealed class PrintPaymentsApiPersistenceTests :
             Assert.Equal(0, capturedState.BlockingMinorUnits);
 
             await SetPrintCodeAsync(factory, user.UserId, changedCode);
-            using var oldCodeResponse = await client.PostAsJsonAsync(
+            using var recoveryResponse = await client.GetAsync(
+                "/api/print-payments/reservations?jobUuid=" +
+                Uri.EscapeDataString(jobUuid));
+            var recovered = await ReadReservationAsync(recoveryResponse);
+            Assert.Equal(captured, recovered);
+
+            using var oldCodeReplayResponse = await client.PostAsJsonAsync(
                 "/api/print-payments/reservations/by-credential",
-                CredentialReserveRequest(
-                    email,
-                    firstCode,
-                    Guid.NewGuid(),
-                    $"urn:uuid:{Guid.NewGuid():D}",
-                    100));
+                request);
             await AssertProblemAsync(
-                oldCodeResponse,
+                oldCodeReplayResponse,
                 HttpStatusCode.Unauthorized,
                 "print_credential_authentication_failed");
 
@@ -579,7 +575,9 @@ public sealed class PrintPaymentsApiPersistenceTests :
 
         try
         {
-            using var factory = CreateApiFactory();
+            var countingHasher = new CountingPrintCodeHasher();
+            using var factory = CreateCountingHasherApiFactory(
+                countingHasher);
             await SetPrintCodeAsync(factory, user.UserId, "123456");
             using var client = CreateClient(factory, SourceACredential);
 
@@ -604,6 +602,8 @@ public sealed class PrintPaymentsApiPersistenceTests :
             Assert.Equal(
                 await wrongCode.Content.ReadAsStringAsync(),
                 await unknownEmail.Content.ReadAsStringAsync());
+            Assert.Equal(2, countingHasher.HashCalls);
+            Assert.Equal(2, countingHasher.VerifyCalls);
             Assert.Equal(0, (await ReadFinancialStateAsync(user.UserId)).ReservationCount);
         }
         finally
@@ -672,6 +672,230 @@ public sealed class PrintPaymentsApiPersistenceTests :
         }
     }
 
+    [Fact]
+    public async Task ByCredential_SuccessfulUsesDoNotConsumeFailedGuessBudget()
+    {
+        const string email = "successful-printing@example.cz";
+        const string printCode = "123456";
+        var user = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: 1_000,
+            email: email);
+
+        try
+        {
+            using var factory = CreateApiFactory();
+            await SetPrintCodeAsync(factory, user.UserId, printCode);
+            using var client = CreateClient(factory, SourceACredential);
+
+            for (var attempt = 0; attempt < 7; attempt++)
+            {
+                using var response = await client.PostAsJsonAsync(
+                    "/api/print-payments/reservations/by-credential",
+                    CredentialReserveRequest(
+                        email,
+                        printCode,
+                        Guid.NewGuid(),
+                        $"urn:uuid:{Guid.NewGuid():D}",
+                        1));
+                _ = await ReadReservationAsync(response);
+            }
+
+            var state = await ReadFinancialStateAsync(user.UserId);
+            Assert.Equal(7, state.ReservationCount);
+            Assert.Equal(7, state.BlockingMinorUnits);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(user.UserId);
+        }
+    }
+
+    [Fact]
+    public async Task PrintCredentialManagement_ConcurrentSetAndRevokeDoNotLeakPersistenceFailures()
+    {
+        const string email = "management-race@example.cz";
+        var user = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: null,
+            email: email);
+
+        try
+        {
+            using var seedFactory = CreateApiFactory();
+            await SetPrintCodeAsync(seedFactory, user.UserId, "111111");
+
+            using var setFactory = CreateManagementRaceApiFactory(
+                new TwoCallBarrier());
+            await Task.WhenAll(
+                SetPrintCodeAsync(setFactory, user.UserId, "222222"),
+                SetPrintCodeAsync(setFactory, user.UserId, "333333"));
+
+            using var setRevokeFactory = CreateManagementRaceApiFactory(
+                new TwoCallBarrier());
+            await Task.WhenAll(
+                SetPrintCodeAsync(setRevokeFactory, user.UserId, "444444"),
+                RevokePrintCodeAsync(setRevokeFactory, user.UserId));
+
+            using var scope = seedFactory.Services.CreateScope();
+            var candidate = await scope.ServiceProvider
+                .GetRequiredService<IPrintCredentialRepository>()
+                .FindAuthenticationCandidateAsync(email);
+
+            if (candidate is not null)
+            {
+                var hasher = scope.ServiceProvider
+                    .GetRequiredService<IPrintCodeHasher>();
+                Assert.True(hasher.Verify(candidate.CodeHash, "444444"));
+                Assert.False(hasher.Verify(candidate.CodeHash, "111111"));
+            }
+        }
+        finally
+        {
+            await DeleteScenarioAsync(user.UserId);
+        }
+    }
+
+    [Fact]
+    public async Task PrintCredentialManagement_ConcurrentInitialSetRetriesWithCleanTrackedState()
+    {
+        const string email = "initial-set-race@example.cz";
+        var user = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: null,
+            email: email);
+
+        try
+        {
+            using var factory = CreateManagementRaceApiFactory(
+                new TwoCallBarrier());
+
+            await Task.WhenAll(
+                SetPrintCodeAsync(factory, user.UserId, "111111"),
+                SetPrintCodeAsync(factory, user.UserId, "222222"));
+
+            using var scope = factory.Services.CreateScope();
+            var candidate = await scope.ServiceProvider
+                .GetRequiredService<IPrintCredentialRepository>()
+                .FindAuthenticationCandidateAsync(email);
+            var hasher = scope.ServiceProvider
+                .GetRequiredService<IPrintCodeHasher>();
+
+            Assert.NotNull(candidate);
+            Assert.True(
+                hasher.Verify(candidate.CodeHash, "111111") ||
+                hasher.Verify(candidate.CodeHash, "222222"));
+        }
+        finally
+        {
+            await DeleteScenarioAsync(user.UserId);
+        }
+    }
+
+    [Fact]
+    public async Task PrintCredentialManagement_StaleEmailUniqueConflictFailsClosed()
+    {
+        const string reassignedEmail = "reassigned-print@example.cz";
+        var originalOwner = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: null,
+            email: reassignedEmail);
+        SeededUser? newOwner = null;
+
+        try
+        {
+            using var factory = CreateApiFactory();
+            await SetPrintCodeAsync(factory, originalOwner.UserId, "111111");
+            await ChangeAccessEmailAsync(
+                originalOwner.UserId,
+                "former-owner@example.cz");
+            newOwner = await SeedUserAsync(
+                customer: true,
+                blocked: false,
+                balanceMinorUnits: null,
+                email: reassignedEmail);
+
+            await Assert.ThrowsAsync<PrintCredentialUnavailableException>(
+                () => SetPrintCodeAsync(
+                    factory,
+                    newOwner.UserId,
+                    "222222"));
+        }
+        finally
+        {
+            if (newOwner is not null)
+            {
+                await DeleteScenarioAsync(newOwner.UserId);
+            }
+
+            await DeleteScenarioAsync(originalOwner.UserId);
+        }
+    }
+
+    [Fact]
+    public async Task ByCredential_UnicodeCompatibilityNormalizationMatchesPostgresLookup()
+    {
+        var user = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: 100,
+            email: "ｓtudent@tul.cz");
+
+        try
+        {
+            using var factory = CreateApiFactory();
+            await SetPrintCodeAsync(factory, user.UserId, "123456");
+            using var client = CreateClient(factory, SourceACredential);
+
+            using var response = await client.PostAsJsonAsync(
+                "/api/print-payments/reservations/by-credential",
+                CredentialReserveRequest(
+                    "student@tul.cz",
+                    "123456",
+                    Guid.NewGuid(),
+                    $"urn:uuid:{Guid.NewGuid():D}",
+                    1));
+
+            _ = await ReadReservationAsync(response);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(user.UserId);
+        }
+    }
+
+    [Fact]
+    public async Task PrintCredentialManagement_UnicodeEquivalentAmbiguityFailsClosed()
+    {
+        var first = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: null,
+            email: "ｓtudent-ambiguous@tul.cz");
+        var second = await SeedUserAsync(
+            customer: true,
+            blocked: false,
+            balanceMinorUnits: null,
+            email: "student-ambiguous@tul.cz");
+
+        try
+        {
+            using var factory = CreateApiFactory();
+
+            await Assert.ThrowsAsync<PrintCredentialUnavailableException>(
+                () => SetPrintCodeAsync(factory, first.UserId, "123456"));
+        }
+        finally
+        {
+            await DeleteScenarioAsync(second.UserId);
+            await DeleteScenarioAsync(first.UserId);
+        }
+    }
+
     private WebApplicationFactory<Program> CreateApiFactory()
     {
         return new ApiWebApplicationFactory();
@@ -697,6 +921,74 @@ public sealed class PrintPaymentsApiPersistenceTests :
                                 descriptor),
                             gate));
                 }));
+    }
+
+    private static WebApplicationFactory<Program> CreateManagementRaceApiFactory(
+        TwoCallBarrier barrier)
+    {
+        return new ApiWebApplicationFactory().WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(
+                services =>
+                {
+                    var descriptor = Assert.Single(
+                        services,
+                        item => item.ServiceType ==
+                            typeof(IPrintCredentialRepository));
+
+                    services.Remove(descriptor);
+                    services.AddScoped<IPrintCredentialRepository>(
+                        provider => new ManagementBarrierPrintCredentialRepository(
+                            CreateOriginalPrintCredentialRepository(
+                                provider,
+                                descriptor),
+                            barrier));
+                }));
+    }
+
+    private static WebApplicationFactory<Program> CreateCountingHasherApiFactory(
+        CountingPrintCodeHasher hasher)
+    {
+        return new ApiWebApplicationFactory().WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(
+                services =>
+                {
+                    var descriptor = Assert.Single(
+                        services,
+                        item => item.ServiceType == typeof(IPrintCodeHasher));
+                    services.Remove(descriptor);
+                    services.AddSingleton<IPrintCodeHasher>(
+                        provider =>
+                        {
+                            hasher.Initialize(
+                                CreateOriginalPrintCodeHasher(
+                                    provider,
+                                    descriptor));
+                            return hasher;
+                        });
+                }));
+    }
+
+    private static IPrintCodeHasher CreateOriginalPrintCodeHasher(
+        IServiceProvider provider,
+        ServiceDescriptor descriptor)
+    {
+        if (descriptor.ImplementationInstance is IPrintCodeHasher instance)
+        {
+            return instance;
+        }
+
+        if (descriptor.ImplementationFactory is not null)
+        {
+            return (IPrintCodeHasher)
+                descriptor.ImplementationFactory(provider);
+        }
+
+        return (IPrintCodeHasher)
+            ActivatorUtilities.CreateInstance(
+                provider,
+                descriptor.ImplementationType
+                    ?? throw new InvalidOperationException(
+                        "The original print-code hasher has no implementation."));
     }
 
     private static IPrintCredentialRepository CreateOriginalPrintCredentialRepository(
@@ -728,6 +1020,7 @@ public sealed class PrintPaymentsApiPersistenceTests :
         return new Dictionary<string, string?>
         {
             ["PrintPayments:Enabled"] = "true",
+            ["PrintCredentials:Enabled"] = "true",
             ["PrintCredentials:PepperBase64"] =
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             ["PrintPayments:Sources:0:PrintSourceId"] =
@@ -873,6 +1166,17 @@ public sealed class PrintPaymentsApiPersistenceTests :
         await scope.ServiceProvider
             .GetRequiredService<PrintCredentialService>()
             .RevokeAsync(ownerId);
+    }
+
+    private async Task ChangeAccessEmailAsync(
+        Guid ownerId,
+        string email)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+        _ = await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE access.users SET email = {email} WHERE id = {ownerId}");
     }
 
     private async Task AssertPrintCodeAbsentFromPersistenceAsync(
@@ -1094,6 +1398,78 @@ public sealed class PrintPaymentsApiPersistenceTests :
         int AccountCount,
         int ReservationCount);
 
+    private sealed class TwoCallBarrier
+    {
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _arrivals;
+
+        public async Task SignalAndWaitAsync(
+            CancellationToken cancellationToken)
+        {
+            var arrival = Interlocked.Increment(ref _arrivals);
+            if (arrival == 2)
+            {
+                _release.TrySetResult();
+            }
+
+            if (arrival <= 2)
+            {
+                await _release.Task.WaitAsync(
+                    TimeSpan.FromSeconds(30),
+                    cancellationToken);
+            }
+        }
+    }
+
+    private sealed class ManagementBarrierPrintCredentialRepository :
+        IPrintCredentialRepository
+    {
+        private readonly IPrintCredentialRepository _inner;
+        private readonly TwoCallBarrier _barrier;
+
+        public ManagementBarrierPrintCredentialRepository(
+            IPrintCredentialRepository inner,
+            TwoCallBarrier barrier)
+        {
+            _inner = inner;
+            _barrier = barrier;
+        }
+
+        public async Task<PrintCredential?> FindByOwnerAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken = default)
+        {
+            var credential = await _inner.FindByOwnerAsync(
+                ownerId,
+                cancellationToken);
+            await _barrier.SignalAndWaitAsync(cancellationToken);
+            return credential;
+        }
+
+        public Task<PrintCredentialAuthenticationCandidate?>
+            FindAuthenticationCandidateAsync(
+                string normalizedEmail,
+                CancellationToken cancellationToken = default) =>
+            _inner.FindAuthenticationCandidateAsync(
+                normalizedEmail,
+                cancellationToken);
+
+        public Task<long> CountAccessUsersByNormalizedEmailAsync(
+            string normalizedEmail,
+            CancellationToken cancellationToken = default) =>
+            _inner.CountAccessUsersByNormalizedEmailAsync(
+                normalizedEmail,
+                cancellationToken);
+
+        public void Add(PrintCredential credential) =>
+            _inner.Add(credential);
+
+        public Task SaveAsync(
+            CancellationToken cancellationToken = default) =>
+            _inner.SaveAsync(cancellationToken);
+    }
+
     private sealed class CredentialRaceGate
     {
         private readonly TaskCompletionSource _authenticationLocked =
@@ -1193,6 +1569,43 @@ public sealed class PrintPaymentsApiPersistenceTests :
             _gate.RevocationIsBlocked();
             await saveTask;
         }
+    }
+
+    private sealed class CountingPrintCodeHasher :
+        IPrintCodeHasher
+    {
+        private IPrintCodeHasher? _inner;
+        private int _hashCalls;
+        private int _verifyCalls;
+
+        public int HashCalls => Volatile.Read(ref _hashCalls);
+
+        public int VerifyCalls => Volatile.Read(ref _verifyCalls);
+
+        public void Initialize(IPrintCodeHasher inner)
+        {
+            if (Interlocked.CompareExchange(ref _inner, inner, null) is not null)
+            {
+                throw new InvalidOperationException(
+                    "The counting print-code hasher was initialized more than once.");
+            }
+        }
+
+        public string Hash(string printCode)
+        {
+            Interlocked.Increment(ref _hashCalls);
+            return RequiredInner().Hash(printCode);
+        }
+
+        public bool Verify(string hash, string printCode)
+        {
+            Interlocked.Increment(ref _verifyCalls);
+            return RequiredInner().Verify(hash, printCode);
+        }
+
+        private IPrintCodeHasher RequiredInner() =>
+            _inner ?? throw new InvalidOperationException(
+                "The counting print-code hasher is not initialized.");
     }
 
     private sealed class ApiWebApplicationFactory :

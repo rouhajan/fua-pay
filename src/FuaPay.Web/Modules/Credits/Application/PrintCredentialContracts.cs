@@ -54,3 +54,19 @@ public sealed class PrintCredentialRateLimitExceededException : Exception
     {
     }
 }
+
+public sealed class PrintCredentialConcurrencyException : Exception
+{
+    public PrintCredentialConcurrencyException(Exception innerException)
+        : base("Printing credential changed concurrently.", innerException)
+    {
+    }
+}
+
+public sealed class PrintCredentialEmailConflictException : Exception
+{
+    public PrintCredentialEmailConflictException(Exception innerException)
+        : base("Printing e-mail is already assigned to an active credential.", innerException)
+    {
+    }
+}

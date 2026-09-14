@@ -42,6 +42,7 @@ public static class CreditsModule
             IPrintCredentialRepository,
             EfPrintCredentialRepository>();
         services.AddSingleton<IPrintCodeHasher, PrintCodeHasher>();
+        services.AddSingleton<PrintCredentialDummyVerifier>();
         services.AddSingleton<
             IPrintCredentialAttemptLimiter,
             PrintCredentialAttemptLimiter>();

@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,10 +14,14 @@ namespace FuaPay.Web.Pages.Customer.PrintCredential;
 public sealed class IndexModel : PageModel
 {
     private readonly PrintCredentialService _service;
+    private readonly PrintCredentialSecurityConfiguration _configuration;
 
-    public IndexModel(PrintCredentialService service)
+    public IndexModel(
+        PrintCredentialService service,
+        PrintCredentialSecurityConfiguration configuration)
     {
         _service = service;
+        _configuration = configuration;
     }
 
     [BindProperty]
@@ -27,14 +32,26 @@ public sealed class IndexModel : PageModel
     [TempData]
     public string? SuccessMessage { get; set; }
 
-    public async Task OnGetAsync(CancellationToken cancellationToken = default)
+    public async Task<IActionResult> OnGetAsync(
+        CancellationToken cancellationToken = default)
     {
+        if (!_configuration.Enabled)
+        {
+            return NotFound();
+        }
+
         await LoadAsync(cancellationToken);
+        return Page();
     }
 
     public async Task<IActionResult> OnPostSetAsync(
         CancellationToken cancellationToken = default)
     {
+        if (!_configuration.Enabled)
+        {
+            return NotFound();
+        }
+
         if (!ModelState.IsValid)
         {
             await LoadAsync(cancellationToken);
@@ -71,6 +88,11 @@ public sealed class IndexModel : PageModel
     public async Task<IActionResult> OnPostRevokeAsync(
         CancellationToken cancellationToken = default)
     {
+        if (!_configuration.Enabled)
+        {
+            return NotFound();
+        }
+
         try
         {
             await _service.RevokeAsync(RequiredOwnerId(), cancellationToken);

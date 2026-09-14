@@ -39,6 +39,31 @@ public sealed class PrintPaymentsEndpointSecurityTests
     }
 
     [Fact]
+    public async Task CredentialReserve_WhenCredentialFeatureDisabledFailsClosedWithoutPepper()
+    {
+        using var factory = CreateEnabledFactory(
+            printCredentialsEnabled: false);
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/print-payments/reservations/by-credential",
+            new
+            {
+                email = "student@tul.cz",
+                printCode = "123456",
+                reserveCommandId = Guid.NewGuid(),
+                jobUuid = $"urn:uuid:{Guid.NewGuid():D}",
+                amountMinorUnits = 100,
+                currency = "CZK"
+            });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("print_credentials_disabled", await ReadCodeAsync(response));
+    }
+
+    [Fact]
     public async Task Endpoint_WithoutServiceCredentialReturnsStable401()
     {
         using var factory = CreateEnabledFactory();
@@ -299,28 +324,36 @@ public sealed class PrintPaymentsEndpointSecurityTests
         Assert.Equal("invalid_request", await ReadCodeAsync(response));
     }
 
-    private static ConfiguredWebApplicationFactory CreateEnabledFactory()
+    private static ConfiguredWebApplicationFactory CreateEnabledFactory(
+        bool printCredentialsEnabled = true)
     {
         var digest = Convert.ToHexString(
                 SHA256.HashData(
                     Encoding.ASCII.GetBytes(Credential)))
             .ToLowerInvariant();
 
+        var settings = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:FuaPay"] =
+                "Host=localhost;Database=unused;" +
+                "Username=unused;Password=unused",
+            ["PrintPayments:Enabled"] = "true",
+            ["PrintCredentials:Enabled"] =
+                printCredentialsEnabled.ToString(),
+            ["PrintPayments:Sources:0:PrintSourceId"] =
+                Guid.NewGuid().ToString("D"),
+            ["PrintPayments:Sources:0:CredentialSha256"] =
+                digest
+        };
+        if (printCredentialsEnabled)
+        {
+            settings["PrintCredentials:PepperBase64"] =
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        }
+
         return new ConfiguredWebApplicationFactory(
             "Development",
-            new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:FuaPay"] =
-                    "Host=localhost;Database=unused;" +
-                    "Username=unused;Password=unused",
-                ["PrintPayments:Enabled"] = "true",
-                ["PrintCredentials:PepperBase64"] =
-                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-                ["PrintPayments:Sources:0:PrintSourceId"] =
-                    Guid.NewGuid().ToString("D"),
-                ["PrintPayments:Sources:0:CredentialSha256"] =
-                    digest
-            });
+            settings);
     }
 
     private static HttpClient CreateClient(

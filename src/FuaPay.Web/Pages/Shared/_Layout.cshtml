@@ -1,5 +1,7 @@
 @using FuaPay.Web.Modules.Access.Web
+@using FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments
 @using Microsoft.AspNetCore.Mvc.RazorPages
+@inject PrintCredentialSecurityConfiguration PrintCredentialConfiguration
 @{
     var isAuthenticated = User.Identity?.IsAuthenticated == true;
     var requestedView = Context.Request.Query["view"].ToString();
@@ -8,7 +10,9 @@
         : null;
     var navigationItems = shellSelection is null
         ? Array.Empty<AccessNavigationItem>()
-        : AccessNavigation.For(shellSelection.Active.View);
+        : AccessNavigation.For(
+            shellSelection.Active.View,
+            PrintCredentialConfiguration.Enabled);
     var currentPage =
         (ViewContext.ActionDescriptor as PageActionDescriptor)?.ViewEnginePath
         ?? string.Empty;
@@ -16,7 +20,8 @@
         ? null
         : AccessNavigation.FindActive(
             shellSelection.Active.View,
-            currentPage);
+            currentPage,
+            PrintCredentialConfiguration.Enabled);
     var accessEmail = User.FindAccessEmail();
 }
 <!DOCTYPE html>

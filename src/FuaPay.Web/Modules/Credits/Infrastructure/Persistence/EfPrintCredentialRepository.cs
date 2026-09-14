@@ -5,6 +5,8 @@ using FuaPay.Web.Modules.Credits.Domain;
 
 using Microsoft.EntityFrameworkCore;
 
+using Npgsql;
+
 namespace FuaPay.Web.Modules.Credits.Infrastructure.Persistence;
 
 internal sealed class EfPrintCredentialRepository : IPrintCredentialRepository
@@ -51,17 +53,24 @@ internal sealed class EfPrintCredentialRepository : IPrintCredentialRepository
             .Select(item => new { item.OwnerId, item.CodeHash })
             .ToArrayAsync(cancellationToken);
 
-        var matchingUsers = await _dbContext.AccessUsers
-            .AsNoTracking()
-            .Where(item => item.Email != null && item.Email.Trim().ToLower() == normalizedEmail)
-            .Take(2)
-            .Select(item => new
-            {
-                item.Id,
-                item.Status,
-                IsCustomer = item.RoleAssignments.Any(
-                    role => role.Role == (int)AccessRole.Customer && role.RevokedAt == null)
-            })
+        var matchingUsers = await _dbContext.Database
+            .SqlQuery<AccessCandidate>(
+                $"""
+                SELECT
+                    candidate.id AS "Id",
+                    candidate.status AS "Status",
+                    EXISTS (
+                        SELECT 1
+                        FROM access.role_assignments AS role
+                        WHERE role.user_id = candidate.id
+                          AND role.role = {(int)AccessRole.Customer}
+                          AND role.revoked_at IS NULL
+                    ) AS "IsCustomer"
+                FROM access.users AS candidate
+                WHERE candidate.email IS NOT NULL
+                  AND lower(normalize(btrim(candidate.email), NFKC)) = {normalizedEmail}
+                LIMIT 2
+                """)
             .ToArrayAsync(cancellationToken);
 
         if (credentials.Length != 1 || matchingUsers.Length != 1)
@@ -79,14 +88,17 @@ internal sealed class EfPrintCredentialRepository : IPrintCredentialRepository
             user.IsCustomer);
     }
 
-    public Task<long> CountAccessUsersByNormalizedEmailAsync(
+    public async Task<long> CountAccessUsersByNormalizedEmailAsync(
         string normalizedEmail,
         CancellationToken cancellationToken = default)
     {
-        return _dbContext.AccessUsers
-            .AsNoTracking()
-            .Where(item => item.Email != null && item.Email.Trim().ToLower() == normalizedEmail)
-            .LongCountAsync(cancellationToken);
+        return await _dbContext.Database.SqlQuery<long>(
+            $"""
+            SELECT count(*)::bigint AS "Value"
+            FROM access.users AS candidate
+            WHERE candidate.email IS NOT NULL
+              AND lower(normalize(btrim(candidate.email), NFKC)) = {normalizedEmail}
+            """).SingleAsync(cancellationToken);
     }
 
     public void Add(PrintCredential credential)
@@ -122,8 +134,41 @@ internal sealed class EfPrintCredentialRepository : IPrintCredentialRepository
             }
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            throw new PrintCredentialConcurrencyException(exception);
+        }
+        catch (DbUpdateException exception)
+            when (IsConstraintViolation(
+                exception,
+                PrintCredentialConfiguration.OwnerPrimaryKey))
+        {
+            throw new PrintCredentialConcurrencyException(exception);
+        }
+        catch (DbUpdateException exception)
+            when (IsConstraintViolation(
+                exception,
+                PrintCredentialConfiguration.NormalizedEmailUniqueConstraint))
+        {
+            throw new PrintCredentialEmailConflictException(exception);
+        }
     }
+
+    private static bool IsConstraintViolation(
+        DbUpdateException exception,
+        string constraintName) =>
+        exception.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation
+        } postgresException &&
+        string.Equals(
+            postgresException.ConstraintName,
+            constraintName,
+            StringComparison.Ordinal);
 
     private static PrintCredential ToDomain(PrintCredentialEntity entity)
     {
@@ -137,4 +182,9 @@ internal sealed class EfPrintCredentialRepository : IPrintCredentialRepository
 
         return domain;
     }
+
+    private sealed record AccessCandidate(
+        Guid Id,
+        int Status,
+        bool IsCustomer);
 }

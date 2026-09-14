@@ -66,8 +66,6 @@ public sealed class FuaPrintAuthenticationRegistrationTests
                 new Dictionary<string, string?>
                 {
                     ["PrintPayments:Enabled"] = "true",
-                    ["PrintCredentials:PepperBase64"] =
-                        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                     ["PrintPayments:Sources:0:PrintSourceId"] =
                         Guid.NewGuid().ToString("D"),
                     ["PrintPayments:Sources:0:CredentialSha256"] =

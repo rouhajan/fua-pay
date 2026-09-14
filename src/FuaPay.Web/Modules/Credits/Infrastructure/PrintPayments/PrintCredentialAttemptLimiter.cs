@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 using FuaPay.Web.Modules.Credits.Application;
 
 namespace FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
@@ -7,51 +5,158 @@ namespace FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
 internal sealed class PrintCredentialAttemptLimiter :
     IPrintCredentialAttemptLimiter
 {
-    internal const int SourcePermitLimit = 30;
-    internal const int EmailPermitLimit = 6;
+    internal const int SourceFailureLimit = 30;
+    internal const int EmailFailureLimit = 6;
+    internal const int MaximumSourceEntries = 1_024;
+    internal const int MaximumEmailEntries = 4_096;
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
 
-    private readonly ConcurrentDictionary<string, Counter> _counters = [];
+    private readonly object _sync = new();
+    private readonly Dictionary<string, Counter> _sourceCounters = [];
+    private readonly Dictionary<string, Counter> _emailCounters = [];
 
-    public bool TryAcquire(
-        Guid printSourceId,
-        string sourceAddress,
-        string normalizedEmail,
-        DateTimeOffset now)
+    internal int EntryCount
     {
-        var sourceKey = $"source:{printSourceId:D}:{sourceAddress}";
-        var emailKey = $"email:{printSourceId:D}:{normalizedEmail}";
-
-        return Acquire(sourceKey, SourcePermitLimit, now) &&
-            Acquire(emailKey, EmailPermitLimit, now);
+        get
+        {
+            lock (_sync)
+            {
+                return _sourceCounters.Count + _emailCounters.Count;
+            }
+        }
     }
 
-    private bool Acquire(string key, int limit, DateTimeOffset now)
+    public bool IsBlocked(
+        Guid printSourceId,
+        string? normalizedEmail,
+        DateTimeOffset now)
     {
-        var counter = _counters.GetOrAdd(key, _ => new Counter(now));
-
-        lock (counter)
+        lock (_sync)
         {
-            if (now - counter.WindowStartedAt >= Window)
-            {
-                counter.WindowStartedAt = now;
-                counter.Count = 0;
-            }
+            RemoveExpired(now);
 
-            if (counter.Count >= limit)
+            return IsAtLimit(
+                    _sourceCounters,
+                    SourceKey(printSourceId),
+                    SourceFailureLimit) ||
+                normalizedEmail is not null &&
+                IsAtLimit(
+                    _emailCounters,
+                    EmailKey(printSourceId, normalizedEmail),
+                    EmailFailureLimit);
+        }
+    }
+
+    public bool TryRecordFailure(
+        Guid printSourceId,
+        string? normalizedEmail,
+        DateTimeOffset now)
+    {
+        lock (_sync)
+        {
+            RemoveExpired(now);
+
+            var sourceKey = SourceKey(printSourceId);
+            var emailKey = normalizedEmail is null
+                ? null
+                : EmailKey(printSourceId, normalizedEmail);
+
+            if (
+                IsAtLimit(
+                    _sourceCounters,
+                    sourceKey,
+                    SourceFailureLimit) ||
+                emailKey is not null &&
+                IsAtLimit(
+                    _emailCounters,
+                    emailKey,
+                    EmailFailureLimit))
             {
                 return false;
             }
 
-            counter.Count++;
+            Increment(
+                _sourceCounters,
+                sourceKey,
+                MaximumSourceEntries,
+                now);
+            if (emailKey is not null)
+            {
+                Increment(
+                    _emailCounters,
+                    emailKey,
+                    MaximumEmailEntries,
+                    now);
+            }
+
             return true;
         }
     }
 
-    private sealed class Counter(DateTimeOffset windowStartedAt)
-    {
-        public DateTimeOffset WindowStartedAt { get; set; } = windowStartedAt;
+    private static bool IsAtLimit(
+        IReadOnlyDictionary<string, Counter> counters,
+        string key,
+        int limit) =>
+        counters.TryGetValue(key, out var counter) &&
+        counter.Count >= limit;
 
-        public int Count { get; set; }
+    private static void Increment(
+        Dictionary<string, Counter> counters,
+        string key,
+        int maximumEntries,
+        DateTimeOffset now)
+    {
+        if (counters.TryGetValue(key, out var counter))
+        {
+            counter.Count++;
+            return;
+        }
+
+        if (counters.Count >= maximumEntries)
+        {
+            var oldest = counters
+                .OrderBy(pair => pair.Value.ExpiresAt)
+                .ThenBy(pair => pair.Key, StringComparer.Ordinal)
+                .First();
+            counters.Remove(oldest.Key);
+        }
+
+        counters.Add(key, new Counter(1, now + Window));
+    }
+
+    private void RemoveExpired(DateTimeOffset now)
+    {
+        RemoveExpired(_sourceCounters, now);
+        RemoveExpired(_emailCounters, now);
+    }
+
+    private static void RemoveExpired(
+        Dictionary<string, Counter> counters,
+        DateTimeOffset now)
+    {
+        foreach (var key in counters
+                     .Where(pair => pair.Value.ExpiresAt <= now)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            counters.Remove(key);
+        }
+    }
+
+    private static string SourceKey(Guid printSourceId) =>
+        printSourceId.ToString("D");
+
+    private static string EmailKey(
+        Guid printSourceId,
+        string normalizedEmail) =>
+        $"{printSourceId:D}:{normalizedEmail}";
+
+    private sealed class Counter(
+        int count,
+        DateTimeOffset expiresAt)
+    {
+        public int Count { get; set; } = count;
+
+        public DateTimeOffset ExpiresAt { get; } = expiresAt;
     }
 }

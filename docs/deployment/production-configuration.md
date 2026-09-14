@@ -35,6 +35,9 @@ Csob__PrivateKeyPath=/var/lib/fuapay/secrets/csob-private.pem
 Csob__GatewayPublicKeyPath=/var/lib/fuapay/secrets/csob-gateway-public.pem
 Csob__ReturnUrl=https://fuapay.tul.cz/payments/csob/return
 
+PrintPayments__Enabled=false
+PrintCredentials__Enabled=false
+
 Receipts__Enabled=false
 Receipts__PreviewMode=false
 Receipts__Issuer__LegalName=<schválený právní název vystavitele>
@@ -54,6 +57,22 @@ Adresář Data Protection musí existovat před startem, být trvalý mimo relea
 čitelný/zapisovatelný pouze účtem služby. ČSOB privátní klíč má být trvalý mimo
 release a pouze čitelný tímto účtem. Změna/odstranění Data Protection klíčů
 zneplatní sessions a antiforgery cookies.
+
+Persistentní tiskové credentialy se zapínají pouze společně s PrintPayments:
+
+```text
+PrintPayments__Enabled=true
+PrintPayments__Sources__0__PrintSourceId=<non-empty GUID>
+PrintPayments__Sources__0__CredentialSha256=<SHA-256 service credentialu>
+PrintCredentials__Enabled=true
+PrintCredentials__PepperBase64=<base64 alespoň 32 náhodných bytů>
+```
+
+Pepper patří do production secret store mimo Git a release artefakt. Musí být
+trvalý přes restarty i nasazení; jeho ztráta nebo rotace zneplatní všechny
+existující tiskové PIN verifiery. Bezpečný provozní postup je credential feature
+vypnout, nastavit nový pepper a vyžádat od zákazníků nové nastavení PINu. Tento
+dokument neprohlašuje credential feature za nasazenou na stagingu ani v produkci.
 
 Doklady zůstávají v Production vypnuté, dokud nejsou účetní údaje a pravidlo
 DPH schválené. Při zapnutí musí být `PreviewMode=false`, nesmí zůstat preview
