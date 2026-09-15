@@ -41,8 +41,8 @@ Ověřeno přímo na staging VM 2026-09-15 po deploymentu aktuálního `main`:
 - Canonical HTTPS smoke: HTTP 200.
 - Plain HTTP canonical URL: HTTP 301.
 - Alternate HTTPS URL: HTTP 301.
-- `PrintPayments` ani `PrintCredentials` nejsou ve staging environment
-  konfiguraci aktivovány; committed defaults obou feature jsou `Enabled=false`.
+- Ve `/etc/fuapay/staging.env` nejsou položky `PrintPayments__*` ani
+  `PrintCredentials__*`; committed defaults obou feature jsou `Enabled=false`.
 - Production ČSOB traffic and production database workload: not active.
 
 ČSOB 30min expiry acceptance na předchozím release `bc868276...` dne
