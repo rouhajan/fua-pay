@@ -7,6 +7,14 @@ public sealed record ReservePrintPaymentRequest(
     long AmountMinorUnits,
     string? Currency);
 
+public sealed record ReservePrintPaymentByCredentialRequest(
+    string? Email,
+    string? PrintCode,
+    Guid ReserveCommandId,
+    string? JobUuid,
+    long AmountMinorUnits,
+    string? Currency);
+
 public sealed record PrintPaymentUserIdentityRequest(
     string? Provider,
     string? TenantId,

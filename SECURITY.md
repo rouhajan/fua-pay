@@ -19,8 +19,21 @@ Požadované OIDC scopes jsou pouze:
 
 Bezpečnostní klíč identity tvoří přesně ověřené GUID claims `tid` (tenant) a
 `oid` (objekt uživatele). Chybějící, prázdné, duplicitní nebo cizí `tid`/`oid`
-se odmítnou. Jméno, `preferred_username` ani e-mail se nikdy nepoužívají pro
-párování nebo autorizaci.
+se odmítnou. Jméno, `preferred_username` ani e-mail se nepoužívají pro Entra
+párování, vytvoření či sloučení účtu, login nebo aplikační autorizaci; stabilní
+identitou účtu zůstává `tid + oid`.
+
+Úzce vymezenou výjimkou je volitelná cesta PrintCredentials. FUA Print se nejprve
+autentizuje vlastním service bearerem a dvojice e-mail + zákazníkem nastavený
+trvalý šestimístný tiskový kód potom autentizuje pouze použití kreditu pro tisk.
+Tato cesta účet Access nevytváří, neslučuje ani do něj uživatele nepřihlašuje.
+Při každém použití znovu fail-closed ověří, že aktuální Access profil odpovídá
+jednoznačně uloženému vlastníkovi a že vlastník je stále aktivní Customer.
+E-mail je v Access profilu volitelný a PrintCredentials neimplementují doménový
+allowlist. Nastavení nebo změna kódu vyžaduje použitelný a jednoznačný aktuální
+profilový e-mail synchronizovaný z ověřeného Entra profilu. Jeho ztráta, změna
+nebo nejednoznačnost zablokuje credential autentizaci, ale aktivní Customer může
+svůj již uložený credential podle stabilního interního `UserId` vždy zneplatnit.
 
 FUA Pay ukládá:
 
@@ -116,6 +129,8 @@ privátního ČSOB klíče musí být mimo release a čitelný jen účtem služ
 Data Protection key ring musí být trvalý a chráněný. Logy používají běžné
 aplikační události a nemají obsahovat tokeny, credentials ani karetní data;
 detailní finanční a administrativní změny patří do auditních tabulek.
+Plaintext tiskový kód ani PrintCredentials pepper se nikdy nesmějí zapisovat do
+logu nebo auditu.
 
 ## Produkční fail-closed pravidla
 

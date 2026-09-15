@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Access.Web;
+using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.Credits.Domain;
 using FuaPay.Web.Tests.Testing;
 
 using Microsoft.AspNetCore.Antiforgery;
@@ -376,6 +378,180 @@ public sealed class SecurityPerimeterTests :
     }
 
     [Fact]
+    public async Task PrintCredentialPost_WithoutAntiforgeryToken_ReturnsBadRequest()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací zákazník",
+            "student@tul.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Customer]);
+        var sessionQueries = new RecordingAccessSessionQueries(session);
+        using var configuredFactory =
+            _factory.WithWebHostBuilder(
+                builder => builder.ConfigureTestServices(
+                    services =>
+                    {
+                        services.RemoveAll<IAccessSessionQueries>();
+                        services.AddSingleton<IAccessSessionQueries>(sessionQueries);
+                    }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var protectedTicket = cookieOptions.TicketDataFormat.Protect(ticket);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}={protectedTicket}");
+        using var content = new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["Input.PrintCode"] = "123456",
+                ["Input.Confirmation"] = "123456",
+                ["ownerId"] = Guid.NewGuid().ToString()
+            });
+
+        using var response = await client.PostAsync(
+            "/Customer/PrintCredential?handler=Set",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, sessionQueries.CallCount);
+        Assert.Equal(session.UserId, sessionQueries.LastUserId);
+    }
+
+    [Fact]
+    public async Task DisabledPrintCredentialPage_ReturnsNotFoundWithoutPepperOrHashing()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací zákazník",
+            "student@tul.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Customer]);
+        var sessionQueries = new RecordingAccessSessionQueries(session);
+        var hasher = new CountingPrintCodeHasher();
+        using var baseFactory = new ConfiguredWebApplicationFactory(
+            Environments.Development,
+            new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:FuaPay"] =
+                    "Host=localhost;Database=unused;" +
+                    "Username=unused;Password=unused",
+                ["PrintCredentials:Enabled"] = "false"
+            });
+        using var configuredFactory = baseFactory.WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(
+                services =>
+                {
+                    services.RemoveAll<IAccessSessionQueries>();
+                    services.AddSingleton<IAccessSessionQueries>(
+                        sessionQueries);
+                    services.RemoveAll<IPrintCodeHasher>();
+                    services.AddSingleton<IPrintCodeHasher>(hasher);
+                }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var protectedTicket = cookieOptions.TicketDataFormat.Protect(ticket);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}={protectedTicket}");
+        using var response = await client.GetAsync(
+            "/Customer/PrintCredential");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(1, sessionQueries.CallCount);
+        Assert.Equal(0, hasher.HashCalls);
+        Assert.Equal(0, hasher.VerifyCalls);
+    }
+
+    [Fact]
+    public async Task PrintCredentialPage_WithStaleActiveCredentialStillOffersRevocation()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací zákazník",
+            null,
+            AccessUserStatus.Active,
+            [AccessRole.Customer]);
+        var sessionQueries = new RecordingAccessSessionQueries(session);
+        var repository = new StalePrintCredentialRepository(session.UserId);
+        using var baseFactory = new ConfiguredWebApplicationFactory(
+            Environments.Development,
+            new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:FuaPay"] =
+                    "Host=localhost;Database=unused;" +
+                    "Username=unused;Password=unused",
+                ["PrintPayments:Enabled"] = "true",
+                ["PrintPayments:Sources:0:PrintSourceId"] =
+                    Guid.NewGuid().ToString("D"),
+                ["PrintPayments:Sources:0:CredentialSha256"] =
+                    new string('a', 64),
+                ["PrintCredentials:Enabled"] = "true",
+                ["PrintCredentials:PepperBase64"] =
+                    Convert.ToBase64String(new byte[32])
+            });
+        using var configuredFactory = baseFactory.WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(
+                services =>
+                {
+                    services.RemoveAll<IAccessSessionQueries>();
+                    services.AddSingleton<IAccessSessionQueries>(
+                        sessionQueries);
+                    services.RemoveAll<IPrintCredentialRepository>();
+                    services.AddSingleton<IPrintCredentialRepository>(
+                        repository);
+                }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var protectedTicket = cookieOptions.TicketDataFormat.Protect(ticket);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}={protectedTicket}");
+        using var response = await client.GetAsync(
+            "/Customer/PrintCredential");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("handler=Revoke", html, StringComparison.Ordinal);
+        Assert.Contains(
+            "name=\"__RequestVerificationToken\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("handler=Set", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            StalePrintCredentialRepository.StaleEmail,
+            html,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void StagingSecurityCookies_UseSecurePolicies()
     {
         using var stagingFactory =
@@ -731,5 +907,74 @@ public sealed class SecurityPerimeterTests :
             Interlocked.Increment(ref _callCount);
             return Task.FromResult(_snapshot);
         }
+    }
+
+    private sealed class CountingPrintCodeHasher : IPrintCodeHasher
+    {
+        public int HashCalls { get; private set; }
+
+        public int VerifyCalls { get; private set; }
+
+        public string Hash(string printCode)
+        {
+            HashCalls++;
+            return "unused";
+        }
+
+        public bool Verify(string hash, string printCode)
+        {
+            VerifyCalls++;
+            return false;
+        }
+    }
+
+    private sealed class StalePrintCredentialRepository :
+        IPrintCredentialRepository
+    {
+        public const string StaleEmail = "stale-profile@example.cz";
+
+        private readonly PrintCredential _credential;
+
+        public StalePrintCredentialRepository(Guid ownerId)
+        {
+            _credential = new PrintCredential(
+                ownerId,
+                StaleEmail,
+                "unused-hash",
+                new DateTimeOffset(
+                    2026,
+                    9,
+                    14,
+                    8,
+                    0,
+                    0,
+                    TimeSpan.Zero));
+        }
+
+        public Task<PrintCredential?> FindByOwnerAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<PrintCredential?>(
+                ownerId == _credential.OwnerId
+                    ? _credential
+                    : null);
+
+        public Task<PrintCredentialAuthenticationCandidate?>
+            FindAuthenticationCandidateAsync(
+                string normalizedEmail,
+                CancellationToken cancellationToken = default) =>
+            Task.FromResult<PrintCredentialAuthenticationCandidate?>(null);
+
+        public Task<long> CountAccessUsersByNormalizedEmailAsync(
+            string normalizedEmail,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(0L);
+
+        public void Add(PrintCredential credential) =>
+            throw new NotSupportedException();
+
+        public Task SaveAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

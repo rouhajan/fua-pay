@@ -15,14 +15,18 @@ Identita služby a identita studenta jsou dvě různé hranice:
 
 - opaque bearer credential autentizuje FUA Print a server-side určí
   `printSourceId`;
-- přesný stabilní Microsoft Entra klíč `provider + tid + oid` pouze dohledá již
-  existujícího aktivního FUA Pay uživatele s rolí `Customer`.
+- původní reserve cesta používá přesný stabilní Microsoft Entra klíč
+  `provider + tid + oid`;
+- alternativní reserve cesta používá zákazníkem předem nastavenou dvojici
+  kanonizovaný aktuální e-mail Access profilu + trvalý šestimístný tiskový kód.
 
 Print cesta nikdy nepoužívá login/JIT službu. Neznámá identita se nevytvoří,
-e-mail ani profilové údaje se nepoužijí k párování, role ani profil se nemění a
-resolver nic nezapisuje.
+role ani profil se nemění a resolver nic nezapisuje. E-mailové párování je
+povoleno výhradně v credential cestě a pouze proti zvláštní tabulce
+`credits.print_credentials`; obyčejný profilový index `access.users.email` není
+považován za unikátní autentizační klíč.
 
-## Stav integrace k 2026-09-13
+## Stav integrace k 2026-09-14
 
 FUA Pay strana kontraktu je implementovaná a security-hardened. Existují
 endpointy pro `Reserve`, read-only recovery lookup, `ResolutionRequired`,
@@ -44,8 +48,8 @@ Aktivační pořadí je záměrně konzervativní:
    explicitně nahrazena ověřenou migrací;
 3. opravit na FUA Print straně všechny potvrzené mezery nutné pro bezpečné
    svázání mutation s očekávaným IPP `job-uuid` a pro durable recovery;
-4. potvrdit, jak FUA Print získá přesné `microsoft-entra + tid + oid`; tiskový
-   PIN/kód se do FUA Pay nepřidává jen jako domněnka;
+4. zapojit buď stávající `microsoft-entra + tid + oid`, nebo zde popsaný
+   zákazníkem spravovaný e-mailový tiskový credential;
 5. implementovat FUA Print klienta tohoto API s durable command IDs a recovery
    podle `jobUuid`;
 6. teprve poté vytvořit jeden `printSourceId`, service credential a zapnout
@@ -66,6 +70,8 @@ nastaví například:
 
 ```text
 PrintPayments__Enabled=true
+PrintCredentials__Enabled=true
+PrintCredentials__PepperBase64=<base64 alespoň 32 náhodných bytů>
 PrintPayments__Sources__0__PrintSourceId=<non-empty GUID>
 PrintPayments__Sources__0__CredentialSha256=<64 hexadecimal characters>
 ```
@@ -83,6 +89,28 @@ header je omezen na 135 znaků. Chybějící, neplatný nebo příliš dlouhý c
 selže jako `401 service_authentication_failed`. Při zapnuté feature zastaví
 startup prázdný source seznam, prázdný nebo neplatný GUID, jiný než 64znakový
 hexadecimální digest a duplicitní source ID nebo digest.
+
+Persistentní tiskové credentialy mají samostatný přepínač a jsou defaultně
+vypnuté. `PrintPayments__Enabled=true` samo o sobě pepper nevyžaduje a zachovává
+původní API. `PrintCredentials__Enabled=true` vyžaduje zapnuté PrintPayments a
+platný pepper; jinak aplikace fail-closed zastaví startup. Vypnutá credential
+feature nezobrazuje zákaznickou navigaci/formulář a credential reserve vrací
+`404 print_credentials_disabled` bez ověřování e-mailu nebo PINu. Tento `404`
+vzniká až po úspěšné autentizaci service beareru FUA Print; chybějící nebo
+neplatný bearer skončí dříve na hranici služby jako
+`401 service_authentication_failed`.
+
+Pepper tiskových kódů je samostatný deployment secret FUA Pay. Nesmí být sdílen
+s FUA Print ani s učebnovými počítači. Při zapnutých PrintCredentials chybějící,
+neplatný nebo kratší než 32bytový pepper zastaví startup. Kód se před pomalým
+ASP.NET Core password hasherem předzpracuje HMAC-SHA-256 s pepperem. V databázi
+je pouze náhodně solený verifier; plaintext, verifier ani pepper se nezapisují do
+auditu nebo logu.
+
+Pepper musí být uložen mimo Git i release artefakt a musí stabilně přežít
+restarty i nasazení dalších verzí. Jeho ztráta nebo rotace zneplatní všechny
+existující verifiery. Bezpečná obnova není pokus o zpětné získání PINů, ale
+vyžádání nového nastavení tiskového PINu od zákazníků.
 
 Bezpečný základ pro vytvoření 256bitového tokenu a digestu na důvěryhodném
 administračním stroji je:
@@ -141,6 +169,86 @@ normalizací. Owner vzniká read-only identity lookupem a source pouze z ověře
 service credentialu. Endpoint pak deleguje na
 `PrintReservationService.ReserveAsync`.
 
+### Reserve podle tiskového credentialu
+
+`POST /api/print-payments/reservations/by-credential`
+
+```json
+{
+  "email": "student@tul.cz",
+  "printCode": "123456",
+  "reserveCommandId": "11111111-1111-1111-1111-111111111111",
+  "jobUuid": "urn:uuid:22222222-2222-2222-2222-222222222222",
+  "amountMinorUnits": 1234,
+  "currency": "CZK"
+}
+```
+
+Také tato cesta nejprve vyžaduje service bearer credential. Kanonizace e-mailu
+má v aplikaci, PostgreSQL lookupu i invariantu `credits.print_credentials`
+stejnou deterministickou definici: Unicode FormKC/NFKC, odstranění pouze znaků
+U+0020 SPACE z obou konců a převod pouze ASCII `A`–`Z` na `a`–`z`. Ostatní
+Unicode znaky včetně jejich velikosti zůstávají beze změny. PostgreSQL používá
+explicitní `C` kolaci, takže identitu neurčuje locale databáze. Full-width ASCII
+se díky NFKC sjednotí; nepodporovaná ne-ASCII case-ekvivalence se nehádá a selže
+uzavřeně.
+
+Musí existovat právě jeden aktivní tiskový credential a právě jeden odpovídající
+aktuální Access profil; jeho ID musí být uloženým vlastníkem a vlastník musí být
+stále aktivní efektivní `Customer`. Profilový e-mail je synchronizovatelný a
+měnitelný: po změně, odstranění nebo přeřazení adresy jinému účtu autentizace
+uspěje jen tehdy, když se aktuální profil pod stejnou kanonizací stále vyhodnotí
+jednoznačně k uloženému vlastníkovi. Stará, přeřazená nebo nejednoznačná adresa
+selže uzavřeně. Neznámý e-mail, chybný kód, zneplatněný/nenastavený credential,
+neaktivní vlastník a nejednoznačný profil selžou bez rezervace stejnou odpovědí
+`401 print_credential_authentication_failed`.
+
+Access e-mail je volitelný a tato feature sama nemá `@tul.cz` ani jiný doménový
+allowlist. Nastavení nebo změna credentialu vyžaduje použitelný jednoznačný
+aktuální e-mail uložený v Access profilu a synchronizovaný z ověřeného Entra
+profilu. Ztráta této způsobilosti nemění stabilního interního vlastníka:
+aktivní `Customer` proto může existující aktivní credential vždy zneplatnit i
+při chybějícím, neplatném, změněném nebo nejednoznačném aktuálním e-mailu. UI
+nezobrazuje uložený starý e-mail jako aktuální identitu.
+
+Kromě obecného limitu 120/min/IP platí pro credential cestu minutové in-memory
+hranice 30 **neúspěšných** pokusů pro serverem určený `printSourceId` a 6
+neúspěšných pokusů pro normalizovaný e-mail + `printSourceId`. Úspěšné tisky tyto
+počty nezvyšují. Překročení vrací `429 print_credential_rate_limited`; nejde o
+trvalý account lockout. Zastaralé klíče expirují a počet source i e-mailových
+klíčů má pevný horní limit, takže náhodné adresy nemohou neomezeně zvětšovat
+paměť procesu. Po odstranění expirovaných položek se existující živý klíč dál
+počítá běžně. Je-li příslušná kapacita plná, nový klíč žádnou živou položku
+nevytěsní: aktuální neúspěšná autentizace fail-closed vrátí `429` a existující
+blokace zůstávají v platnosti do své normální expirace.
+
+Po ověření se sestaví stejný `ReservePrintCreditCommand` a ihned se volá
+`PrintReservationService`; nevzniká druhý ledger, Payment ani idempotency model.
+Konfliktní replay zůstává konfliktem a stejný `jobUuid` nemůže vytvořit dvě
+rezervace. Tiskový kód se úspěchem nespotřebuje.
+
+Po ztracené nebo nejednoznačné reserve odpovědi FUA Print nejprve provede
+autentizovaný `GET /api/print-payments/reservations?jobUuid=...`. Pokud rezervace
+existuje, použije její stav. Jen když bezpečný recovery kontrakt prokáže, že
+rezervace commitnuta nebyla, smí zopakovat tutéž reserve operaci se zachovaným
+`reserveCommandId` a `jobUuid`. Přímý replay se starým PINem není garantován,
+pokud zákazník mezitím PIN změnil nebo zneplatnil.
+
+## Nastavení zákazníkem a zamýšlený tok
+
+Přihlášený efektivní zákazník otevře v FUA Pay stránku **Tiskový kód**. Owner ID
+se bere výhradně z autentizované session a tiskový e-mail z aktuálního
+Entra-synchronizovaného Access profilu; formulář nepřijímá owner ID ani cizí
+e-mail. Zákazník zvolí šest číslic, zadá potvrzení a může credential později
+změnit nebo zneplatnit. Stejný kód smějí mít různí zákazníci. Změna okamžitě
+nahradí předchozí verifier.
+
+Celý tok je: Entra login → jednorázové nastavení credentialu ve FUA Pay; poté
+pro každý tisk Windows print → FUA Print held job → quote → zadání e-mailu a
+trvalého kódu → service call do FUA Pay → existující Reserve → fyzický tisk →
+existující Capture / Release / ResolutionRequired. FUA Pay není nutné navštívit
+před každým tiskem.
+
 ### Recovery a lifecycle
 
 - `GET /api/print-payments/reservations?jobUuid=<IPP job UUID>` provede read-only
@@ -173,6 +281,10 @@ Business a validační chyby jsou `application/problem+json` se stabilním polem
 `code`:
 
 - `401`: `service_authentication_failed`;
+- `401`: `print_credential_authentication_failed` (credential reserve);
+- `429`: `print_credential_rate_limited` (credential reserve);
+- `404`: `print_credentials_disabled` (credential reserve feature je vypnutá;
+  pouze po úspěšné service autentizaci);
 - `400`: `invalid_request`, `invalid_job_uuid`, `invalid_amount`,
   `unsupported_currency`, `invalid_identity`;
 - `403`: `user_not_eligible`;

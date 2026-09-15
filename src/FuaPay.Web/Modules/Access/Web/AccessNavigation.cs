@@ -16,6 +16,7 @@ public static class AccessNavigation
         [
             new("Přehled", "/Index", IsOverview: true),
             new("Kredit", "/Customer/Credit/Index", "/Customer/Credit"),
+            new("Tiskový kód", "/Customer/PrintCredential/Index", "/Customer/PrintCredential"),
             new("Platby", "/Customer/Payments/Index", "/Customer/Payments"),
             new("Zakázky", "/Customer/Jobs/Index", "/Customer/Jobs"),
             new("Nápověda", "/Help", "/Help")
@@ -46,11 +47,18 @@ public static class AccessNavigation
         ];
 
     public static IReadOnlyList<AccessNavigationItem> For(
-        AccessView view)
+        AccessView view,
+        bool printCredentialsEnabled = false)
     {
         return view switch
         {
-            AccessView.Customer => CustomerItems,
+            AccessView.Customer when printCredentialsEnabled =>
+                CustomerItems,
+            AccessView.Customer => CustomerItems.Where(
+                item => !string.Equals(
+                    item.SectionPrefix,
+                    "/Customer/PrintCredential",
+                    StringComparison.Ordinal)).ToArray(),
             AccessView.Requester => RequesterItems,
             AccessView.Admin => AdminItems,
             _ => throw new ArgumentOutOfRangeException(
@@ -62,7 +70,8 @@ public static class AccessNavigation
 
     public static AccessNavigationItem? FindActive(
         AccessView view,
-        string currentPage)
+        string currentPage,
+        bool printCredentialsEnabled = false)
     {
         ArgumentNullException.ThrowIfNull(currentPage);
 
@@ -75,7 +84,7 @@ public static class AccessNavigation
                 ? "/Customer/Credit/Index"
                 : currentPage;
 
-        return For(view)
+        return For(view, printCredentialsEnabled)
             .Where(item =>
                 item.Page is not null &&
                 (

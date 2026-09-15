@@ -36,6 +36,9 @@ public static class PrintPaymentsEndpoint
             .DisableAntiforgery();
 
         group.MapPost("/reservations", ReserveAsync);
+        group.MapPost(
+            "/reservations/by-credential",
+            ReserveByCredentialAsync);
         group.MapGet("/reservations", FindByJobAsync);
         group.MapPost(
             "/reservations/{reservationId}/resolution-required",
@@ -48,6 +51,98 @@ public static class PrintPaymentsEndpoint
             ReleaseAsync);
 
         return endpoints;
+    }
+
+    private static async Task<IResult> ReserveByCredentialAsync(
+        HttpContext context,
+        PrintCredentialSecurityConfiguration configuration)
+    {
+        if (!configuration.Enabled)
+        {
+            return Problem(
+                StatusCodes.Status404NotFound,
+                "print_credentials_disabled");
+        }
+
+        var body = await ReadBodyAsync<ReservePrintPaymentByCredentialRequest>(context);
+
+        if (!body.IsValid || body.Value is null)
+        {
+            return Problem(StatusCodes.Status400BadRequest, "invalid_request");
+        }
+
+        var request = body.Value;
+        if (
+            request.ReserveCommandId == Guid.Empty ||
+            request.Email is null ||
+            request.PrintCode is null)
+        {
+            return Problem(StatusCodes.Status400BadRequest, "invalid_request");
+        }
+
+        string jobUuid;
+        try
+        {
+            jobUuid = IppJobUuid.Normalize(request.JobUuid!);
+        }
+        catch (ArgumentException)
+        {
+            return Problem(StatusCodes.Status400BadRequest, "invalid_job_uuid");
+        }
+
+        if (request.AmountMinorUnits <= 0)
+        {
+            return Problem(StatusCodes.Status400BadRequest, "invalid_amount");
+        }
+
+        if (!string.Equals(request.Currency, "CZK", StringComparison.Ordinal))
+        {
+            return Problem(StatusCodes.Status400BadRequest, "unsupported_currency");
+        }
+
+        try
+        {
+            var credentialReservationService = context.RequestServices
+                .GetRequiredService<PrintCredentialReservationService>();
+            var reservation = await credentialReservationService.ReserveAsync(
+                context.User.GetRequiredPrintSourceId(),
+                request.Email,
+                request.PrintCode,
+                jobUuid,
+                new Money(request.AmountMinorUnits),
+                request.ReserveCommandId,
+                context.RequestAborted);
+
+            return Results.Ok(ToResponse(reservation));
+        }
+        catch (PrintCredentialAuthenticationFailedException)
+        {
+            return Problem(
+                StatusCodes.Status401Unauthorized,
+                "print_credential_authentication_failed");
+        }
+        catch (PrintCredentialRateLimitExceededException)
+        {
+            return Problem(
+                StatusCodes.Status429TooManyRequests,
+                "print_credential_rate_limited");
+        }
+        catch (CreditAccountNotFoundException)
+        {
+            return Problem(StatusCodes.Status409Conflict, "insufficient_credit");
+        }
+        catch (InsufficientAvailablePrintCreditException)
+        {
+            return Problem(StatusCodes.Status409Conflict, "insufficient_credit");
+        }
+        catch (PrintReservationCommandConflictException)
+        {
+            return Problem(StatusCodes.Status409Conflict, "idempotency_conflict");
+        }
+        catch (PrintReservationJobConflictException)
+        {
+            return Problem(StatusCodes.Status409Conflict, "print_job_conflict");
+        }
     }
 
     private static async Task<IResult> ReserveAsync(
@@ -523,6 +618,9 @@ public static class PrintPaymentsEndpoint
             "invalid_amount" => "The amount is invalid.",
             "unsupported_currency" => "The currency is unsupported.",
             "invalid_identity" => "The user identity is invalid.",
+            "print_credential_authentication_failed" => "The printing credential is invalid.",
+            "print_credential_rate_limited" => "Too many printing credential attempts.",
+            "print_credentials_disabled" => "Printing credentials are disabled.",
             "identity_not_linked" => "The identity is not linked.",
             "user_not_eligible" => "The user is not eligible.",
             "reservation_not_found" => "The reservation was not found.",

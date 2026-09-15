@@ -5,9 +5,13 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Tests.Testing;
 
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace FuaPay.Web.Tests.Modules.Credits.Web.PrintPayments;
 
@@ -15,6 +19,87 @@ public sealed class PrintPaymentsEndpointSecurityTests
 {
     private const string Credential =
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
+
+    [Fact]
+    public async Task CredentialReserve_WithoutServiceCredentialReturnsStable401()
+    {
+        using var factory = CreateEnabledFactory();
+        using var client = CreateClient(factory);
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/print-payments/reservations/by-credential",
+            new
+            {
+                email = "student@tul.cz",
+                printCode = "123456",
+                reserveCommandId = Guid.NewGuid(),
+                jobUuid = $"urn:uuid:{Guid.NewGuid():D}",
+                amountMinorUnits = 100,
+                currency = "CZK"
+            });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("service_authentication_failed", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task CredentialReserve_WhenCredentialFeatureDisabledFailsClosedWithoutPepper()
+    {
+        using var factory = CreateEnabledFactory(
+            printCredentialsEnabled: false);
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/print-payments/reservations/by-credential",
+            new
+            {
+                email = "student@tul.cz",
+                printCode = "123456",
+                reserveCommandId = Guid.NewGuid(),
+                jobUuid = $"urn:uuid:{Guid.NewGuid():D}",
+                amountMinorUnits = 100,
+                currency = "CZK"
+            });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("print_credentials_disabled", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task CredentialReserve_WhenLimiterCannotRecordFailureReturns429()
+    {
+        using var baseFactory = CreateEnabledFactory();
+        using var factory = baseFactory.WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(
+                services =>
+                {
+                    services.RemoveAll<IPrintCredentialAttemptLimiter>();
+                    services.AddSingleton<IPrintCredentialAttemptLimiter>(
+                        new SaturatedAttemptLimiter());
+                }));
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/print-payments/reservations/by-credential",
+            new
+            {
+                email = "student@tul.cz",
+                printCode = "invalid",
+                reserveCommandId = Guid.NewGuid(),
+                jobUuid = $"urn:uuid:{Guid.NewGuid():D}",
+                amountMinorUnits = 100,
+                currency = "CZK"
+            });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal(
+            "print_credential_rate_limited",
+            await ReadCodeAsync(response));
+    }
 
     [Fact]
     public async Task Endpoint_WithoutServiceCredentialReturnsStable401()
@@ -109,6 +194,33 @@ public sealed class PrintPaymentsEndpointSecurityTests
         using var response = await client.PostAsync(
             "/api/print-payments/reservations",
             content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_request", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task CredentialReserve_ClientSuppliedOwnerIdIsRejected()
+    {
+        using var factory = CreateEnabledFactory();
+        using var client = CreateClient(factory);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Credential);
+        var body = $$"""
+            {
+              "email": "student@tul.cz",
+              "printCode": "123456",
+              "reserveCommandId": "{{Guid.NewGuid():D}}",
+              "jobUuid": "urn:uuid:{{Guid.NewGuid():D}}",
+              "amountMinorUnits": 100,
+              "currency": "CZK",
+              "ownerId": "{{Guid.NewGuid():D}}"
+            }
+            """;
+
+        using var response = await client.PostAsync(
+            "/api/print-payments/reservations/by-credential",
+            new StringContent(body, Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("invalid_request", await ReadCodeAsync(response));
@@ -250,26 +362,36 @@ public sealed class PrintPaymentsEndpointSecurityTests
         Assert.Equal("invalid_request", await ReadCodeAsync(response));
     }
 
-    private static ConfiguredWebApplicationFactory CreateEnabledFactory()
+    private static ConfiguredWebApplicationFactory CreateEnabledFactory(
+        bool printCredentialsEnabled = true)
     {
         var digest = Convert.ToHexString(
                 SHA256.HashData(
                     Encoding.ASCII.GetBytes(Credential)))
             .ToLowerInvariant();
 
+        var settings = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:FuaPay"] =
+                "Host=localhost;Database=unused;" +
+                "Username=unused;Password=unused",
+            ["PrintPayments:Enabled"] = "true",
+            ["PrintCredentials:Enabled"] =
+                printCredentialsEnabled.ToString(),
+            ["PrintPayments:Sources:0:PrintSourceId"] =
+                Guid.NewGuid().ToString("D"),
+            ["PrintPayments:Sources:0:CredentialSha256"] =
+                digest
+        };
+        if (printCredentialsEnabled)
+        {
+            settings["PrintCredentials:PepperBase64"] =
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        }
+
         return new ConfiguredWebApplicationFactory(
             "Development",
-            new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:FuaPay"] =
-                    "Host=localhost;Database=unused;" +
-                    "Username=unused;Password=unused",
-                ["PrintPayments:Enabled"] = "true",
-                ["PrintPayments:Sources:0:PrintSourceId"] =
-                    Guid.NewGuid().ToString("D"),
-                ["PrintPayments:Sources:0:CredentialSha256"] =
-                    digest
-            });
+            settings);
     }
 
     private static HttpClient CreateClient(
@@ -291,5 +413,19 @@ public sealed class PrintPaymentsEndpointSecurityTests
         return document.RootElement
             .GetProperty("code")
             .GetString()!;
+    }
+
+    private sealed class SaturatedAttemptLimiter :
+        IPrintCredentialAttemptLimiter
+    {
+        public bool IsBlocked(
+            Guid printSourceId,
+            string? normalizedEmail,
+            DateTimeOffset now) => false;
+
+        public bool TryRecordFailure(
+            Guid printSourceId,
+            string? normalizedEmail,
+            DateTimeOffset now) => false;
     }
 }
