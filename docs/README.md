@@ -22,5 +22,6 @@ Aktuální dokumentace je záměrně malá:
 - [ověření FUA Print Payments API 2026-08-27](testing/fuaprint-payments-api-verification-2026-08-27.md);
 - [ČSOB expiry acceptance 2026-09-14](testing/csob-expiry-acceptance-2026-09-14.md);
 - [ověření persistentního FUA Print credentialu 2026-09-15](testing/print-credential-verification-2026-09-15.md);
+- [staging acceptance ručního dobití kreditu 2026-09-15](testing/manual-credit-topup-acceptance-2026-09-15.md);
 - [bezpečnost](../SECURITY.md);
 - [vendored frontendové závislosti](development/third-party-frontend-inventory.md).

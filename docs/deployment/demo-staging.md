@@ -1,48 +1,194 @@
 # Demo / staging deployment
 
-Status: 2026-09-13
+Status: 2026-09-15
 
-Tento soubor popisuje pouze aktuální staging runtime a poslední deployment
-evidence. Kanonické vytváření/installace release artefaktu je v
+Tento soubor popisuje aktuální staging runtime a staging deployment evidence.
+Kanonické vytváření/installace release artefaktu je v
 [`release-artifacts.md`](release-artifacts.md). Aktuální ČSOB postup až do
 production readiness je v
 [`../integrations/csob-production-readiness.md`](../integrations/csob-production-readiness.md).
-Detailní evidence aktuálního integračního incidentu je v
-[`../integrations/csob-incident-2026-09-13.md`](../integrations/csob-incident-2026-09-13.md).
+Detailní evidence incidentu 2026-09-13 je v
+[`../integrations/csob-incident-2026-09-13.md`](../integrations/csob-incident-2026-09-13.md)
+a následná úspěšná expiry acceptance v
+[`../testing/csob-expiry-acceptance-2026-09-14.md`](../testing/csob-expiry-acceptance-2026-09-14.md).
 
 ## Aktuální runtime
 
-- URL: `https://fuapay.tul.cz`
+Ověřeno přímo na staging VM 2026-09-15 po deploymentu aktuálního `main`:
+
+- URL: `https://fuapay.tul.cz`.
 - Alternate URL: `https://fuapay.fa.tul.cz` -> canonical URL.
-- Git `main`: `bc868276aead1b350033303ce8e80bc6ce9a5894`.
-- Revision ověřená při poslední úspěšné live payment acceptance:
-  `768aec26c72bc77ca43d554c8e8bab20f60678b6`.
-- Aktivní release po řízeném code-only rollbacku 2026-09-13:
-  `/opt/fuapay/releases/768aec26c72bc77ca43d554c8e8bab20f60678b6`.
-- Release `bc868276aead1b350033303ce8e80bc6ce9a5894` zůstává nainstalovaný
-  vedle aktivního release; artifact/schema/deployment gate prošel, ale funkční
-  payment acceptance je blokována aktuálním ČSOB integration incidentem.
+- Git `main`: `9ecee2d9c57d88a2969d42094e49597b41f1642c`.
+- Aktivní release:
+  `/opt/fuapay/releases/9ecee2d9c57d88a2969d42094e49597b41f1642c`.
+- Běžící executable:
+  `/opt/fuapay/releases/9ecee2d9c57d88a2969d42094e49597b41f1642c/FuaPay.Web`.
+- `fuapay.service`: active.
 - Service account: `fuapay:fuapay`.
 - Kestrel: `127.0.0.1:5080` behind Nginx.
 - Configuration: `/etc/fuapay/staging.env`.
 - Database: `fuapay_demo`.
-- Databáze má po deployi PR #44 19 aplikovaných EF migrací; code-only rollback
-  schema nevracel.
-- Nejnovější migrace jsou
-  `20260913111715_AddCsobExpiryFailureProvenance` a
-  `20260912145956_AddCsobVerifiedExpiryReturnEvidence`.
+- Databáze má 21 aplikovaných EF migrací; dvě nové migrace nasazené 2026-09-15
+  jsou `20260913162532_AddManualCreditTopUps` a
+  `20260914080618_AddPersistentPrintCredentials`.
 - `Database__ApplyMigrationsOnStart=false`.
-- `Csob__PaymentTtlSeconds=1800`.
 - Microsoft Entra login: live and in use.
-- Payment provider: ČSOB integration, Merchant ID `M1EPAY2213`.
+- Payment provider: ČSOB integration.
 - Simulated payments: disabled.
-- ČSOB reconciliation worker: enabled and po rollbacku `Healthy`.
-- Staging seed data: enabled.
-- Receipt preview mode: enabled.
-- Nginx Basic Authentication: intentionally absent.
+- `/health/ready`: `Healthy`.
+- `/health/workers/csob-reconciliation`: `Healthy`; při post-activation gate byl
+  poslední úspěšný cyklus `2026-09-15T12:48:20.5141938+00:00`, bez failed cycle.
+- Canonical HTTPS smoke: HTTP 200.
+- Plain HTTP canonical URL: HTTP 301.
+- Alternate HTTPS URL: HTTP 301.
+- Ve `/etc/fuapay/staging.env` nejsou položky `PrintPayments__*` ani
+  `PrintCredentials__*`; committed defaults obou feature jsou `Enabled=false`.
 - Production ČSOB traffic and production database workload: not active.
 
+ČSOB 30min expiry acceptance na předchozím release `bc868276...` dne
+2026-09-14 je PASS: browser return `130/6`, následný podepsaný server status
+`0/6`, interní stav `Expired` a žádný finanční efekt. Konkrétní root cause
+incidentu z 2026-09-13 zůstává neprokázaný.
+
+## Staging PostgreSQL deployment/auth model
+
+Ověřeno přímo z PostgreSQL katalogu a `pg_hba_file_rules` 2026-09-15:
+
+- databázi `fuapay_demo` vlastní `fuapay_migrator`;
+- schémata `access`, `app`, `audit`, `credits`, `jobs`, `notifications`,
+  `payments` a `service_units` vlastní `fuapay_migrator`;
+- `fuapay_migrator` má na těchto schématech `USAGE` a `CREATE`;
+- `app.__ef_migrations_history` vlastní `fuapay_migrator`;
+- existují PostgreSQL role `fuapay_app` a `fuapay_migrator`;
+- obě jsou LOGIN role, nejsou superuser, nemají `CREATEDB` ani `CREATEROLE`;
+- žádná z nich nemá PostgreSQL password uložený v roli;
+- mezi FUA Pay rolemi nejsou žádná role memberships;
+- staging nemá PostgreSQL roli `fuapay_deployer`;
+- lokální Unix-socket autentizace používá `peer`; TCP localhost pravidla používají
+  `scram-sha-256`;
+- na OS neexistuje účet `fuapay_migrator`.
+
+`fuapay_deployer`, který se objevuje v CI a v generickém příkladu v
+`release-artifacts.md`, není staging účet a nesmí se pro staging odvozovat ani
+vytvářet. CI používá oddělený testovací model rolí.
+
+Staging migration execution používá lokální peer session OS/PostgreSQL uživatele
+`postgres` a uvnitř kanonického execution artefaktu explicitní
+`SET ROLE "fuapay_migrator";`. Read-only probe před migrací ověřil:
+
+- `current_database() = fuapay_demo`;
+- `session_user = postgres`;
+- `current_user = fuapay_migrator`;
+- před deploymentem bylo 19 migrací a žádná z obou nových nebyla aplikována.
+
+Protože soukromý deployment adresář uživatele `rouha` má mode `0700`, byl
+byte-identický execution SQL před spuštěním zkopírován do
+`/var/lib/postgresql/` jako `postgres:postgres`, mode `0600`; SHA-256 kopie byl
+znovu ověřen proti lokálně připravenému artefaktu. SQL se neměnilo.
+
+Předchozí fail-closed pokus, který očekával stejnojmenný OS účet
+`fuapay_migrator`, skončil ještě před spuštěním migration SQL a nic v databázi
+nezměnil.
+
+## 2026-09-15 deployment `9ecee2d...`
+
+Dne 2026-09-15 byl pro přesný commit
+`9ecee2d9c57d88a2969d42094e49597b41f1642c` připraven, ověřen a na staging
+úspěšně nasazen self-contained `linux-x64` release. `main` CI i CodeQL nad tímto
+SHA jsou PASS.
+
+Release artefakt:
+
+- soubor:
+  `fuapay-staging-9ecee2d9c57d88a2969d42094e49597b41f1642c-linux-x64.tar.gz`;
+- velikost: `123264396` bytes;
+- SHA-256:
+  `27442F74317623C75C9664851BF04BE4D69BA10A40579AFFEF9B7FA504FCF41D`.
+
+Migration artefakty:
+
+- `fuapay-migrations.sql`;
+  SHA-256
+  `FD74956E3CB7853C7584CA1DF28F4014FFBDABE00998CC19E1243796DF5A84B8`;
+- `fuapay-migrations.execution.sql`;
+  SHA-256
+  `9AFEC76CB0C55766B4CEA167D4C0408791F79A197C1B2CD4226FCCD51857C778`.
+
+Lokální release/migration verification prošla a server po přenosu znovu ověřil
+všechny tři SHA-256. `gzip -t` a úplný tar listing release archivu prošly.
+
+Před změnou schema vznikl PostgreSQL custom dump:
+
+`/home/rouha/fuapay_demo-pre-print-20260915T113533Z.dump`
+
+- velikost: `213739` bytes;
+- mode: `0600`;
+- owner: `rouha:rouha`;
+- SHA-256:
+  `7679a801a366d52e704b818b05eaa578ee08db5f66266e6d4ea4c93489cb4afb`;
+- `pg_restore --list`: PASS.
+
+Před migrací měl staging 19 EF migrací. Execution artefakt byl spuštěn s
+`ON_ERROR_STOP=1`; post-migration gate ověřil přesně `21|2` a existenci obou
+nových tabulek:
+
+- `credits.manual_topup_commands`;
+- `credits.print_credentials`.
+
+Nové migrace jsou additive: vytvářejí nové tabulky, constraints, FK a indexy;
+existující finanční schema nemažou ani nepřepisují.
+
+Release byl následně nainstalován vedle aktivního `bc868276...`, jeho ownership a
+modes prošly pre-activation kontrolou a `/opt/fuapay/current` byl atomicky
+přepnut na `9ecee2d...`. Po restartu prošly všechny activation gates:
+
+- `/health/ready`: `Healthy`;
+- reconciliation worker: `Healthy`, bez failed cycle;
+- běžící executable přesně odpovídá novému release;
+- `https://fuapay.tul.cz/`: HTTP 200;
+- `http://fuapay.tul.cz/`: HTTP 301;
+- `https://fuapay.fa.tul.cz/`: HTTP 301;
+- `fuapay.service`: active;
+- finální DB migration gate: `21|2`.
+
+Automatický code rollback nebyl aktivován. Předchozí release
+`bc868276aead1b350033303ce8e80bc6ce9a5894` zůstává rollback baseline pro tento
+konkrétní deployment; databázové schema je forward-only a zpět se automaticky
+nevrací.
+
+Print feature zůstávají po deploymentu vypnuté. Zapnutí `PrintPayments` /
+`PrintCredentials`, konfigurace FUA Print service identity a FUA Pay-only pepperu
+jsou samostatný následný provozní krok a nejsou součástí tohoto deployment
+closeoutu.
+
+## Canonical staging post-activation health rule
+
+Direct Kestrel requests must include both:
+
+```text
+Host: fuapay.tul.cz
+X-Forwarded-Proto: https
+```
+
+Startup health is bounded, not instantaneous:
+
+1. retry `/health/ready` until `Healthy` or timeout;
+2. then poll `/health/workers/csob-reconciliation`;
+3. worker `NotStarted` immediately after restart is a warm-up state, not a
+   rollback reason;
+4. worker `Healthy` is PASS;
+5. worker `Failed`, `Stale` or bounded timeout is FAIL and may trigger rollback;
+6. verify the running executable resolves to the new release;
+7. finish with canonical/alternate HTTPS smoke.
+
+Do not infer a broken `/opt/fuapay/current` target from an unprivileged
+`readlink -f` when the deployment user cannot traverse the release directory;
+use an appropriately privileged read-only check.
+
 ## 2026-09-13 PR #44 deployment a ČSOB integration incident
+
+Tato sekce je historická evidence stavu 2026-09-13. Pozdější úspěšnou expiry
+acceptance z 2026-09-14 popisuje výše odkazovaný samostatný closeout.
 
 PR #44 byl mergnut do `main` jako:
 
@@ -67,10 +213,10 @@ bajtu odpovědi. Naproti tomu úmyslně malformed POST `{}` na stejný `/echo`
 endpoint dostal HTTP 400 přibližně za 62 ms, takže DNS/TCP/TLS i základní HTTP
 endpoint byly ze staging VM dosažitelné.
 
-Aktuální pracovní závěr je externí nebo merchant-specific integrační blocker;
-konkrétní root cause zatím ČSOB nepotvrdila. Další payment-init pokusy se
-nepoužívají jako availability test. Expired activation scénář zůstává BLOCKED a
-není PASS. Kompletní časy, artefakty, rollback a diagnostická evidence jsou v
+Aktuální pracovní závěr v tomto historickém bodě byl externí nebo
+merchant-specific integrační blocker; konkrétní root cause ČSOB nepotvrdila.
+Další payment-init pokusy se nepoužívaly jako availability test. Kompletní časy,
+artefakty, rollback a diagnostická evidence jsou v
 [`../integrations/csob-incident-2026-09-13.md`](../integrations/csob-incident-2026-09-13.md).
 
 ## 2026-09-12 live ČSOB acceptance
@@ -98,9 +244,8 @@ payload proto nebyly zachyceny a pro tento konkrétní běh nelze tvrdit, že br
 vrátil `130/6`. Pozdější autoritativní podepsaný serverový `payment/status`
 persistoval `resultCode=0`, `paymentStatus=6`. Nasazený runtime uzavřel platbu
 jako `Failed`, zakázka zůstala neuhrazená a nevznikl settlement efekt. To není
-activation PASS. Oprava expiry lifecycle je v aktuálním `main`, ale její live
-acceptance je po incidentu 2026-09-13 stále blokována a musí se zopakovat až po
-obnovení ČSOB integration eAPI.
+activation PASS pro tento konkrétní historický běh. Pozdější oprava a nový
+expiry acceptance scénář jsou zdokumentované samostatně.
 
 ## 2026-09-12 release evidence
 
@@ -191,30 +336,6 @@ The corrected activation used bounded worker warm-up. Final result:
 - `https://fuapay.tul.cz/`: HTTP 200;
 - `http://fuapay.tul.cz/`: HTTP 301;
 - `https://fuapay.fa.tul.cz/`: HTTP 301.
-
-### Canonical staging post-activation health rule
-
-Direct Kestrel requests must include both:
-
-```text
-Host: fuapay.tul.cz
-X-Forwarded-Proto: https
-```
-
-Startup health is bounded, not instantaneous:
-
-1. retry `/health/ready` until `Healthy` or timeout;
-2. then poll `/health/workers/csob-reconciliation`;
-3. worker `NotStarted` immediately after restart is a warm-up state, not a
-   rollback reason;
-4. worker `Healthy` is PASS;
-5. worker `Failed`, `Stale` or bounded timeout is FAIL and may trigger rollback;
-6. verify the running executable resolves to the new release;
-7. finish with canonical/alternate HTTPS smoke.
-
-Do not infer a broken `/opt/fuapay/current` target from an unprivileged
-`readlink -f` when the deployment user cannot traverse the release directory;
-use an appropriately privileged read-only check.
 
 ## 2026-09-08 live ČSOB functional acceptance
 
