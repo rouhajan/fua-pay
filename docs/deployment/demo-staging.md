@@ -14,36 +14,41 @@ a následná úspěšná expiry acceptance v
 
 ## Aktuální runtime
 
-Ověřeno přímo na staging VM 2026-09-15:
+Ověřeno přímo na staging VM 2026-09-15 po deploymentu aktuálního `main`:
 
 - URL: `https://fuapay.tul.cz`.
 - Alternate URL: `https://fuapay.fa.tul.cz` -> canonical URL.
 - Git `main`: `9ecee2d9c57d88a2969d42094e49597b41f1642c`.
 - Aktivní release:
-  `/opt/fuapay/releases/bc868276aead1b350033303ce8e80bc6ce9a5894`.
+  `/opt/fuapay/releases/9ecee2d9c57d88a2969d42094e49597b41f1642c`.
 - Běžící executable:
-  `/opt/fuapay/releases/bc868276aead1b350033303ce8e80bc6ce9a5894/FuaPay.Web`.
-- `fuapay.service`: active/running.
+  `/opt/fuapay/releases/9ecee2d9c57d88a2969d42094e49597b41f1642c/FuaPay.Web`.
+- `fuapay.service`: active.
 - Service account: `fuapay:fuapay`.
 - Kestrel: `127.0.0.1:5080` behind Nginx.
 - Configuration: `/etc/fuapay/staging.env`.
 - Database: `fuapay_demo`.
-- Databáze má 19 aplikovaných EF migrací; nejnovější je
-  `20260913111715_AddCsobExpiryFailureProvenance`.
+- Databáze má 21 aplikovaných EF migrací; dvě nové migrace nasazené 2026-09-15
+  jsou `20260913162532_AddManualCreditTopUps` a
+  `20260914080618_AddPersistentPrintCredentials`.
 - `Database__ApplyMigrationsOnStart=false`.
 - Microsoft Entra login: live and in use.
 - Payment provider: ČSOB integration.
 - Simulated payments: disabled.
 - `/health/ready`: `Healthy`.
-- `/health/workers/csob-reconciliation`: `Healthy`.
+- `/health/workers/csob-reconciliation`: `Healthy`; při post-activation gate byl
+  poslední úspěšný cyklus `2026-09-15T12:48:20.5141938+00:00`, bez failed cycle.
+- Canonical HTTPS smoke: HTTP 200.
+- Plain HTTP canonical URL: HTTP 301.
+- Alternate HTTPS URL: HTTP 301.
 - `PrintPayments` ani `PrintCredentials` nejsou ve staging environment
   konfiguraci aktivovány; committed defaults obou feature jsou `Enabled=false`.
 - Production ČSOB traffic and production database workload: not active.
 
-ČSOB 30min expiry acceptance na release `bc868276...` dne 2026-09-14 je PASS:
-browser return `130/6`, následný podepsaný server status `0/6`, interní stav
-`Expired` a žádný finanční efekt. Konkrétní root cause incidentu z 2026-09-13
-zůstává neprokázaný.
+ČSOB 30min expiry acceptance na předchozím release `bc868276...` dne
+2026-09-14 je PASS: browser return `130/6`, následný podepsaný server status
+`0/6`, interní stav `Expired` a žádný finanční efekt. Konkrétní root cause
+incidentu z 2026-09-13 zůstává neprokázaný.
 
 ## Staging PostgreSQL deployment/auth model
 
@@ -67,25 +72,30 @@ Ověřeno přímo z PostgreSQL katalogu a `pg_hba_file_rules` 2026-09-15:
 `release-artifacts.md`, není staging účet a nesmí se pro staging odvozovat ani
 vytvářet. CI používá oddělený testovací model rolí.
 
-Read-only execution-identity probe přes lokální peer session uživatele `postgres`
-a následné `SET ROLE "fuapay_migrator";` ověřil:
+Staging migration execution používá lokální peer session OS/PostgreSQL uživatele
+`postgres` a uvnitř kanonického execution artefaktu explicitní
+`SET ROLE "fuapay_migrator";`. Read-only probe před migrací ověřil:
 
 - `current_database() = fuapay_demo`;
 - `session_user = postgres`;
 - `current_user = fuapay_migrator`;
-- celkem 19 aplikovaných migrací;
-- žádná z obou nových migrací ještě není v migration history.
+- před deploymentem bylo 19 migrací a žádná z obou nových nebyla aplikována.
+
+Protože soukromý deployment adresář uživatele `rouha` má mode `0700`, byl
+byte-identický execution SQL před spuštěním zkopírován do
+`/var/lib/postgresql/` jako `postgres:postgres`, mode `0600`; SHA-256 kopie byl
+znovu ověřen proti lokálně připravenému artefaktu. SQL se neměnilo.
 
 Předchozí fail-closed pokus, který očekával stejnojmenný OS účet
 `fuapay_migrator`, skončil ještě před spuštěním migration SQL a nic v databázi
 nezměnil.
 
-## Připravený deployment `9ecee2d...` — dosud neaktivovaný
+## 2026-09-15 deployment `9ecee2d...`
 
 Dne 2026-09-15 byl pro přesný commit
-`9ecee2d9c57d88a2969d42094e49597b41f1642c` připraven a lokálně ověřen nový
-self-contained `linux-x64` release a migration artefakty. `main` CI i CodeQL nad
-tímto SHA jsou PASS.
+`9ecee2d9c57d88a2969d42094e49597b41f1642c` připraven, ověřen a na staging
+úspěšně nasazen self-contained `linux-x64` release. `main` CI i CodeQL nad tímto
+SHA jsou PASS.
 
 Release artefakt:
 
@@ -106,8 +116,6 @@ Migration artefakty:
 
 Lokální release/migration verification prošla a server po přenosu znovu ověřil
 všechny tři SHA-256. `gzip -t` a úplný tar listing release archivu prošly.
-Artefakty jsou dočasně uloženy v soukromém deployment adresáři pod
-`/home/rouha`.
 
 Před změnou schema vznikl PostgreSQL custom dump:
 
@@ -120,17 +128,38 @@ Před změnou schema vznikl PostgreSQL custom dump:
   `7679a801a366d52e704b818b05eaa578ee08db5f66266e6d4ea4c93489cb4afb`;
 - `pg_restore --list`: PASS.
 
-Staging DB zatím stále obsahuje 19 migrací. Pro commit `9ecee2d...` jsou proti
-aktuálnímu staging schema nové přesně dvě forward-only migrace:
+Před migrací měl staging 19 EF migrací. Execution artefakt byl spuštěn s
+`ON_ERROR_STOP=1`; post-migration gate ověřil přesně `21|2` a existenci obou
+nových tabulek:
 
-1. `20260913162532_AddManualCreditTopUps` — vytváří pouze
-   `credits.manual_topup_commands`;
-2. `20260914080618_AddPersistentPrintCredentials` — vytváří pouze
-   `credits.print_credentials` včetně constraints, FK a filtered unique indexu.
+- `credits.manual_topup_commands`;
+- `credits.print_credentials`.
 
-Obě jsou additive; jejich `Up()` nemaže ani nepřepisuje existující finanční
-schema. Print feature zůstávají po samotném deploymentu vypnuté, dokud nejsou
-později explicitně nakonfigurovány.
+Nové migrace jsou additive: vytvářejí nové tabulky, constraints, FK a indexy;
+existující finanční schema nemažou ani nepřepisují.
+
+Release byl následně nainstalován vedle aktivního `bc868276...`, jeho ownership a
+modes prošly pre-activation kontrolou a `/opt/fuapay/current` byl atomicky
+přepnut na `9ecee2d...`. Po restartu prošly všechny activation gates:
+
+- `/health/ready`: `Healthy`;
+- reconciliation worker: `Healthy`, bez failed cycle;
+- běžící executable přesně odpovídá novému release;
+- `https://fuapay.tul.cz/`: HTTP 200;
+- `http://fuapay.tul.cz/`: HTTP 301;
+- `https://fuapay.fa.tul.cz/`: HTTP 301;
+- `fuapay.service`: active;
+- finální DB migration gate: `21|2`.
+
+Automatický code rollback nebyl aktivován. Předchozí release
+`bc868276aead1b350033303ce8e80bc6ce9a5894` zůstává rollback baseline pro tento
+konkrétní deployment; databázové schema je forward-only a zpět se automaticky
+nevrací.
+
+Print feature zůstávají po deploymentu vypnuté. Zapnutí `PrintPayments` /
+`PrintCredentials`, konfigurace FUA Print service identity a FUA Pay-only pepperu
+jsou samostatný následný provozní krok a nejsou součástí tohoto deployment
+closeoutu.
 
 ## Canonical staging post-activation health rule
 
