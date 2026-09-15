@@ -1,13 +1,15 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-13
+Status: 2026-09-15
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu FUA Pay až k bezpečnému production cutoveru. Stabilní technický kontrakt je
 v [`csob.md`](csob.md); staging deployment evidence je v
 [`../deployment/demo-staging.md`](../deployment/demo-staging.md). Incident
 2026-09-13 je zachycen v
-[`csob-incident-2026-09-13.md`](csob-incident-2026-09-13.md).
+[`csob-incident-2026-09-13.md`](csob-incident-2026-09-13.md) a následná úspěšná
+expiry acceptance v
+[`../testing/csob-expiry-acceptance-2026-09-14.md`](../testing/csob-expiry-acceptance-2026-09-14.md).
 
 Oficiální ČSOB activation checklist:
 https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environment
@@ -37,19 +39,19 @@ https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environ
 - [x] Expiry hardening z PR #44 je v `main` jako
       `bc868276aead1b350033303ce8e80bc6ce9a5894`; lokální verification,
       forward-only migrace a staging deployment mechanika prošly.
-- [ ] Live acceptance PR #44 je BLOCKED incidentem 2026-09-13: `payment/init` i
-      signed GET/POST `echo` pro integrační merchant timeoutují bez odpovědi.
-      Stejný `payment/init` timeout byl reprodukován i po code-only rollbacku na
-      předchozí live-accepted release `768aec26...`; malformed POST na stejný
-      `/echo` endpoint dostal HTTP 400 přibližně za 62 ms. Root cause zatím ČSOB
-      nepotvrdila.
+- [x] Live acceptance expiry hardeningu proběhla 2026-09-14 po obnovení merchant
+      eAPI: fresh `payment/init` prošel, browser return po `1806.001 s` nesl
+      `resultCode=130`, `paymentStatus=6`, následný podepsaný serverový status
+      vrátil `0/6`, interní stav skončil `Expired` a nevznikl žádný kreditní
+      pohyb ani jiný finanční efekt.
 - [ ] Production traffic není aktivní a nesmí být aktivován před dokončením
       zbytku tohoto checklistu.
 
-Aktuální staging runtime je po řízeném code-only rollbacku znovu
-`768aec26c72bc77ca43d554c8e8bab20f60678b6`. Databázové schema se nevracelo a
-zůstává na 19 aplikovaných migracích včetně obou additive migrací PR #44. Tento
-stav je záměrný; detailní evidence je v incident dokumentu.
+Aktuální staging runtime je po deploymentu 2026-09-15
+`9ecee2d9c57d88a2969d42094e49597b41f1642c`. Databáze má 21 aplikovaných EF
+migrací. Readiness, reconciliation worker, running-executable check i veřejný
+HTTP/HTTPS smoke po tomto deploymentu prošly. Incident 2026-09-13 tedy již není
+aktivní availability blocker; jeho konkrétní root cause ale zůstává neprokázaný.
 
 ## B. Jeden cílený implementační pass před dalšími bankovními testy
 
@@ -93,17 +95,16 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
 - [x] Doplnit cílené unit testy pro Stage 1 lifecycle, Stage 2 UX endpointy a
       Stage 3 reverse protokol/orchestrace; PostgreSQL testy pokrývají souběh a
       restart z durabilního `InProgress` bez druhého PUT.
-- [ ] `scripts/verify.ps1` + PostgreSQL gate + live GET/POST echo před merge.
+- [ ] Samostatný fresh GET/POST echo gate bezprostředně před production activation
+      zopakovat; historické i implementační testy jsou PASS, ale production
+      activation musí ověřit aktuální merchant availability v daném okamžiku.
 
-Zaškrtnuté Stage 1 a Stage 2 položky výše označují implementaci a lokální
-automatizované pokrytí. Stage 2 používá owner-scoped read-only status handler a
-bounded polling post-return stavu (2 sekundy, nejvýše 30 pokusů). Happy-path byl
-živě ověřen na revision `768aec26c72bc77ca43d554c8e8bab20f60678b6` bez ručního
-F5. CSS pravidlo pro `[hidden]` je v aktuálním `main`; release `bc868276...` byl
-2026-09-13 nasazen, ale incident na `payment/init` zabránil novému end-to-end
-return testu, takže tato konkrétní revize není live-accepted. Historické živé
-GET/POST echo PASS zůstávají validní evidencí implementace; aktuální availability
-je ale od incidentu samostatný externí blocker.
+Stage 2 používá owner-scoped read-only status handler a bounded polling
+post-return stavu (2 sekundy, nejvýše 30 pokusů). Happy-path byl živě ověřen na
+revision `768aec26c72bc77ca43d554c8e8bab20f60678b6` bez ručního F5. Expiry
+hardening z PR #44 byl po předchozím incidentu samostatně live-accepted
+2026-09-14 na `bc868276...`; současný `main` `9ecee2d...` tyto změny obsahuje a
+je od 2026-09-15 zdravě nasazený na stagingu.
 
 Stage 3 ukládá `SettlementReturn` i Reverse attempt jako `InProgress` před
 externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy PUT
@@ -135,18 +136,11 @@ Podle oficiální wiki upravené 2026-06-30:
       stránku ověřen.
 - [x] Payment cancelled by customer: `resultCode=0`, `paymentStatus=3` a
       odpovídající lokální `Cancelled` ověřen uživatelským testem 2026-09-08.
-- [ ] Expired payment: po >=30 min ověřit `resultCode=130`, `paymentStatus=6` a
-      interní `Expired` bez finančního účinku. CardJob `PLT-2026-000007` s TTL
-      1800 s vznikl `2026-09-12 13:56:07.895386 UTC`; browser auto-return byl
-      pozorován `2026-09-12 14:26:15.665062 UTC`, po `1807.769676` s. Starý
-      endpoint zachytil pouze `payId`, takže historický browserový resultCode,
-      paymentStatus, podpis ani celý podepsaný payload nejsou prokázány. Pozdější
-      podepsaný serverový status persistoval `0/6`; starý runtime skončil jako
-      `Failed`, Job zůstal neuhrazený a settlement efekt nevznikl. Nejde o
-      activation PASS a scénář se musí po budoucím nasazení opravy zopakovat.
-      Aktuálně je tento scénář BLOCKED incidentem 2026-09-13 a nesmí se znovu
-      spouštět, dokud signed `echo` neprokáže obnovenou dostupnost integration
-      eAPI.
+- [x] Expired payment: fresh scénář 2026-09-14 prošel po `1806.001 s`; browser
+      return nesl `resultCode=130`, `paymentStatus=6`, následný podepsaný
+      serverový status vrátil `0/6`, interní stav byl `Expired` a nevznikl žádný
+      kreditní pohyb ani settlement efekt. Jde o náhradu neúplného historického
+      pokusu z 2026-09-12, který neuměl zachytit celý podepsaný browser payload.
 - [x] Payment reversal: po úspěšné autorizaci zavolat `payment/reverse`, ověřit
       HTTP 200, podpis, `resultCode=0`, `paymentStatus=5` a odpovídající lokální
       stav/return evidence; ověřeno 2026-09-12 nad CardJob `PLT-2026-000006`.
@@ -192,15 +186,19 @@ celek.
 - [ ] funkční payment smoke podle scope patchu;
 - [ ] starý release ponechat jako immediate rollback do dokončení acceptance.
 
-### Výsledek gate 2026-09-13 pro `bc868276...`
+### Historický výsledek gate 2026-09-13 pro `bc868276...`
 
 Artifact, backup, dvě forward-only migrace, instalace, atomická aktivace,
 readiness, worker health, running-executable check a HTTPS smoke prošly. Funkční
-payment smoke neprošel kvůli opakovanému 30sekundovému `payment/init` timeoutu.
-Stejný timeout po rollbacku na `768aec26...` a současné signed echo timeouty
-znamenají, že release není odmítnut jako prokázaná kódová regrese, ale současně
-není live-accepted. Aktivní runtime proto zůstává code-only rollback
-`768aec26...` se schema na 19 migracích, dokud se externí blocker nevyřeší.
+payment smoke tehdy neprošel kvůli opakovanému 30sekundovému `payment/init`
+timeoutu. Stejný timeout po rollbacku na `768aec26...` a současné signed echo
+timeouty neprokázaly kódovou regresi a vedly ke code-only rollbacku.
+
+Tento blocker byl následně uzavřen čerstvou expiry acceptance 2026-09-14 po
+obnovení merchant eAPI. Aktuální staging runtime je od 2026-09-15
+`9ecee2d9c57d88a2969d42094e49597b41f1642c` se schema na 21 migracích a zdravým
+post-activation gate. Historická diagnostika z 2026-09-13 zůstává zachována jako
+evidence, nikoli jako aktuální runtime stav.
 
 ## F. Production cutover až po bankovním schválení
 
