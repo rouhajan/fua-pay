@@ -19,7 +19,7 @@
         <div class="data-panel-header"><h2>Dobít kredit</h2></div>
         <form method="post" asp-page-handler="ManualTopUp" class="form-grid three-columns">
             <input asp-for="ManualTopUp.CommandId" type="hidden" />
-            <label><span>Uživatel</span><select asp-for="ManualTopUp.OwnerId"><option value="">Vyberte uživatele</option>@foreach (var customer in Model.Customers) { <option value="@customer.Id">@customer.DisplayName · @customer.Email</option> }</select><span asp-validation-for="ManualTopUp.OwnerId"></span></label>
+            <label><span>Uživatel</span><select asp-for="ManualTopUp.OwnerId" data-searchable-select-source><option value="">Vyberte uživatele</option>@foreach (var customer in Model.Customers) { <option value="@customer.Id">@customer.DisplayName · @customer.Email</option> }</select><span asp-validation-for="ManualTopUp.OwnerId"></span></label>
             <label><span>Částka v Kč</span><input asp-for="ManualTopUp.AmountCrowns" type="number" min="@FinancialAmountPolicy.ManualCreditTopUp.MinimumCrownsInvariant" max="@FinancialAmountPolicy.ManualCreditTopUp.MaximumCrownsInvariant" step="0.01" /><small>Pouze kladná částka.</small><span asp-validation-for="ManualTopUp.AmountCrowns"></span></label>
             <label><span>Poznámka / důvod</span><input asp-for="ManualTopUp.Note" placeholder="např. přijatá hotovost dne 13. 9. 2026" /><span asp-validation-for="ManualTopUp.Note"></span></label>
             <div class="form-actions full-row"><button type="submit" class="primary-action-button">Dobít kredit</button></div>
@@ -30,7 +30,7 @@
         <div class="data-panel-header"><h2>Administrativní korekce</h2></div>
         <form method="post" asp-page-handler="Adjust" class="form-grid three-columns">
             <input asp-for="Adjustment.CommandId" type="hidden" />
-            <label><span>Uživatel</span><select asp-for="Adjustment.OwnerId"><option value="">Vyberte uživatele</option>@foreach (var customer in Model.Customers) { <option value="@customer.Id">@customer.DisplayName · @customer.Email</option> }</select><span asp-validation-for="Adjustment.OwnerId"></span></label>
+            <label><span>Uživatel</span><select asp-for="Adjustment.OwnerId" data-searchable-select-source><option value="">Vyberte uživatele</option>@foreach (var customer in Model.Customers) { <option value="@customer.Id">@customer.DisplayName · @customer.Email</option> }</select><span asp-validation-for="Adjustment.OwnerId"></span></label>
             <label><span>Částka v Kč</span><input asp-for="Adjustment.SignedAmountCrowns" type="number" min="-@FinancialAmountPolicy.CreditAdjustmentAbsolute.MaximumCrownsInvariant" max="@FinancialAmountPolicy.CreditAdjustmentAbsolute.MaximumCrownsInvariant" step="0.01" /><small>Kladná částka přidá kredit, záporná jej odebere.</small><span asp-validation-for="Adjustment.SignedAmountCrowns"></span></label>
             <label><span>Důvod</span><input asp-for="Adjustment.Reason" placeholder="např. oprava chybně zaúčtovaného pohybu" /><span asp-validation-for="Adjustment.Reason"></span></label>
             <div class="form-actions full-row"><button type="submit" class="primary-action-button">Zapsat korekci</button></div>
@@ -53,4 +53,7 @@
     </section>
 </section>
 
-@section Scripts { <partial name="_ValidationScriptsPartial" /> }
+@section Scripts {
+    <script src="~/js/customer-select-filter.js" asp-append-version="true"></script>
+    <partial name="_ValidationScriptsPartial" />
+}
