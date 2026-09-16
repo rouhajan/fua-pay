@@ -4,6 +4,7 @@ using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 using FuaPay.Web.Pages.Shared;
 
 using Microsoft.AspNetCore.Authorization;
@@ -152,6 +153,21 @@ public sealed class IndexModel : PageModel
             return Page();
         }
 
+        var ownerOptions = await _accessUserQueries.FindOptionsAsync(
+            [manualTopUp.OwnerId],
+            cancellationToken);
+
+        if (!ownerOptions.TryGetValue(
+            manualTopUp.OwnerId,
+            out var ownerOption))
+        {
+            ModelState.AddModelError(
+                $"{nameof(ManualTopUp)}.{nameof(manualTopUp.OwnerId)}",
+                "Vybran\u00e9ho z\u00e1kazn\u00edka se nepoda\u0159ilo na\u010d\u00edst.");
+            await LoadAsync(0, cancellationToken);
+            return Page();
+        }
+
         try
         {
             await _manualTopUps.TopUpAsync(
@@ -163,6 +179,10 @@ public sealed class IndexModel : PageModel
                     manualTopUp.OwnerId,
                     Money.FromCrowns(manualTopUp.AmountCrowns),
                     manualTopUp.Note),
+                new FinancialDocumentCustomerSnapshot(
+                    ownerOption.Id,
+                    ownerOption.DisplayName,
+                    ownerOption.Email),
                 cancellationToken);
 
             TempData["StatusMessage"] =

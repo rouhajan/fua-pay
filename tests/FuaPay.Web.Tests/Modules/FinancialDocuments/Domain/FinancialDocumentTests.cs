@@ -80,6 +80,48 @@ public sealed class FinancialDocumentTests
     }
 
     [Fact]
+    public void CreateManualCreditTopUp_UsesCanonicalShapeAndVersions()
+    {
+        var documentId = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
+        var customer = new FinancialDocumentCustomerSnapshot(
+            Guid.NewGuid(),
+            "Customer",
+            "customer@example.test");
+
+        var document = FinancialDocument.CreateManualCreditTopUp(
+            documentId,
+            "FUA-2026-000001",
+            commandId,
+            customer,
+            2_500,
+            "CZK",
+            IssuedAt.AddMinutes(-1),
+            IssuedAt);
+
+        Assert.Equal(documentId, document.DocumentId);
+        Assert.Equal(commandId, document.SourceId);
+        Assert.Equal(
+            FinancialDocumentType.ManualCreditTopUp,
+            document.DocumentType);
+        Assert.Equal(
+            FinancialDocumentSourceType.ManualCreditTopUp,
+            document.SourceType);
+        Assert.Equal(
+            FinancialDocumentSettlementMethod.ManualCreditTopUp,
+            document.SettlementMethod);
+        Assert.Equal(
+            FinancialDocument.CurrentSchemaVersion,
+            document.SchemaVersion);
+        Assert.Equal(
+            FinancialDocument.CurrentRenderVersion,
+            document.RenderVersion);
+        Assert.Null(document.Issuer);
+        Assert.Null(document.Provider);
+        Assert.Null(document.Job);
+    }
+
+    [Fact]
     public void Constructor_ManualTopUpRejectsInventedProviderOrJob()
     {
         Assert.Throws<ArgumentException>(

@@ -10,4 +10,8 @@ public interface IFinancialDocumentRepository
         CancellationToken cancellationToken = default);
 
     void Stage(FinancialDocument document);
+
+    Task PersistStagedAsync(
+        FinancialDocument document,
+        CancellationToken cancellationToken = default);
 }

@@ -74,4 +74,5 @@ public sealed record ManualCreditTopUpResult(
 public sealed record PersistedManualCreditTopUpCommand(
     ManualCreditTopUpCommand Command,
     ManualCreditTopUpResult Result,
-    DateTimeOffset AcceptedAt);
+    DateTimeOffset AcceptedAt,
+    bool FinancialDocumentRequired);

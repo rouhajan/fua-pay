@@ -120,6 +120,102 @@ transaction and retry boundary, remains the next implementation step. Staging
 was not changed and remains on the previously documented
 `9ecee2d9c57d88a2969d42094e49597b41f1642c` release.
 
+## Local Stage B implementation evidence - 2026-09-16
+
+Stage A is anchored at exact commit
+`759142351ef3c2e50c4b508e1088632b3fb1ed49`. GitHub CI run #256 and CodeQL
+run #260 both passed for that closed stage.
+
+Stage B was implemented and verified locally on branch
+`wip/financial-documents-v2-manual-topup`. The work remains uncommitted and was
+not pushed, opened as a PR, deployed or applied to staging.
+
+`ManualCreditTopUpService` owns the top-level business transaction through
+`IApplicationTransaction.ExecuteTopLevelAsync`. The EF implementation fails
+before invoking the callback when a transaction is already active. Ordinary
+`ExecuteAsync` retains its join behavior so nested `CreditService` calls use the
+owned transaction. Its ordering is deliberate: replay check; stage command;
+stage audit; call
+`CreditService.CreditAsync`; let `EfCreditAccountRepository.SaveChangesAsync`
+flush the credit movement, command and audit; obtain `IssuedAt`; allocate the
+document number outside the business transaction; create and stage the immutable
+manual-top-up document; explicitly call
+`IFinancialDocumentRepository.PersistStagedAsync`; then commit the outer
+transaction. `Stage` remains save-free. A canonical manual-document factory owns
+the current schema/render version convention instead of duplicating version
+literals in Credits.
+
+The repository translates the PostgreSQL unique violation for canonical
+`(SourceType, SourceId)` into
+`FinancialDocumentSourceAlreadyExistsException`. That exception unwinds through
+`EfApplicationTransaction`, which rolls the business transaction back before
+`ManualCreditTopUpService` performs any replay read. No query is issued through
+an aborted PostgreSQL transaction. A PostgreSQL test starts an ambient
+transaction through the same scoped `FuaPayDbContext`, proves that the manual
+flow fails before its callback, then successfully executes `SELECT 1` through
+the still-usable transaction before rolling it back.
+
+The Admin Credit page keeps its existing active-customer validation, then reads
+the existing `AccessUserOption` and maps its `Id`, `DisplayName` and `Email` to a
+`FinancialDocumentCustomerSnapshot` at the source boundary. The manual-top-up
+flow verifies that the snapshot customer ID equals the command owner. Mutable
+name and email are intentionally excluded from command conflict identity.
+
+Migration `20260916150005_AddManualTopUpFinancialDocumentCutover` adds the
+non-nullable boolean `credits.manual_topup_commands.financial_document_required`
+without a database default. The migration explicitly sets existing rows to
+`FALSE` before enforcing `NOT NULL`, so they are pre-cutover legacy commands.
+New writers must supply the marker and the Stage B repository explicitly writes
+`TRUE`; omitting the column fails at the database boundary rather than silently
+classifying a new command as legacy. Exact legacy replay returns the original
+result without reading or creating a FinancialDocument and without allocating a
+number. A post-cutover command marked `TRUE` must have its canonical document; a
+missing document is a fail-closed corruption state and is never backfilled from
+current customer data. Ordinary post-cutover replay reuses the original document
+and number.
+
+The canonical local gate used the isolated loopback database
+`localhost:5432/fuapay_test_e178cdf` and passed:
+
+- Release build and formatting: PASS with zero warnings and errors;
+- web/application tests: `970/970` PASS;
+- EF pending-model check: PASS, with the cutover migration matching the model;
+- PostgreSQL tests: `268/268` PASS;
+- targeted `ManualCreditTopUpPersistenceTests`: `9/9` PASS;
+- targeted `FinancialDocumentPersistenceTests`: `10/10` PASS.
+
+The Stage B PostgreSQL tests prove one command, movement, audit and document on
+success; exact replay with stable document ID/number and no counter advance;
+concurrent duplicate processing with one financial effect, one document and one
+allocation; rollback before allocation with no counter advance; and immutable
+customer snapshot behavior. The deterministic post-allocation failure decorator
+first executes the real document `SaveChanges`, then throws before the outer
+commit. The test proves that command, movement, audit and document all roll back,
+the allocated number remains consumed, and the next successful operation receives
+sequence `000002`.
+
+The same targeted suite proves legacy exact replay is a database no-op with no
+document or counter allocation; legacy payload mismatch still conflicts; a
+post-cutover command missing its document fails closed; all newly persisted
+commands carry `financial_document_required = TRUE`; the cutover column is
+`NOT NULL` with no database default; a direct SQL insert omitting the marker
+fails with `NotNullViolation`; and ambient transactions are rejected before any
+command, credit, audit, allocation or document work. A migration-upgrade proof
+inserted a pre-cutover row, applied the generated PostgreSQL SQL, and observed
+that row as `FALSE` while `information_schema.columns` reported
+`is_nullable = NO` and `column_default = NULL`.
+
+The cutover marker is the only Stage B schema change and the migration is purely
+additive. No issuer, VAT/tax, provider or job data was invented. Stage C/PDF
+remains the next implementation step; payment settlement/Stage D was not
+implemented. Staging remains unchanged.
+
+The deployment privilege blocker remains unresolved: repository evidence still
+does not establish how `fuapay_migrator`-owned objects grant the required runtime
+access to `fuapay_app`. Do not add runtime DDL or guessed grants. TUL/accounting
+approval of issuer identity, VAT/tax treatment and formal accounting semantics
+also remains open.
+
 ## Non-negotiable functional invariants
 
 The full normative list is in `docs/features/financial-documents.md`. The implementation must preserve at least these release-blocking properties:

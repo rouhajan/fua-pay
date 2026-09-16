@@ -2,6 +2,8 @@ using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 
 namespace FuaPay.Web.Tests.Modules.Credits.Application;
 
@@ -18,7 +20,9 @@ public sealed class ManualCreditTopUpServiceTests
             new Money(2_500),
             note: "  Přijatá hotovost  ");
 
-        var result = await fixture.Service.TopUpAsync(command);
+        var result = await fixture.Service.TopUpAsync(
+            command,
+            fixture.Customer);
 
         var movement = Assert.Single(fixture.Accounts.Account!.Movements);
         Assert.Equal(command.CommandId, movement.OperationId);
@@ -43,12 +47,25 @@ public sealed class ManualCreditTopUpServiceTests
         Assert.Equal(new Money(2_500), persisted.Command.Amount);
         Assert.Equal("Přijatá hotovost", persisted.Command.Note);
         Assert.Equal(CurrentTime, persisted.AcceptedAt);
+        Assert.True(persisted.FinancialDocumentRequired);
 
         var audit = Assert.Single(fixture.Audit.Entries);
         Assert.Equal("credit.manual-topup", audit.Action);
         Assert.Equal(fixture.AdministratorId, audit.ActorUserId);
         Assert.Equal(fixture.OwnerId.ToString(), audit.EntityId);
         Assert.Contains(command.Note, audit.Description);
+
+        var document = Assert.IsType<FinancialDocument>(
+            await fixture.Documents.FindBySourceAsync(
+                FinancialDocumentSourceType.ManualCreditTopUp,
+                command.CommandId));
+        Assert.Equal(fixture.Customer, document.Customer);
+        Assert.Equal(command.Amount.MinorUnits, document.AmountMinorUnits);
+        Assert.Equal(CurrentTime, document.FinancialEventAt);
+        Assert.Equal(CurrentTime, document.IssuedAt);
+        Assert.Null(document.Issuer);
+        Assert.Null(document.Provider);
+        Assert.Null(document.Job);
     }
 
     [Fact]
@@ -57,13 +74,26 @@ public sealed class ManualCreditTopUpServiceTests
         var fixture = new Fixture();
         var command = fixture.CreateCommand(new Money(2_500));
 
-        var first = await fixture.Service.TopUpAsync(command);
-        var replay = await fixture.Service.TopUpAsync(command);
+        var first = await fixture.Service.TopUpAsync(
+            command,
+            fixture.Customer);
+        var replay = await fixture.Service.TopUpAsync(
+            command,
+            new FinancialDocumentCustomerSnapshot(
+                fixture.OwnerId,
+                "Changed customer name",
+                "changed@example.test"));
 
         Assert.Equal(first, replay);
         Assert.Equal(1, fixture.Accounts.SaveCalls);
         Assert.Single(fixture.Audit.Entries);
         Assert.Single(fixture.Accounts.Account!.Movements);
+        Assert.Equal(1, fixture.DocumentNumbers.AllocationCount);
+        var document = Assert.IsType<FinancialDocument>(
+            await fixture.Documents.FindBySourceAsync(
+                FinancialDocumentSourceType.ManualCreditTopUp,
+                command.CommandId));
+        Assert.Equal(fixture.Customer, document.Customer);
     }
 
     [Fact]
@@ -71,17 +101,38 @@ public sealed class ManualCreditTopUpServiceTests
     {
         var fixture = new Fixture();
         var command = fixture.CreateCommand(new Money(2_500));
-        await fixture.Service.TopUpAsync(command);
+        await fixture.Service.TopUpAsync(command, fixture.Customer);
 
         var conflicting = fixture.CreateCommand(
             new Money(2_501),
             command.CommandId);
 
         await Assert.ThrowsAsync<ManualCreditTopUpCommandConflictException>(
-            () => fixture.Service.TopUpAsync(conflicting));
+            () => fixture.Service.TopUpAsync(
+                conflicting,
+                fixture.Customer));
         Assert.Equal(1, fixture.Accounts.SaveCalls);
         Assert.Single(fixture.Audit.Entries);
         Assert.Single(fixture.Accounts.Account!.Movements);
+    }
+
+    [Fact]
+    public async Task TopUpAsync_CustomerSnapshotForDifferentOwnerIsRejected()
+    {
+        var fixture = new Fixture();
+        var command = fixture.CreateCommand(new Money(2_500));
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => fixture.Service.TopUpAsync(
+                command,
+                new FinancialDocumentCustomerSnapshot(
+                    Guid.NewGuid(),
+                    "Wrong customer",
+                    null)));
+
+        Assert.Equal(0, fixture.Accounts.SaveCalls);
+        Assert.Empty(fixture.Audit.Entries);
+        Assert.Equal(0, fixture.DocumentNumbers.AllocationCount);
     }
 
     [Theory]
@@ -101,6 +152,10 @@ public sealed class ManualCreditTopUpServiceTests
         {
             OwnerId = Guid.NewGuid();
             AdministratorId = Guid.NewGuid();
+            Customer = new FinancialDocumentCustomerSnapshot(
+                OwnerId,
+                "Test customer",
+                "customer@example.test");
             Accounts.Account = new CreditAccount(Guid.NewGuid(), OwnerId);
             Commands = new FakeCommandRepository(Accounts);
             var transaction = new ImmediateTransaction();
@@ -114,6 +169,8 @@ public sealed class ManualCreditTopUpServiceTests
                 Commands,
                 transaction,
                 Audit,
+                Documents,
+                DocumentNumbers,
                 new FixedTimeProvider(CurrentTime));
         }
 
@@ -121,11 +178,17 @@ public sealed class ManualCreditTopUpServiceTests
 
         public Guid AdministratorId { get; }
 
+        public FinancialDocumentCustomerSnapshot Customer { get; }
+
         public FakeCreditAccountRepository Accounts { get; } = new();
 
         public FakeCommandRepository Commands { get; }
 
         public RecordingAuditTrail Audit { get; } = new();
+
+        public FakeFinancialDocumentRepository Documents { get; } = new();
+
+        public FakeFinancialDocumentNumberAllocator DocumentNumbers { get; } = new();
 
         public ManualCreditTopUpService Service { get; }
 
@@ -139,6 +202,60 @@ public sealed class ManualCreditTopUpServiceTests
                 OwnerId,
                 amount,
                 note);
+    }
+
+    private sealed class FakeFinancialDocumentRepository :
+        IFinancialDocumentRepository
+    {
+        private readonly Dictionary<
+            (FinancialDocumentSourceType SourceType, Guid SourceId),
+            FinancialDocument> _documents = [];
+        private FinancialDocument? _staged;
+
+        public Task<FinancialDocument?> FindBySourceAsync(
+            FinancialDocumentSourceType sourceType,
+            Guid sourceId,
+            CancellationToken cancellationToken = default)
+        {
+            _documents.TryGetValue((sourceType, sourceId), out var document);
+            return Task.FromResult(document);
+        }
+
+        public void Stage(FinancialDocument document)
+        {
+            Assert.Null(_staged);
+            _staged = document;
+        }
+
+        public Task PersistStagedAsync(
+            FinancialDocument document,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Same(document, _staged);
+            _documents.Add(
+                (document.SourceType, document.SourceId),
+                document);
+            _staged = null;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeFinancialDocumentNumberAllocator :
+        IFinancialDocumentNumberAllocator
+    {
+        public int AllocationCount { get; private set; }
+
+        public Task<FinancialDocumentNumberAllocation> AllocateAsync(
+            DateTimeOffset issuedAt,
+            CancellationToken cancellationToken = default)
+        {
+            AllocationCount++;
+            return Task.FromResult(
+                new FinancialDocumentNumberAllocation(
+                    $"FUA-{issuedAt.Year:D4}-{AllocationCount:D6}",
+                    issuedAt.Year,
+                    AllocationCount));
+        }
     }
 
     private sealed class FakeCreditAccountRepository : ICreditAccountRepository
@@ -213,7 +330,11 @@ public sealed class ManualCreditTopUpServiceTests
                 movement.Description);
 
             return Task.FromResult<PersistedManualCreditTopUpCommand?>(
-                new(stored.Command, result, stored.AcceptedAt));
+                new(
+                    stored.Command,
+                    result,
+                    stored.AcceptedAt,
+                    FinancialDocumentRequired: true));
         }
 
         public void Stage(
@@ -227,6 +348,11 @@ public sealed class ManualCreditTopUpServiceTests
     private sealed class ImmediateTransaction : IApplicationTransaction
     {
         public Task<T> ExecuteAsync<T>(
+            Func<CancellationToken, Task<T>> operation,
+            CancellationToken cancellationToken = default) =>
+            operation(cancellationToken);
+
+        public Task<T> ExecuteTopLevelAsync<T>(
             Func<CancellationToken, Task<T>> operation,
             CancellationToken cancellationToken = default) =>
             operation(cancellationToken);

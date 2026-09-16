@@ -50,6 +50,24 @@ U payment zdroje se v dokumentu navíc snapshotují dostupné provider vazby,
 zejména provider, interní payment ID, provider reference (`payId` u ČSOB) a
 provider order number/variabilní symbol, pokud jej daný tok má.
 
+## Rollout and source-flow cutover
+
+The FinancialDocument requirement applies to new financial sources created after
+the corresponding source flow is activated. Manual credit top-ups persisted
+before the manual-flow cutover remain explicit legacy commands. They are not
+automatically backfilled because the complete immutable customer snapshot from
+the original financial event was not persisted.
+
+An exact replay of a legacy manual top-up is a financial no-op: it returns the
+original business result and creates neither a document nor a document number.
+A persisted command marker distinguishes these legacy rows from new commands.
+For a post-cutover command the marker requires the canonical FinancialDocument;
+a missing document is a corruption condition that fails closed and must not be
+reclassified as legacy or reconstructed from current mutable customer data.
+
+This rollout rule does not weaken the document invariant for any new source
+created after its source-flow cutover.
+
 ## Neměnný snapshot
 
 Po vystavení se nesmí obsah dokumentu dopočítávat z aktuálně změnitelných profilů

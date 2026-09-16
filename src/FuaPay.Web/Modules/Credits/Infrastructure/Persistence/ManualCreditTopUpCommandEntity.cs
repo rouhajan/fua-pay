@@ -13,4 +13,6 @@ internal sealed class ManualCreditTopUpCommandEntity
     public string Note { get; set; } = string.Empty;
 
     public DateTimeOffset AcceptedAt { get; set; }
+
+    public bool FinancialDocumentRequired { get; set; }
 }

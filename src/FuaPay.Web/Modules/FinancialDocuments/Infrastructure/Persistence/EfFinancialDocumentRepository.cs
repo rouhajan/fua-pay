@@ -4,6 +4,8 @@ using FuaPay.Web.Modules.FinancialDocuments.Domain;
 
 using Microsoft.EntityFrameworkCore;
 
+using Npgsql;
+
 namespace FuaPay.Web.Modules.FinancialDocuments.Infrastructure.Persistence;
 
 internal sealed class EfFinancialDocumentRepository :
@@ -77,6 +79,53 @@ internal sealed class EfFinancialDocumentRepository :
             });
     }
 
+    public async Task PersistStagedAsync(
+        FinancialDocument document,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        var stagedDocuments = _dbContext.ChangeTracker
+            .Entries<FinancialDocumentEntity>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => entry.Entity)
+            .ToArray();
+
+        if (
+            stagedDocuments.Length != 1 ||
+            stagedDocuments[0].DocumentId != document.DocumentId ||
+            stagedDocuments[0].SourceType != (int)document.SourceType ||
+            stagedDocuments[0].SourceId != document.SourceId)
+        {
+            throw new InvalidOperationException(
+                "Exactly one matching financial document must be staged before persistence.");
+        }
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (
+            IsUniqueViolation(
+                exception,
+                FinancialDocumentConfiguration.SourceUniqueConstraint))
+        {
+            _dbContext.ChangeTracker.Clear();
+
+            throw new FinancialDocumentSourceAlreadyExistsException(
+                document.SourceType,
+                document.SourceId,
+                exception);
+        }
+        catch
+        {
+            _dbContext.ChangeTracker.Clear();
+            throw;
+        }
+
+        _dbContext.ChangeTracker.Clear();
+    }
+
     private static FinancialDocument Restore(
         FinancialDocumentEntity entity)
     {
@@ -147,5 +196,17 @@ internal sealed class EfFinancialDocumentRepository :
                 "ID zdroje nesmí být prázdné.",
                 nameof(sourceId));
         }
+    }
+
+    private static bool IsUniqueViolation(
+        DbUpdateException exception,
+        string constraintName)
+    {
+        return
+            exception.InnerException is PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation
+            } postgresException &&
+            postgresException.ConstraintName == constraintName;
     }
 }

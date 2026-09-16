@@ -21,6 +21,7 @@ public sealed class FinancialDocumentPersistenceTests :
     private const int PaymentPersistenceYear = 2097;
     private const int DocumentNumberUniqueYear = 2098;
     private const int ExhaustionYear = 2099;
+    private const int AmbiguousPersistenceYear = 2100;
 
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -240,10 +241,8 @@ public sealed class FinancialDocumentPersistenceTests :
             {
                 var repository = scope.ServiceProvider
                     .GetRequiredService<IFinancialDocumentRepository>();
-                var dbContext = scope.ServiceProvider
-                    .GetRequiredService<FuaPayDbContext>();
                 repository.Stage(first);
-                await dbContext.SaveChangesAsync();
+                await repository.PersistStagedAsync(first);
             }
 
             using (var scope = _factory.Services.CreateScope())
@@ -264,15 +263,19 @@ public sealed class FinancialDocumentPersistenceTests :
             {
                 var repository = scope.ServiceProvider
                     .GetRequiredService<IFinancialDocumentRepository>();
-                var dbContext = scope.ServiceProvider
-                    .GetRequiredService<FuaPayDbContext>();
-                repository.Stage(CreateManualDocument(
+                var duplicate = CreateManualDocument(
                     secondNumber.DocumentNumber,
                     sourceId,
-                    issuedAt));
+                    issuedAt);
+                repository.Stage(duplicate);
 
-                await Assert.ThrowsAsync<DbUpdateException>(
-                    () => dbContext.SaveChangesAsync());
+                var exception = await Assert.ThrowsAsync<
+                    FinancialDocumentSourceAlreadyExistsException>(
+                        () => repository.PersistStagedAsync(duplicate));
+                Assert.Equal(
+                    FinancialDocumentSourceType.ManualCreditTopUp,
+                    exception.SourceType);
+                Assert.Equal(sourceId, exception.SourceId);
             }
 
             Assert.Equal(1, await CountDocumentsBySourceAsync(sourceId));
@@ -281,6 +284,59 @@ public sealed class FinancialDocumentPersistenceTests :
         {
             await DeleteDocumentsBySourceAsync(sourceId);
             await DeleteCountersAsync(PersistenceYear);
+        }
+    }
+
+    [Fact]
+    public async Task Repository_PersistRejectsAmbiguousStagedDocumentsBeforeWrite()
+    {
+        await DeleteCountersAsync(AmbiguousPersistenceYear);
+        var firstSourceId = Guid.NewGuid();
+        var secondSourceId = Guid.NewGuid();
+
+        try
+        {
+            var issuedAt = UtcInstant(
+                AmbiguousPersistenceYear,
+                8,
+                1,
+                9,
+                0);
+            var firstNumber = await AllocateAsync(issuedAt);
+            var secondNumber = await AllocateAsync(issuedAt);
+            var first = CreateManualDocument(
+                firstNumber.DocumentNumber,
+                firstSourceId,
+                issuedAt);
+            var second = CreateManualDocument(
+                secondNumber.DocumentNumber,
+                secondSourceId,
+                issuedAt);
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var repository = scope.ServiceProvider
+                    .GetRequiredService<IFinancialDocumentRepository>();
+                repository.Stage(first);
+                repository.Stage(second);
+
+                await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => repository.PersistStagedAsync(first));
+            }
+
+            Assert.Equal(
+                0,
+                await CountDocumentsBySourceAsync(firstSourceId));
+            Assert.Equal(
+                0,
+                await CountDocumentsBySourceAsync(secondSourceId));
+        }
+        finally
+        {
+            await DeleteDocumentsBySourceAsync(
+                firstSourceId,
+                secondSourceId);
+            await DeleteCountersAsync(AmbiguousPersistenceYear);
         }
     }
 
@@ -412,15 +468,12 @@ public sealed class FinancialDocumentPersistenceTests :
         using var scope = _factory.Services.CreateScope();
         var repository = scope.ServiceProvider
             .GetRequiredService<IFinancialDocumentRepository>();
-        var dbContext = scope.ServiceProvider
-            .GetRequiredService<FuaPayDbContext>();
 
         foreach (var document in documents)
         {
             repository.Stage(document);
+            await repository.PersistStagedAsync(document);
         }
-
-        await dbContext.SaveChangesAsync();
     }
 
     private async Task<FinancialDocument> FindBySourceAsync(

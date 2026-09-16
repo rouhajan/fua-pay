@@ -65,5 +65,8 @@ internal sealed class ManualCreditTopUpCommandConfiguration :
         builder.Property(item => item.AcceptedAt)
             .HasColumnName("accepted_at")
             .IsRequired();
+        builder.Property(item => item.FinancialDocumentRequired)
+            .HasColumnName("financial_document_required")
+            .IsRequired();
     }
 }

@@ -4,6 +4,9 @@ namespace FuaPay.Web.Modules.FinancialDocuments.Domain;
 
 public sealed partial class FinancialDocument
 {
+    public const int CurrentSchemaVersion = 1;
+    public const int CurrentRenderVersion = 1;
+
     public FinancialDocument(
         Guid documentId,
         string documentNumber,
@@ -108,6 +111,35 @@ public sealed partial class FinancialDocument
     public int SchemaVersion { get; }
 
     public int RenderVersion { get; }
+
+    public static FinancialDocument CreateManualCreditTopUp(
+        Guid documentId,
+        string documentNumber,
+        Guid commandId,
+        FinancialDocumentCustomerSnapshot customer,
+        long amountMinorUnits,
+        string currency,
+        DateTimeOffset financialEventAt,
+        DateTimeOffset issuedAt)
+    {
+        return new FinancialDocument(
+            documentId,
+            documentNumber,
+            FinancialDocumentType.ManualCreditTopUp,
+            FinancialDocumentSourceType.ManualCreditTopUp,
+            commandId,
+            customer,
+            amountMinorUnits,
+            currency,
+            financialEventAt,
+            issuedAt,
+            FinancialDocumentSettlementMethod.ManualCreditTopUp,
+            null,
+            null,
+            null,
+            CurrentSchemaVersion,
+            CurrentRenderVersion);
+    }
 
     private static void ValidateSource(
         FinancialDocumentSourceType sourceType,
