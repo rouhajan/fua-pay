@@ -10,6 +10,7 @@ using FuaPay.Web.Modules.Audit;
 using FuaPay.Web.Modules.Credits;
 using FuaPay.Web.Modules.Credits.Infrastructure.PrintPayments;
 using FuaPay.Web.Modules.Credits.Web.PrintPayments;
+using FuaPay.Web.Modules.FinancialDocuments;
 using FuaPay.Web.Modules.Jobs;
 using FuaPay.Web.Modules.Notifications;
 using FuaPay.Web.Modules.Payments;
@@ -194,6 +195,7 @@ builder.Services
     .AddAccessModule(
         runtimeFeatures.InteractiveTestSignInEnabled)
     .AddCreditsModule()
+    .AddFinancialDocumentsModule()
     .AddJobsModule()
     .AddServiceUnitsModule()
     .AddPaymentsModule(

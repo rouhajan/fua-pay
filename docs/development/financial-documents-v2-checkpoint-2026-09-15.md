@@ -36,6 +36,90 @@ Verified facts from the preceding audit/work:
 9. Business year for `FUA-YYYY-NNNNNN` is `Europe/Prague`, not raw UTC.
 10. Tax/VAT/formal accounting semantics are an external fact, not a coding assumption. They remain fail-closed until confirmed by TUL/accounting.
 
+## Local Stage A implementation evidence – 2026-09-16
+
+Stage A was implemented and verified only in the isolated local worktree
+`C:\Projects\fua-pay-fd-core` on branch
+`wip/financial-documents-v2-core`, based on commit
+`0592a275b815f08b7193b90ad684730d13124052`. The changes described in this
+section remain uncommitted and have not been pushed, merged, deployed or applied
+to staging.
+
+The generated EF migration is
+`20260916132427_AddFinancialDocumentsCore`. It creates the dedicated
+`financial_documents` schema, an immutable-document persistence table and an
+annual counter table. Database uniqueness covers both `DocumentNumber` and
+`(SourceType, SourceId)`.
+
+`FinancialDocumentType` is a technical classification separate from source
+identity. Its values are `ManualCreditTopUp`, `CardWalletTopUp` and
+`DirectJobCardPayment`; `FinancialDocumentSourceType` remains limited to
+`ManualCreditTopUp` and `Payment`. Domain validation and a database check
+constraint allow only these combinations:
+
+- `ManualCreditTopUp` document -> `ManualCreditTopUp` source, manual settlement,
+  no provider and no job snapshot;
+- `CardWalletTopUp` document -> `Payment` source, payment-provider settlement,
+  provider snapshot present and job snapshot absent;
+- `DirectJobCardPayment` document -> `Payment` source, payment-provider
+  settlement, provider and job snapshots present.
+
+The immutable nullable issuer snapshot uses only the configuration shape already
+defined by the repository: `LegalName`, `UnitName`, `AddressLine1`,
+`AddressLine2`, `Country`, `RegistrationNumber`, `VatNumber` and `ContactEmail`.
+The snapshot is either wholly absent or all fields are present and nonblank; it
+has no defaults. No issuer value, VAT rate, tax treatment or accounting meaning
+was copied from Receipts or invented. Stage A has no formal-PDF rendering path;
+a future formal renderer must reject documents without the approved required
+issuer snapshot.
+
+Annual numbering uses one migrated counter row per Prague business year and a
+single atomic PostgreSQL
+`INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING` statement. The allocator
+opens a separate `NpgsqlConnection` with `Enlist=false`; it does not attach the
+command to the EF business transaction. Successful allocation therefore
+autocommits independently, permits gaps and does not recycle a number when the
+business transaction rolls back. `Europe/Prague` determines the year and the
+counter fails closed above `999999`.
+
+The migration was applied to the isolated loopback test database
+`localhost:5432/fuapay_test_e178cdf` as `fuapay_app`. The repository safety guard
+was enabled only for the test process. Canonical
+`scripts/verify.ps1 -RunDatabaseTests` passed with:
+
+- Release build: PASS, zero warnings and errors;
+- formatting: PASS;
+- web/application tests: `967/967` PASS;
+- EF pending-model check: PASS;
+- PostgreSQL tests: `261/261` PASS.
+
+The nine targeted `FinancialDocumentPersistenceTests` also passed independently.
+They proved concurrent allocations unique; one common monotonic annual sequence
+by persisting two different document types; the Prague New Year UTC boundary;
+non-recycling after an outer business transaction rollback; race-safe first
+allocation of a new year; source uniqueness; document-number uniqueness across
+different sources; fail-closed exhaustion at `999999`; and full immutable
+round-trip of every document field. The round-trip evidence includes a direct-job
+payment with non-null issuer, provider reference/payId, provider order/VS and job
+snapshots.
+
+No deployment evidence is implied by these local results.
+
+One deployment blocker remains: repository documentation does not establish how
+the runtime `fuapay_app` role receives the required schema usage and table DML
+privileges for newly migrated, `fuapay_migrator`-owned objects. Do not add
+runtime DDL or guessed grants. Resolve and verify the existing privilege model
+before staging.
+
+TUL/accounting approval of issuer values, VAT/tax treatment and formal document
+semantics also remains a blocker for formal output. The persisted nullable shape
+is preparation for approved values, not approval of any value.
+
+Stage B, deliberate integration into the existing manual-credit-top-up
+transaction and retry boundary, remains the next implementation step. Staging
+was not changed and remains on the previously documented
+`9ecee2d9c57d88a2969d42094e49597b41f1642c` release.
+
 ## Non-negotiable functional invariants
 
 The full normative list is in `docs/features/financial-documents.md`. The implementation must preserve at least these release-blocking properties:
