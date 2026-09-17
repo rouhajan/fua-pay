@@ -55,24 +55,21 @@ Preview PDF proto nese viditelné upozornění, že IČO, DIČ a pravidlo DPH js
 zástupné/neověřené a nejde o finální daňový doklad. Production odmítne start zapnutých
 dokladů v preview režimu a mimo preview odmítne uvedené zástupné IČO/DIČ.
 
-Před produkčním zapnutím je nutné dodat a ověřit skutečné účetní údaje,
-schválený význam DPH a případně požadovanou samostatnou číselnou řadu dokladů.
-Pokud má být dokument později právně neměnným účetním/daňovým dokladem, bude
-nutné doplnit perzistentní snapshot vystaveného dokumentu; současná verze je
-on-demand potvrzení o evidované úhradě.
+Tato konfigurace a výpočet patří pouze legacy preview toku. Schválený
+perzistentní doklad, jeho issuer, 21% daňový snapshot a číselnou řadu vlastní
+`FinancialDocuments`; `Receipts` pro něj není zdrojem dat ani konfigurace.
 
 Deterministická reference `PAY-{JobNumber}` současného potvrzení není číslem
 budoucího účetního/daňového dokladu ani referencí poskytovatele platby. U ČSOB
 je provider reference platby `payId`.
 
-### Budoucí formální doklad
+### Perzistentní FinancialDocument
 
-Pokud TUL schválí vystavování formálního účetního nebo daňového dokladu přímo
-ve FUA Pay, dostane vystavený dokument vlastní neměnnou identitu a uložený
-snapshot. Cílový model má oddělit minimálně:
+Schválený doklad ve FUA Pay má vlastní neměnnou identitu a uložený snapshot.
+Model odděluje minimálně:
 
-- interní `DocumentId` a vlastní `DocumentNumber` z účetně schválené číselné
-  řady; číslo musí být přidělené atomicky a jedinečně;
+- interní `DocumentId` a vlastní `DocumentNumber` z řady
+  `FUA-YYYY-NNNNNN`; číslo je přidělené atomicky a jedinečně;
 - `JobId`, typ settlementu a interní `SettlementReferenceId`;
 - u `DirectPayment` vazbu na interní `PaymentId`, poskytovatele a jeho
   provider reference (u ČSOB tedy `payId`);
@@ -83,7 +80,7 @@ snapshot. Cílový model má oddělit minimálně:
 
 Pozdější změna jména, adresy nebo konfigurace nesmí již vystavený formální
 doklad přepsat. Pravidla pro opravy/storna, retenční dobu, export do účetnictví
-a konkrétní formát číselné řady se doplní až podle schváleného zadání TUL.
+a retenční dobu zůstávají samostatnými budoucími tématy.
 
 ## Ověření
 
@@ -97,8 +94,8 @@ Stav 2026-08-19:
   errors prošly; publish obsahuje PDFsharp a výchozí `Receipts:Enabled=false`;
 - lokální Development runtime a vizuální kontrola PDF prošly.
 
-Production zůstává vypnutá, dokud nejsou schválené účetní údaje, význam DPH
-a provozní fonty.
+Legacy `Receipts` může v Production zůstat vypnutý nezávisle na
+`FinancialDocuments`; oba toky sdílejí pouze obecnou PDF/font infrastrukturu.
 
 ## PDF a fonty
 
@@ -112,6 +109,5 @@ PDF se neposílá do `wwwroot` ani neukládá na disk. Endpoint je autorizovaný
 Customer, načítá pouze jeho zakázku a odpovídá `application/pdf` s
 `Cache-Control: private, no-store`.
 
-Dobití kreditu v této etapě vlastní PDF potvrzení nemá. Jde o jiný ekonomický
-případ než úhrada zakázky a nebude se do stejného modelu přimíchávat bez
-schváleného účetního významu.
+Dobití kreditu má v `FinancialDocuments` vlastní typ a render z immutable
+snapshotu. Legacy `Receipts` jej nadále neobsluhuje.

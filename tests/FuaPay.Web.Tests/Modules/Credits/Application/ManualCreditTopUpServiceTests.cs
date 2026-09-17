@@ -63,7 +63,13 @@ public sealed class ManualCreditTopUpServiceTests
         Assert.Equal(command.Amount.MinorUnits, document.AmountMinorUnits);
         Assert.Equal(CurrentTime, document.FinancialEventAt);
         Assert.Equal(CurrentTime, document.IssuedAt);
-        Assert.Null(document.Issuer);
+        Assert.Equal("46747885", document.Issuer?.RegistrationNumber);
+        Assert.Equal("CZ46747885", document.Issuer?.VatNumber);
+        Assert.Equal(2_066, document.Tax?.TaxBaseMinorUnits);
+        Assert.Equal(434, document.Tax?.VatAmountMinorUnits);
+        Assert.Equal(
+            FinancialDocumentTaxTreatment.StandardRateIncluded,
+            document.Tax?.Treatment);
         Assert.Null(document.Provider);
         Assert.Null(document.Job);
     }
@@ -94,6 +100,7 @@ public sealed class ManualCreditTopUpServiceTests
                 FinancialDocumentSourceType.ManualCreditTopUp,
                 command.CommandId));
         Assert.Equal(fixture.Customer, document.Customer);
+        Assert.Equal(2_066, document.Tax?.TaxBaseMinorUnits);
     }
 
     [Fact]
@@ -171,6 +178,7 @@ public sealed class ManualCreditTopUpServiceTests
                 Audit,
                 Documents,
                 DocumentNumbers,
+                new ApprovedProfile(),
                 new FixedTimeProvider(CurrentTime));
         }
 
@@ -191,6 +199,26 @@ public sealed class ManualCreditTopUpServiceTests
         public FakeFinancialDocumentNumberAllocator DocumentNumbers { get; } = new();
 
         public ManualCreditTopUpService Service { get; }
+
+        private sealed class ApprovedProfile :
+            IFinancialDocumentIssuanceProfile
+        {
+            public FinancialDocumentIssuerSnapshot CreateIssuerSnapshot() =>
+                new(
+                    "Technická univerzita v Liberci",
+                    "Fakulta umění a architektury",
+                    "Studentská 1402/2",
+                    "461 17 Liberec 1",
+                    "Česká republika",
+                    "46747885",
+                    "CZ46747885",
+                    "fua@tul.cz");
+
+            public FinancialDocumentTaxSnapshot CreateTaxSnapshot(
+                long grossMinorUnits) =>
+                FinancialDocumentTaxPolicy.CreateApprovedSnapshot(
+                    grossMinorUnits);
+        }
 
         public ManualCreditTopUpCommand CreateCommand(
             Money amount,

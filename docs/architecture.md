@@ -60,14 +60,20 @@ ověření.
 - `Credits`: účty, pohyby, ruční dobití a administrativní korekce;
 - `Payments`: provider-neutral platby, inicializace, ČSOB a reconciliation;
 - `Receipts`: read-only sestavení a PDF potvrzení již ověřené úhrady zakázky;
+- `FinancialDocuments`: neměnné očíslované finanční snapshoty, issuance profil,
+  owner/admin query a PDF render bez finančních side effectů;
 - `Audit`, `Notifications`, `Reporting`: auditní události, transakční outbox
   a CSV exporty.
 
 `Receipts` nevlastní finanční stav ani databázové schéma. Před vykreslením znovu
 ověří vazbu zakázky na konkrétní kreditní debit nebo úspěšnou přímou platbu a
 při rozporu selže. Současný dokument je on-demand potvrzení o evidované úhradě,
-ne perzistentní účetní/daňový doklad. Preview účetní údaje a DPH jsou popsány v
+ne perzistentní finanční doklad. Preview účetní údaje a DPH jsou popsány v
 [PDF potvrzení o úhradě](features/payment-receipts.md).
+
+`FinancialDocuments` na `Receipts` nezávisí. Sdílí s ním pouze obecnou
+PDFsharp/font/layout infrastrukturu z BuildingBlocks. Schválený issuer a daňový
+snapshot vznikají při issuance a renderer je čte výhradně z perzistence.
 
 `Credits` také vlastní volitelnou persistentní PrintCredentials hranici. Service
 bearer autentizuje FUA Print; zákazníkem spravovaný e-mailový tiskový credential

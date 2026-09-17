@@ -66,6 +66,10 @@ internal sealed class EfFinancialDocumentRepository :
                     document.Issuer?.RegistrationNumber,
                 IssuerVatNumber = document.Issuer?.VatNumber,
                 IssuerContactEmail = document.Issuer?.ContactEmail,
+                TaxTreatment = (int?)document.Tax?.Treatment,
+                VatRateBasisPoints = document.Tax?.VatRateBasisPoints,
+                TaxBaseMinorUnits = document.Tax?.TaxBaseMinorUnits,
+                VatAmountMinorUnits = document.Tax?.VatAmountMinorUnits,
                 Provider = document.Provider?.Provider,
                 ProviderReference = document.Provider?.Reference,
                 ProviderOrderNumber = document.Provider?.OrderNumber,
@@ -126,7 +130,7 @@ internal sealed class EfFinancialDocumentRepository :
         _dbContext.ChangeTracker.Clear();
     }
 
-    private static FinancialDocument Restore(
+    internal static FinancialDocument Restore(
         FinancialDocumentEntity entity)
     {
         var provider = entity.Provider is null
@@ -157,6 +161,14 @@ internal sealed class EfFinancialDocumentRepository :
                 entity.IssuerVatNumber!,
                 entity.IssuerContactEmail!);
 
+        var tax = entity.TaxTreatment.HasValue
+            ? new FinancialDocumentTaxSnapshot(
+                (FinancialDocumentTaxTreatment)entity.TaxTreatment.Value,
+                entity.VatRateBasisPoints!.Value,
+                entity.TaxBaseMinorUnits!.Value,
+                entity.VatAmountMinorUnits!.Value)
+            : null;
+
         return new FinancialDocument(
             entity.DocumentId,
             entity.DocumentNumber,
@@ -173,6 +185,7 @@ internal sealed class EfFinancialDocumentRepository :
             entity.IssuedAt,
             (FinancialDocumentSettlementMethod)entity.SettlementMethod,
             issuer,
+            tax,
             provider,
             job,
             entity.SchemaVersion,

@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
+using Npgsql;
+
 namespace FuaPay.DatabaseTests;
 
 public sealed class FinancialDocumentPersistenceTests :
@@ -22,6 +24,7 @@ public sealed class FinancialDocumentPersistenceTests :
     private const int DocumentNumberUniqueYear = 2098;
     private const int ExhaustionYear = 2099;
     private const int AmbiguousPersistenceYear = 2100;
+    private const int TaxConstraintYear = 2101;
 
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -29,6 +32,168 @@ public sealed class FinancialDocumentPersistenceTests :
         WebApplicationFactory<Program> factory)
     {
         _factory = factory;
+    }
+
+    [Fact]
+    public async Task Queries_EnforceCustomerOwnershipAndAdminCanReadById()
+    {
+        var sourceId = Guid.NewGuid();
+        var document = CreateManualDocument(
+            "FUA-2096-900001",
+            sourceId,
+            UtcInstant(PersistenceYear, 5, 1, 10, 0));
+
+        try
+        {
+            await PersistAsync(document);
+            using var scope = _factory.Services.CreateScope();
+            var queries = scope.ServiceProvider
+                .GetRequiredService<IFinancialDocumentQueries>();
+
+            var owner = await queries.FindByIdForCustomerAsync(
+                document.DocumentId,
+                document.Customer.CustomerUserId);
+            var foreign = await queries.FindByIdForCustomerAsync(
+                document.DocumentId,
+                Guid.NewGuid());
+            var admin = await queries.FindByIdForAdminAsync(document.DocumentId);
+            var missing = await queries.FindByIdForAdminAsync(Guid.NewGuid());
+
+            Assert.Equal(document.DocumentId, owner?.DocumentId);
+            Assert.Null(foreign);
+            Assert.Equal(document.DocumentId, admin?.DocumentId);
+            Assert.Null(missing);
+            Assert.Empty(scope.ServiceProvider
+                .GetRequiredService<FuaPayDbContext>()
+                .ChangeTracker.Entries());
+        }
+        finally
+        {
+            await DeleteDocumentsBySourceAsync(sourceId);
+        }
+    }
+
+    [Fact]
+    public async Task TaxColumns_AreAdditiveAndConstraintEnforcesApprovedMathematicalSplit()
+    {
+        var sourceId = Guid.NewGuid();
+        var document = CreateDirectJobPaymentDocument(
+            "FUA-2101-900001",
+            sourceId,
+            UtcInstant(TaxConstraintYear, 5, 1, 10, 0));
+
+        try
+        {
+            await PersistAsync(document);
+            using var scope = _factory.Services.CreateScope();
+            var dbContext = scope.ServiceProvider
+                .GetRequiredService<FuaPayDbContext>();
+
+            var nullableCount = await dbContext.Database.SqlQueryRaw<int>(
+                """
+                SELECT count(*)::int AS "Value"
+                FROM information_schema.columns
+                WHERE table_schema = 'financial_documents'
+                  AND table_name = 'documents'
+                  AND column_name IN (
+                    'tax_treatment', 'vat_rate_basis_points',
+                    'tax_base_minor_units', 'vat_amount_minor_units')
+                  AND is_nullable = 'YES'
+                  AND column_default IS NULL
+                """).SingleAsync();
+            Assert.Equal(4, nullableCount);
+
+            var validRows = await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                UPDATE financial_documents.documents
+                SET amount_minor_units = 12100,
+                    tax_base_minor_units = 10000,
+                    vat_amount_minor_units = 2100
+                WHERE document_id = {document.DocumentId}
+                """);
+            Assert.Equal(1, validRows);
+
+            using var invalidScope = _factory.Services.CreateScope();
+            var invalidDbContext = invalidScope.ServiceProvider
+                .GetRequiredService<FuaPayDbContext>();
+            var exception = await Assert.ThrowsAsync<PostgresException>(
+                () => invalidDbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    UPDATE financial_documents.documents
+                    SET tax_base_minor_units = 9000,
+                        vat_amount_minor_units = 3100
+                    WHERE document_id = {document.DocumentId}
+                    """));
+
+            Assert.Equal(PostgresErrorCodes.CheckViolation, exception.SqlState);
+            Assert.Equal(
+                "ck_financial_documents_tax_snapshot_consistent",
+                exception.ConstraintName);
+
+            using var incompleteScope = _factory.Services.CreateScope();
+            var incompleteDbContext = incompleteScope.ServiceProvider
+                .GetRequiredService<FuaPayDbContext>();
+            var incomplete = await Assert.ThrowsAsync<PostgresException>(
+                () => incompleteDbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    UPDATE financial_documents.documents
+                    SET tax_treatment = NULL
+                    WHERE document_id = {document.DocumentId}
+                    """));
+
+            Assert.Equal(PostgresErrorCodes.CheckViolation, incomplete.SqlState);
+            Assert.Equal(
+                "ck_financial_documents_tax_snapshot_consistent",
+                incomplete.ConstraintName);
+        }
+        finally
+        {
+            await DeleteDocumentsBySourceAsync(sourceId);
+        }
+    }
+
+    [Fact]
+    public async Task LegacyV1IssuerNullDocument_RemainsPersistableAndReadableUnchanged()
+    {
+        var sourceId = Guid.NewGuid();
+        var document = new FinancialDocument(
+            Guid.NewGuid(),
+            "FUA-2096-900003",
+            FinancialDocumentType.ManualCreditTopUp,
+            FinancialDocumentSourceType.ManualCreditTopUp,
+            sourceId,
+            new FinancialDocumentCustomerSnapshot(
+                Guid.NewGuid(),
+                "Legacy customer",
+                null),
+            100,
+            "CZK",
+            UtcInstant(PersistenceYear, 6, 1, 10, 0),
+            UtcInstant(PersistenceYear, 6, 1, 10, 0),
+            FinancialDocumentSettlementMethod.ManualCreditTopUp,
+            null,
+            null,
+            null,
+            null,
+            1,
+            1);
+
+        try
+        {
+            await PersistAsync(document);
+            var restored = await FindBySourceAsync(
+                FinancialDocumentSourceType.ManualCreditTopUp,
+                sourceId);
+
+            Assert.Null(restored.Issuer);
+            Assert.Null(restored.Tax);
+            Assert.Equal(1, restored.SchemaVersion);
+            Assert.Equal(1, restored.RenderVersion);
+        }
+        finally
+        {
+            await DeleteDocumentsBySourceAsync(sourceId);
+        }
     }
 
     [Fact]
@@ -509,6 +674,7 @@ public sealed class FinancialDocumentPersistenceTests :
             CreateTestIssuer(),
             null,
             null,
+            null,
             1,
             1);
 
@@ -531,6 +697,7 @@ public sealed class FinancialDocumentPersistenceTests :
             issuedAt.AddMinutes(-1),
             issuedAt,
             FinancialDocumentSettlementMethod.PaymentProvider,
+            null,
             null,
             new FinancialDocumentProviderSnapshot(
                 "TestProvider",
@@ -560,6 +727,7 @@ public sealed class FinancialDocumentPersistenceTests :
             issuedAt,
             FinancialDocumentSettlementMethod.PaymentProvider,
             CreateTestIssuer(),
+            FinancialDocumentTaxPolicy.CreateApprovedSnapshot(12_345),
             new FinancialDocumentProviderSnapshot(
                 "Csob",
                 "test-pay-id@TEST",
@@ -571,7 +739,7 @@ public sealed class FinancialDocumentPersistenceTests :
                 "TEST JOB DESCRIPTION",
                 "TEST SERVICE UNIT"),
             2,
-            3);
+            2);
 
     private static FinancialDocumentIssuerSnapshot CreateTestIssuer() =>
         new(
@@ -608,8 +776,26 @@ public sealed class FinancialDocumentPersistenceTests :
         Assert.Equal(expected.SchemaVersion, actual.SchemaVersion);
         Assert.Equal(expected.RenderVersion, actual.RenderVersion);
         AssertIssuerSnapshot(expected.Issuer, actual.Issuer);
+        AssertTaxSnapshot(expected.Tax, actual.Tax);
         AssertProviderSnapshot(expected.Provider, actual.Provider);
         AssertJobSnapshot(expected.Job, actual.Job);
+    }
+
+    private static void AssertTaxSnapshot(
+        FinancialDocumentTaxSnapshot? expected,
+        FinancialDocumentTaxSnapshot? actual)
+    {
+        if (expected is null)
+        {
+            Assert.Null(actual);
+            return;
+        }
+
+        var persisted = Assert.IsType<FinancialDocumentTaxSnapshot>(actual);
+        Assert.Equal(expected.Treatment, persisted.Treatment);
+        Assert.Equal(expected.VatRateBasisPoints, persisted.VatRateBasisPoints);
+        Assert.Equal(expected.TaxBaseMinorUnits, persisted.TaxBaseMinorUnits);
+        Assert.Equal(expected.VatAmountMinorUnits, persisted.VatAmountMinorUnits);
     }
 
     private static void AssertIssuerSnapshot(

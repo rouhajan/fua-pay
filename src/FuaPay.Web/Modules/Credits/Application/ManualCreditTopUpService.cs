@@ -15,6 +15,7 @@ public sealed class ManualCreditTopUpService
     private readonly IAuditTrail _auditTrail;
     private readonly IFinancialDocumentRepository _financialDocuments;
     private readonly IFinancialDocumentNumberAllocator _documentNumbers;
+    private readonly IFinancialDocumentIssuanceProfile _issuanceProfile;
     private readonly TimeProvider _timeProvider;
 
     public ManualCreditTopUpService(
@@ -24,6 +25,7 @@ public sealed class ManualCreditTopUpService
         IAuditTrail auditTrail,
         IFinancialDocumentRepository financialDocuments,
         IFinancialDocumentNumberAllocator documentNumbers,
+        IFinancialDocumentIssuanceProfile issuanceProfile,
         TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(creditService);
@@ -32,6 +34,7 @@ public sealed class ManualCreditTopUpService
         ArgumentNullException.ThrowIfNull(auditTrail);
         ArgumentNullException.ThrowIfNull(financialDocuments);
         ArgumentNullException.ThrowIfNull(documentNumbers);
+        ArgumentNullException.ThrowIfNull(issuanceProfile);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _creditService = creditService;
@@ -40,6 +43,7 @@ public sealed class ManualCreditTopUpService
         _auditTrail = auditTrail;
         _financialDocuments = financialDocuments;
         _documentNumbers = documentNumbers;
+        _issuanceProfile = issuanceProfile;
         _timeProvider = timeProvider;
     }
 
@@ -149,7 +153,10 @@ public sealed class ManualCreditTopUpService
             command.Amount.MinorUnits,
             Money.CurrencyCode,
             movement.RecordedAt,
-            issuedAt);
+            issuedAt,
+            _issuanceProfile.CreateIssuerSnapshot(),
+            _issuanceProfile.CreateTaxSnapshot(
+                command.Amount.MinorUnits));
 
         _financialDocuments.Stage(document);
         await _financialDocuments.PersistStagedAsync(

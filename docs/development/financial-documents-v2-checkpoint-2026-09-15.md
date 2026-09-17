@@ -32,9 +32,15 @@ Verified facts from the preceding audit/work:
 5. Existing administrator manual credit top-up already has command idempotency, canonical credit movement, audit, concurrency handling and rollback tests. FinancialDocuments must preserve these properties.
 6. A read-only audit established that a naive outer wrapper around the current `ManualCreditTopUpService` is unsafe as an implementation shortcut. Its current retry/replay and database-error handling assumes its existing transaction boundary. A PostgreSQL error inside a naively nested outer transaction could leave that transaction unusable for the subsequent replay read. The implementation must therefore be designed around the actual service/transaction behavior, not simply wrapped from the outside.
 7. The application transaction abstraction does not replace explicit EF `SaveChanges`; exact save/transaction ordering must therefore remain visible and tested in the final implementation.
-8. The desired document-number semantics are compatible with PostgreSQL non-transactional sequence allocation: an allocated number may be lost on rollback (gap allowed) but must never be recycled. The exact annual implementation is still to be selected and proven by integration tests before merge.
+8. The desired document-number semantics are implemented by the annual
+   PostgreSQL counter described in Stage A evidence: an allocated number may be
+   lost on rollback (gap allowed) but is never recycled.
 9. Business year for `FUA-YYYY-NNNNNN` is `Europe/Prague`, not raw UTC.
-10. Tax/VAT/formal accounting semantics are an external fact, not a coding assumption. They remain fail-closed until confirmed by TUL/accounting.
+10. The approved Stage C correction fixes the title, issuer, numbering and tax
+    contract. The document title is `Doklad o úhradě`, the canonical issuer is
+    the exact TUL/FUA identity recorded below, and gross amounts include 21 %
+    VAT. These facts must be persisted at issuance and must not be read from
+    `Receipts` configuration during rendering.
 
 ## Local Stage A implementation evidence – 2026-09-16
 
@@ -69,9 +75,9 @@ defined by the repository: `LegalName`, `UnitName`, `AddressLine1`,
 `AddressLine2`, `Country`, `RegistrationNumber`, `VatNumber` and `ContactEmail`.
 The snapshot is either wholly absent or all fields are present and nonblank; it
 has no defaults. No issuer value, VAT rate, tax treatment or accounting meaning
-was copied from Receipts or invented. Stage A has no formal-PDF rendering path;
-a future formal renderer must reject documents without the approved required
-issuer snapshot.
+was copied from Receipts or invented. Stage A had no PDF rendering path; the
+Stage C renderer now rejects those schema/render `1/1` documents as
+`legacy-incomplete`.
 
 Annual numbering uses one migrated counter row per Prague business year and a
 single atomic PostgreSQL
@@ -111,13 +117,14 @@ privileges for newly migrated, `fuapay_migrator`-owned objects. Do not add
 runtime DDL or guessed grants. Resolve and verify the existing privilege model
 before staging.
 
-TUL/accounting approval of issuer values, VAT/tax treatment and formal document
-semantics also remains a blocker for formal output. The persisted nullable shape
-is preparation for approved values, not approval of any value.
+The earlier statement that issuer values, VAT/tax treatment and document naming
+still awaited TUL/accounting approval is superseded. The approved values are
+recorded in the Stage C correction below. Stage A intentionally kept the fields
+nullable so existing schema `1/1` documents remain valid.
 
-Stage B, deliberate integration into the existing manual-credit-top-up
-transaction and retry boundary, remains the next implementation step. Staging
-was not changed and remains on the previously documented
+At this historical Stage A checkpoint, Stage B was the next implementation
+step. The later Stage B evidence below supersedes that status. Staging was not
+changed and remains on the previously documented
 `9ecee2d9c57d88a2969d42094e49597b41f1642c` release.
 
 ## Local Stage B implementation evidence - 2026-09-16
@@ -206,15 +213,93 @@ that row as `FALSE` while `information_schema.columns` reported
 `is_nullable = NO` and `column_default = NULL`.
 
 The cutover marker is the only Stage B schema change and the migration is purely
-additive. No issuer, VAT/tax, provider or job data was invented. Stage C/PDF
-remains the next implementation step; payment settlement/Stage D was not
-implemented. Staging remains unchanged.
+additive. Stage B emitted schema/render `1/1` documents without issuer or tax
+because the approved contract had not yet been reflected in repository code.
+Stage C must therefore update issuance before enabling its renderer; payment
+settlement/Stage D was not implemented. Staging remains unchanged.
 
 The deployment privilege blocker remains unresolved: repository evidence still
 does not establish how `fuapay_migrator`-owned objects grant the required runtime
-access to `fuapay_app`. Do not add runtime DDL or guessed grants. TUL/accounting
-approval of issuer identity, VAT/tax treatment and formal accounting semantics
-also remains open.
+access to `fuapay_app`. Do not add runtime DDL or guessed grants. Issuer identity,
+VAT/tax treatment, title and numbering are no longer external approval blockers.
+
+## Stage C approved contract correction - 2026-09-16
+
+The following decisions supersede every older statement in this checkpoint that
+describes issuer identity, formal naming, numbering or VAT treatment as awaiting
+approval:
+
+- title: `Doklad o úhradě` (never invoice or tax-document wording);
+- number: persistent `FUA-YYYY-NNNNNN`, one sequence per Prague year;
+- issuer: Technická univerzita v Liberci; Fakulta umění a architektury;
+  Studentská 1402/2; 461 17 Liberec 1; Česká republika; IČO 46747885;
+  DIČ CZ46747885; fua@tul.cz;
+- approved VAT rate: 21 %, with `AmountMinorUnits` as gross including VAT;
+- the base is rounded once at issuance in minor units using
+  `MidpointRounding.AwayFromZero`; VAT is the residual, so base + VAT = gross;
+  schema/render `2/2` accepts only this exact mathematical split in both the
+  domain and PostgreSQL CHECK constraint, not merely any non-negative values
+  with the correct sum and rate;
+- issuer and tax values come from one FinancialDocuments-owned approved
+  issuance profile and are persisted as immutable snapshots;
+- rendering reads no financial value from mutable runtime configuration or
+  `Receipts` and performs no tax calculation;
+- new documents use schema/render `2/2`; historical `1/1` documents remain
+  immutable and replayable but are `legacy-incomplete` for PDF rendering.
+
+The PDF does not show customer identity, provider reference/payId, provider
+order/VS, `SourceId`, `PaymentId` or any internal technical reference. Manual
+top-up shows `Dobití kreditu`, event date and settlement method. Direct job
+payment shows job title, service unit, job number, payment date and settlement
+method. Repeated rendering has no database or financial side effect.
+
+## Local Stage C implementation evidence - 2026-09-16
+
+Stage C was implemented locally in `C:\Projects\fua-pay-fd-core` on branch
+`wip/financial-documents-v2-pdf-query`, based on exact baseline
+`9aa5ab3acd2dfdbeb27389c48ed219660f35174d`. The work remains uncommitted and
+has not been pushed, opened as a PR, deployed or applied outside the isolated
+local test database.
+
+Generated EF migration `20260917064943_AddFinancialDocumentTaxSnapshot` adds
+four nullable, default-free columns: tax treatment, VAT rate in basis points,
+tax base minor units and VAT amount minor units. Existing `1/1` rows remain
+unchanged and valid. Database constraints require new `2/2` rows to carry the
+complete issuer and approved standard-rate-included 2100-basis-point tax
+snapshot with nonnegative amounts, the exact approved rounded gross-inclusive
+base, residual VAT and `base + VAT = gross`.
+
+`ApprovedFinancialDocumentIssuanceProfile` is the single FinancialDocuments-
+owned source of approved issuer/tax values. `ManualCreditTopUpService` snapshots
+it only on new issuance. Replay reads the existing document, including
+historical issuer-null `1/1` documents, without recalculation or renumbering.
+
+The owner-scoped and admin query paths use EF `AsNoTracking`. Customer and admin
+download endpoints are addressed by `DocumentId`, return 404 for missing or
+unauthorized records, and send `application/pdf` with private no-store headers.
+Only `1/1` and `2/2` are valid canonical domain/version pairs. `2/2` is
+dispatched to the renderer, while `1/1` is rejected as legacy-incomplete; the
+renderer version dispatcher separately fails closed with a typed reason for
+unknown versions. No listing or navigation entry was added.
+
+PDFsharp font initialization and text layout are now process-wide BuildingBlocks
+infrastructure shared with legacy `Receipts`. The FinancialDocuments module has
+no dependency on `Receipts`; its renderer reads only the immutable document and
+the shared logo/font assets. The generated A4 output was rasterized and visually
+checked for logo, Czech diacritics, issuer, persisted number, amount rows and
+neutral footer. Issuer and detail values use the shared measured text wrapping,
+advance the vertical position by their actual line count and fail closed with a
+typed layout-overflow reason before producing a PDF that would overlap its
+footer.
+
+Canonical `scripts/verify.ps1 -RunDatabaseTests` passed against the isolated
+loopback database `fuapay_test_e178cdf` after applying the generated migration:
+
+- Release build: PASS, zero warnings and errors;
+- formatting: PASS;
+- web/application tests: `1004/1004` PASS;
+- EF pending-model check: PASS;
+- PostgreSQL integration tests: `272/272` PASS.
 
 ## Non-negotiable functional invariants
 
@@ -280,7 +365,8 @@ If that answer is not explicit from the actual code, STOP. Do not solve it with 
 
 ### Stage A – persistent FinancialDocument model and numbering foundation
 
-Implement the smallest model capable of storing an immutable financial snapshot without inventing tax semantics.
+This historical Stage A plan intentionally omitted tax semantics. Stage C adds
+the approved immutable v2 tax snapshot without changing existing v1 rows.
 
 Required design outcomes:
 
@@ -332,7 +418,8 @@ Only after persistent snapshots are correct:
 - render formal PDF solely from the stored FinancialDocument snapshot;
 - repeated download/render must allocate no number and change no financial state;
 - changing customer profile/config after issuance must not change already-issued output;
-- tax/formal wording remains disabled/fail-closed wherever TUL accounting facts are still unknown.
+- dispatch is explicit: only schema/render `2/2` renders; `1/1` fails as
+  `legacy-incomplete` and every unknown version fails as unsupported.
 
 Existing Receipts rendering code may be reused only as presentation infrastructure after review. It must not become the data source for FinancialDocuments.
 
@@ -466,12 +553,12 @@ After all features are complete:
 
 These are legitimate STOP points, not reasons to weaken the implementation:
 
-- TUL/accounting approval of VAT/tax treatment, formal document naming and any legally/accountingly required issuer fields;
-- exact approved issuer data/config if not already present in authoritative project configuration;
 - bank/POS-side ČSOB production activation actions that only the external party can perform;
 - actual FUA Print runtime behavior where repository/runtime evidence is not available.
 
-Code may prepare explicit storage/configuration for approved values, but unknown accounting facts must never be filled with defaults from `Receipts` or invented values.
+Approved issuer and tax values must be snapshotted from the canonical
+FinancialDocuments issuance profile. No value may be filled from `Receipts` or
+computed from mutable configuration during rendering.
 
 ## Definition of done – FinancialDocuments v2
 
@@ -488,7 +575,7 @@ FinancialDocuments v2 is done only when all of the following are true:
 - CI and CodeQL pass on the exact feature head;
 - staging migration/deploy/manual acceptance pass on an exact documented SHA;
 - documentation reflects the implementation, not merely the design;
-- unresolved tax/accounting claims remain fail-closed rather than guessed.
+- renderer version dispatch and incomplete legacy documents remain fail-closed.
 
 ## Definition of done – complete FUA Pay release
 

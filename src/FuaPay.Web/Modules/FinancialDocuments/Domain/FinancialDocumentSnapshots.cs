@@ -115,6 +115,51 @@ public sealed record FinancialDocumentIssuerSnapshot
     public string ContactEmail { get; }
 }
 
+public sealed record FinancialDocumentTaxSnapshot
+{
+    public FinancialDocumentTaxSnapshot(
+        FinancialDocumentTaxTreatment treatment,
+        int vatRateBasisPoints,
+        long taxBaseMinorUnits,
+        long vatAmountMinorUnits)
+    {
+        if (
+            treatment == FinancialDocumentTaxTreatment.Unknown ||
+            !Enum.IsDefined(treatment))
+        {
+            throw new ArgumentOutOfRangeException(nameof(treatment));
+        }
+
+        if (vatRateBasisPoints is < 0 or > 10_000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(vatRateBasisPoints));
+        }
+
+        if (taxBaseMinorUnits < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(taxBaseMinorUnits));
+        }
+
+        if (vatAmountMinorUnits < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(vatAmountMinorUnits));
+        }
+
+        Treatment = treatment;
+        VatRateBasisPoints = vatRateBasisPoints;
+        TaxBaseMinorUnits = taxBaseMinorUnits;
+        VatAmountMinorUnits = vatAmountMinorUnits;
+    }
+
+    public FinancialDocumentTaxTreatment Treatment { get; }
+
+    public int VatRateBasisPoints { get; }
+
+    public long TaxBaseMinorUnits { get; }
+
+    public long VatAmountMinorUnits { get; }
+}
+
 public sealed record FinancialDocumentJobSnapshot
 {
     public FinancialDocumentJobSnapshot(

@@ -1,10 +1,10 @@
 using System.Globalization;
 
+using FuaPay.Web.BuildingBlocks.Pdf;
 using FuaPay.Web.Modules.Receipts.Application;
 
 using PdfSharp;
 using PdfSharp.Drawing;
-using PdfSharp.Fonts;
 using PdfSharp.Pdf;
 
 namespace FuaPay.Web.Modules.Receipts.Infrastructure.Pdf;
@@ -17,16 +17,21 @@ internal sealed class PdfSharpReceiptPdfRenderer : IReceiptPdfRenderer
     private static readonly CultureInfo CzechCulture =
         CultureInfo.GetCultureInfo("cs-CZ");
     private static readonly TimeZoneInfo CzechTimeZone = ResolveCzechTimeZone();
-    private static readonly object FontConfigurationGate = new();
-    private static string? _configuredFontSignature;
-
     private readonly ReceiptConfiguration _configuration;
+    private readonly PdfAssetsConfiguration _assets;
+    private readonly PdfSharpFontManager _fontManager;
 
     public PdfSharpReceiptPdfRenderer(
-        ReceiptConfiguration configuration)
+        ReceiptConfiguration configuration,
+        PdfAssetsConfiguration assets,
+        PdfSharpFontManager fontManager)
     {
         ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(assets);
+        ArgumentNullException.ThrowIfNull(fontManager);
         _configuration = configuration;
+        _assets = assets;
+        _fontManager = fontManager;
     }
 
     public ReceiptPdfFile Render(JobPaymentReceiptData receipt)
@@ -39,7 +44,7 @@ internal sealed class PdfSharpReceiptPdfRenderer : IReceiptPdfRenderer
                 "Generování PDF dokladů není v tomto prostředí povoleno.");
         }
 
-        var fontFamily = ConfigureFonts();
+        var fontFamily = _fontManager.GetFontFamily();
 
         var document = new PdfDocument();
         document.Info.Title = $"Potvrzení o úhradě {receipt.JobNumber}";
@@ -50,7 +55,7 @@ internal sealed class PdfSharpReceiptPdfRenderer : IReceiptPdfRenderer
         page.Size = PageSize.A4;
 
         using var graphics = XGraphics.FromPdfPage(page);
-        using var logo = XImage.FromFile(_configuration.LogoPath);
+        using var logo = XImage.FromFile(_assets.LogoPath);
 
         var regular = new XFont(fontFamily, 9.5, XFontStyleEx.Regular);
         var small = new XFont(fontFamily, 8, XFontStyleEx.Regular);
@@ -274,7 +279,7 @@ internal sealed class PdfSharpReceiptPdfRenderer : IReceiptPdfRenderer
 
         var footerY = page.Height.Point - 78;
 
-        if (!ReceiptTextLayout.FitsBeforeFooter(
+        if (!PdfTextLayout.FitsBeforeFooter(
                 y,
                 18,
                 ContentGap,
@@ -305,53 +310,6 @@ internal sealed class PdfSharpReceiptPdfRenderer : IReceiptPdfRenderer
         return new ReceiptPdfFile(
             stream.ToArray(),
             BuildFileName(receipt.JobNumber));
-    }
-
-    private string ConfigureFonts()
-    {
-        var regularPath = _configuration.RegularFontPath;
-        var boldPath = _configuration.BoldFontPath;
-        var signature = regularPath is not null && boldPath is not null
-            ? $"files:{regularPath}|{boldPath}"
-            : "windows-platform";
-
-        lock (FontConfigurationGate)
-        {
-            if (_configuredFontSignature is not null)
-            {
-                if (!string.Equals(
-                        _configuredFontSignature,
-                        signature,
-                        StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException(
-                        "PDFsharp fonty už byly inicializované jinou konfigurací.");
-                }
-
-                return regularPath is not null
-                    ? ReceiptFontResolver.FamilyName
-                    : "Arial";
-            }
-
-            if (regularPath is not null && boldPath is not null)
-            {
-                GlobalFontSettings.FontResolver =
-                    new ReceiptFontResolver(regularPath, boldPath);
-                _configuredFontSignature = signature;
-                return ReceiptFontResolver.FamilyName;
-            }
-
-            if (!OperatingSystem.IsWindows())
-            {
-                throw new InvalidOperationException(
-                    "Na Linuxu musí být pro PDF doklady nastavené " +
-                    "Receipts:RegularFontPath a Receipts:BoldFontPath.");
-            }
-
-            GlobalFontSettings.UseWindowsFontsUnderWindows = true;
-            _configuredFontSignature = signature;
-            return "Arial";
-        }
     }
 
     private static double DrawIdentityBlock(
@@ -430,7 +388,7 @@ internal sealed class PdfSharpReceiptPdfRenderer : IReceiptPdfRenderer
         double width,
         double lineHeight)
     {
-        var lines = ReceiptTextLayout.Wrap(
+        var lines = PdfTextLayout.Wrap(
             text,
             width,
             candidate => graphics.MeasureString(candidate, font).Width);

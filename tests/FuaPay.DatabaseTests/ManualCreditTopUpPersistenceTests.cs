@@ -25,6 +25,7 @@ public sealed class ManualCreditTopUpPersistenceTests :
     private const int LegacyConflictYear = 2086;
     private const int PostCutoverCorruptionYear = 2087;
     private const int AmbientTransactionYear = 2088;
+    private const int HistoricalV1ReplayYear = 2089;
 
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -99,7 +100,19 @@ public sealed class ManualCreditTopUpPersistenceTests :
             Assert.Equal(
                 FinancialDocumentSettlementMethod.ManualCreditTopUp,
                 firstDocument.SettlementMethod);
-            Assert.Null(firstDocument.Issuer);
+            Assert.Equal(
+                "Technická univerzita v Liberci",
+                firstDocument.Issuer?.LegalName);
+            Assert.Equal("46747885", firstDocument.Issuer?.RegistrationNumber);
+            Assert.Equal("CZ46747885", firstDocument.Issuer?.VatNumber);
+            Assert.Equal(
+                FinancialDocumentTaxTreatment.StandardRateIncluded,
+                firstDocument.Tax?.Treatment);
+            Assert.Equal(2_100, firstDocument.Tax?.VatRateBasisPoints);
+            Assert.Equal(
+                command.Amount.MinorUnits,
+                firstDocument.Tax!.TaxBaseMinorUnits +
+                firstDocument.Tax.VatAmountMinorUnits);
             Assert.Null(firstDocument.Provider);
             Assert.Null(firstDocument.Job);
             Assert.Equal(
@@ -514,6 +527,75 @@ public sealed class ManualCreditTopUpPersistenceTests :
         {
             await DeleteAsync(command);
             await DeleteCounterAsync(PostCutoverCorruptionYear);
+        }
+    }
+
+    [Fact]
+    public async Task TopUp_PostCutoverHistoricalV1DocumentReplayDoesNotRecalculateSnapshot()
+    {
+        var command = CreateCommand("Historical v1 replay");
+        var customer = CreateCustomer(
+            command.OwnerId,
+            "Historical v1 customer",
+            "historical@example.test");
+        using var factory = CreateTimeFactory(
+            HistoricalV1ReplayYear,
+            month: 10,
+            day: 1);
+
+        await DeleteCounterAsync(HistoricalV1ReplayYear);
+
+        try
+        {
+            var original = await TopUpAsync(factory, command, customer);
+            using (var scope = factory.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider
+                    .GetRequiredService<FuaPayDbContext>();
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    UPDATE financial_documents.documents
+                    SET schema_version = 1,
+                        render_version = 1,
+                        issuer_legal_name = NULL,
+                        issuer_unit_name = NULL,
+                        issuer_address_line1 = NULL,
+                        issuer_address_line2 = NULL,
+                        issuer_country = NULL,
+                        issuer_registration_number = NULL,
+                        issuer_vat_number = NULL,
+                        issuer_contact_email = NULL,
+                        tax_treatment = NULL,
+                        vat_rate_basis_points = NULL,
+                        tax_base_minor_units = NULL,
+                        vat_amount_minor_units = NULL
+                    WHERE source_id = {command.CommandId}
+                    """);
+            }
+
+            var replay = await TopUpAsync(
+                factory,
+                command,
+                CreateCustomer(
+                    command.OwnerId,
+                    "Changed current profile",
+                    "changed@example.test"));
+            var document = await FindDocumentAsync(factory, command.CommandId);
+
+            Assert.Equal(original, replay);
+            Assert.Equal(1, document.SchemaVersion);
+            Assert.Equal(1, document.RenderVersion);
+            Assert.Null(document.Issuer);
+            Assert.Null(document.Tax);
+            Assert.Equal(
+                1,
+                await ReadCounterValueAsync(factory, HistoricalV1ReplayYear));
+            await AssertPersistedEffectCountsAsync(factory, command, 1);
+        }
+        finally
+        {
+            await DeleteAsync(command);
+            await DeleteCounterAsync(HistoricalV1ReplayYear);
         }
     }
 

@@ -24,6 +24,10 @@ public sealed class FinancialDocumentTests
         Assert.Equal(
             2,
             (int)FinancialDocumentSettlementMethod.PaymentProvider);
+        Assert.Equal(0, (int)FinancialDocumentTaxTreatment.Unknown);
+        Assert.Equal(
+            1,
+            (int)FinancialDocumentTaxTreatment.StandardRateIncluded);
     }
 
     [Fact]
@@ -50,6 +54,11 @@ public sealed class FinancialDocumentTests
             IssuedAt,
             FinancialDocumentSettlementMethod.PaymentProvider,
             CreateTestIssuer(),
+            new FinancialDocumentTaxSnapshot(
+                FinancialDocumentTaxTreatment.StandardRateIncluded,
+                2_100,
+                10_202,
+                2_143),
             new FinancialDocumentProviderSnapshot(
                 "ČSOB",
                 "pay-id",
@@ -60,8 +69,8 @@ public sealed class FinancialDocumentTests
                 "Model",
                 "Tisk modelu",
                 "Dílna"),
-            1,
-            1);
+            2,
+            2);
 
         Assert.Equal(documentId, document.DocumentId);
         Assert.Equal("FUA-2026-000001", document.DocumentNumber);
@@ -97,7 +106,9 @@ public sealed class FinancialDocumentTests
             2_500,
             "CZK",
             IssuedAt.AddMinutes(-1),
-            IssuedAt);
+            IssuedAt,
+            CreateTestIssuer(),
+            FinancialDocumentTaxPolicy.CreateApprovedSnapshot(2_500));
 
         Assert.Equal(documentId, document.DocumentId);
         Assert.Equal(commandId, document.SourceId);
@@ -116,7 +127,10 @@ public sealed class FinancialDocumentTests
         Assert.Equal(
             FinancialDocument.CurrentRenderVersion,
             document.RenderVersion);
-        Assert.Null(document.Issuer);
+        Assert.NotNull(document.Issuer);
+        Assert.NotNull(document.Tax);
+        Assert.Equal(2_066, document.Tax.TaxBaseMinorUnits);
+        Assert.Equal(434, document.Tax.VatAmountMinorUnits);
         Assert.Null(document.Provider);
         Assert.Null(document.Job);
     }
@@ -140,6 +154,7 @@ public sealed class FinancialDocumentTests
                 IssuedAt,
                 IssuedAt,
                 FinancialDocumentSettlementMethod.ManualCreditTopUp,
+                null,
                 null,
                 new FinancialDocumentProviderSnapshot(
                     "Neexistující provider",
@@ -172,6 +187,7 @@ public sealed class FinancialDocumentTests
                 null,
                 null,
                 null,
+                null,
                 1,
                 1));
     }
@@ -198,8 +214,142 @@ public sealed class FinancialDocumentTests
                 null,
                 null,
                 null,
+                null,
                 1,
                 1));
+    }
+
+    [Theory]
+    [InlineData(1, 1, 0)]
+    [InlineData(100, 83, 17)]
+    [InlineData(2, 2, 0)]
+    [InlineData(3, 2, 1)]
+    [InlineData(120, 99, 21)]
+    [InlineData(121, 100, 21)]
+    [InlineData(12_100, 10_000, 2_100)]
+    [InlineData(12_345, 10_202, 2_143)]
+    [InlineData(
+        long.MaxValue,
+        7_622_621_518_061_798_188,
+        1_600_750_518_792_977_619)]
+    public void TaxPolicy_CalculatesDeterministicInclusiveBreakdown(
+        long gross,
+        long expectedBase,
+        long expectedVat)
+    {
+        var tax = FinancialDocumentTaxPolicy.CreateApprovedSnapshot(gross);
+
+        Assert.Equal(expectedBase, tax.TaxBaseMinorUnits);
+        Assert.Equal(expectedVat, tax.VatAmountMinorUnits);
+        Assert.Equal(gross, tax.TaxBaseMinorUnits + tax.VatAmountMinorUnits);
+        Assert.Equal(2_100, tax.VatRateBasisPoints);
+    }
+
+    [Fact]
+    public void Constructor_V2RejectsMissingOrInconsistentTaxSnapshot()
+    {
+        var validTax = FinancialDocumentTaxPolicy.CreateApprovedSnapshot(100);
+
+        Assert.Throws<ArgumentException>(
+            () => CreateV2ManualDocument(issuer: null, tax: validTax));
+        Assert.Throws<ArgumentException>(
+            () => CreateV2ManualDocument(issuer: CreateTestIssuer(), tax: null));
+        Assert.Throws<ArgumentException>(
+            () => CreateV2ManualDocument(
+                CreateTestIssuer(),
+                new FinancialDocumentTaxSnapshot(
+                    FinancialDocumentTaxTreatment.StandardRateIncluded,
+                    2_100,
+                    9_000,
+                    3_100),
+                12_100));
+    }
+
+    [Theory]
+    [InlineData(1, 2)]
+    [InlineData(2, 1)]
+    [InlineData(3, 2)]
+    [InlineData(2, 3)]
+    [InlineData(3, 1)]
+    [InlineData(1, 3)]
+    [InlineData(3, 3)]
+    public void Constructor_RejectsMixedAndFutureVersionPairs(
+        int schemaVersion,
+        int renderVersion)
+    {
+        Assert.Throws<ArgumentException>(
+            () => CreateManualDocumentForVersion(
+                schemaVersion,
+                renderVersion));
+    }
+
+    [Fact]
+    public void Constructor_AcceptsBothSupportedVersionPairs()
+    {
+        var legacy = CreateManualDocumentForVersion(1, 1);
+        var current = CreateManualDocumentForVersion(2, 2);
+
+        Assert.Equal((1, 1), (legacy.SchemaVersion, legacy.RenderVersion));
+        Assert.Equal((2, 2), (current.SchemaVersion, current.RenderVersion));
+    }
+
+    private static FinancialDocument CreateV2ManualDocument(
+        FinancialDocumentIssuerSnapshot? issuer,
+        FinancialDocumentTaxSnapshot? tax,
+        long amountMinorUnits = 100) =>
+        new(
+            Guid.NewGuid(),
+            "FUA-2026-000001",
+            FinancialDocumentType.ManualCreditTopUp,
+            FinancialDocumentSourceType.ManualCreditTopUp,
+            Guid.NewGuid(),
+            new FinancialDocumentCustomerSnapshot(
+                Guid.NewGuid(),
+                "Zákazník",
+                null),
+            amountMinorUnits,
+            "CZK",
+            IssuedAt,
+            IssuedAt,
+            FinancialDocumentSettlementMethod.ManualCreditTopUp,
+            issuer,
+            tax,
+            null,
+            null,
+            2,
+            2);
+
+    private static FinancialDocument CreateManualDocumentForVersion(
+        int schemaVersion,
+        int renderVersion)
+    {
+        const long amountMinorUnits = 100;
+        var isCurrent = schemaVersion == 2 && renderVersion == 2;
+
+        return new FinancialDocument(
+            Guid.NewGuid(),
+            "FUA-2026-000001",
+            FinancialDocumentType.ManualCreditTopUp,
+            FinancialDocumentSourceType.ManualCreditTopUp,
+            Guid.NewGuid(),
+            new FinancialDocumentCustomerSnapshot(
+                Guid.NewGuid(),
+                "Zákazník",
+                null),
+            amountMinorUnits,
+            "CZK",
+            IssuedAt,
+            IssuedAt,
+            FinancialDocumentSettlementMethod.ManualCreditTopUp,
+            isCurrent ? CreateTestIssuer() : null,
+            isCurrent
+                ? FinancialDocumentTaxPolicy.CreateApprovedSnapshot(
+                    amountMinorUnits)
+                : null,
+            null,
+            null,
+            schemaVersion,
+            renderVersion);
     }
 
     private static FinancialDocumentIssuerSnapshot CreateTestIssuer() =>

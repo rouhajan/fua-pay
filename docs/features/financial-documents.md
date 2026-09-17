@@ -1,10 +1,10 @@
 # Finanční doklady
 
-Status: návrhový kontrakt pro implementaci `FinancialDocuments v2`.
+Status: normativní kontrakt pro implementaci `FinancialDocuments v2`.
 
-Tento dokument stanovuje finanční a technické invarianty budoucího perzistentního
-modelu dokladů. Dokud není implementace dokončená a samostatně ověřená, nemění
-současné chování produkčních ani staging finančních toků.
+Tento dokument stanovuje finanční a technické invarianty perzistentního modelu
+dokladů. Lokální implementace ani její testy samy o sobě nemění současné chování
+produkčních nebo staging finančních toků.
 
 ## Zdroj pravdy
 
@@ -81,6 +81,8 @@ nebo konfigurace. Perzistentní snapshot má uchovat minimálně:
 - čas finanční události a čas vystavení;
 - způsob vypořádání v technicky jednoznačné podobě;
 - snapshot schválených údajů vystavitele;
+- neměnný daňový snapshot (daňové zacházení, sazba v basis points, základ a
+  částka DPH);
 - provider identifikátory, pokud existují;
 - verzi schématu/renderingu potřebnou pro deterministickou interpretaci.
 
@@ -88,15 +90,41 @@ U přímé platby zakázky se uchová také stabilní vazba na zakázku a potře
 snapshot popisu zakázky/pracoviště. U dobití kreditu se nevytváří falešná
 zakázka ani falešná provider platba.
 
-## Daňové údaje
+## Schválená podoba, vystavitel a daňové údaje
 
-DPH, daňový základ, DIČ, formální název dokladu ani jiné účetní/daňové tvrzení
-se nesmí odvodit ze současného preview `Receipts` modelu nebo z jeho výchozí
-21% sazby. Tyto údaje se do formálního dokladu aktivují až po schválení TUL.
+Název dokumentu je přesně `Doklad o úhradě`; dokument se neoznačuje jako
+faktura ani daňový doklad. Vystavitelem je tento kanonický profil:
 
-Model může mít připravená explicitní pole pro schválený daňový snapshot, ale
-neznámá pravidla se nesmí nahrazovat výchozími hodnotami. Produkční aktivace
-formálního PDF zůstává fail-closed, dokud nejsou schválené údaje dostupné.
+- Technická univerzita v Liberci;
+- Fakulta umění a architektury;
+- Studentská 1402/2;
+- 461 17 Liberec 1;
+- Česká republika;
+- IČO 46747885;
+- DIČ CZ46747885;
+- fua@tul.cz.
+
+Schválená sazba DPH je 21 % a `AmountMinorUnits` je hrubá částka včetně DPH.
+Při vystavení se jednou deterministicky vypočte základ v celých minor units
+jako `round(gross / 1.21, MidpointRounding.AwayFromZero)` a částka DPH jako
+`gross - base`. Uložený v2 snapshot musí obsahovat právě tento vypočtený základ
+a residual DPH; samotná shoda sazby a součtu nestačí. Vždy současně platí
+`base + VAT = gross`. Stejný versioned invariant prosazuje doména i databázový
+CHECK constraint přes přesnou `numeric` aritmetiku.
+Daňové zacházení je explicitně typované a sazba se ukládá přesně jako 2100
+basis points.
+
+Tyto hodnoty nejsou převzaté z runtime konfigurace ani z legacy modulu
+`Receipts`. Kanonický schválený issuance profil vlastní modul
+`FinancialDocuments`; při vzniku dokumentu se vystavitel i daňový rozpad
+snapshotují do dokumentu. Renderer používá výhradně uložený snapshot, nic
+nepřepočítává a pozdější změna konfigurace nebo profilu starý dokument nemění.
+
+Dokumenty schématu/renderu `1/1` zůstávají platnými neměnnými historickými
+záznamy, ale pro schválené PDF jsou klasifikovány jako `legacy-incomplete` a
+renderer je odmítne typovanou chybou. Neprovádí se backfill, změna čísla ani
+dopočet z dnešní konfigurace. Nové dokumenty po tomto cutoveru používají
+výhradně schéma/render `2/2` a vyžadují úplný issuer i tax snapshot.
 
 ## Číselná řada
 
@@ -104,7 +132,7 @@ Cílový formát je:
 
 `FUA-YYYY-NNNNNN`
 
-`YYYY` je obchodní rok odvozený podle `Europe/Prague`, nikoli náhodně podle UTC.
+`YYYY` je obchodní rok odvozený podle `Europe/Prague`, nikoli podle UTC.
 V rámci roku je jedna společná řada pro všechny typy finančních dokladů.
 
 Přidělení musí být atomické a bezpečné při souběhu. Přidělené číslo se nikdy
@@ -146,7 +174,20 @@ není perzistentním finančním dokumentem. Jeho `PAY-{JobNumber}` není čísl
 formálního dokladu. `FinancialDocuments v2` jej nebude používat jako finanční
 source of truth.
 
-Po dokončení v2 se PDF pro formální doklad musí renderovat z perzistentního
+PDF pro schválený doklad se musí renderovat z perzistentního
 `FinancialDocument`. Starý preview tok bude buď odstraněn, nebo výslovně
 ponechán jen jako neformální historické potvrzení; nesmí vytvářet paralelní
 účetní význam.
+
+## Viditelný obsah PDF
+
+PDF zobrazuje logo, název `Doklad o úhradě`, persistentní `DocumentNumber`,
+uložený snapshot vystavitele, datum úhrady, způsob úhrady a uložený daňový
+rozpad. Zákaznická sekce se nezobrazuje. Provider `payId`/reference, provider
+order number/variabilní symbol, `SourceId`, `PaymentId` ani jiná interní
+technická reference se nezobrazují.
+
+Ruční dobití zobrazuje účel `Dobití kreditu`. Přímá platba zakázky zobrazuje
+název zakázky, pracoviště a číslo zakázky. Řádky částek jsou `Částka včetně
+DPH`, `Základ bez DPH`, `DPH 21 %` a `Celkem uhrazeno` a používají pouze
+uložené hodnoty.

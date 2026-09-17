@@ -255,6 +255,30 @@ public sealed class ModuleRegistrationTests
             descriptor =>
                 descriptor.ServiceType ==
                     typeof(IFinancialDocumentNumberAllocator));
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IFinancialDocumentQueries) &&
+                descriptor.Lifetime == ServiceLifetime.Scoped);
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IFinancialDocumentIssuanceProfile) &&
+                descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IFinancialDocumentPdfRenderer) &&
+                descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(FinancialDocumentDownloadService) &&
+                descriptor.Lifetime == ServiceLifetime.Scoped);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using FuaPay.Web.BuildingBlocks.Pdf;
 using FuaPay.Web.BuildingBlocks.Persistence;
 using FuaPay.Web.Development;
 using FuaPay.Web.Hosting;
@@ -191,6 +192,11 @@ builder.Services.AddAntiforgery(
 
 builder.Services
     .AddFuaPayPersistence(builder.Configuration)
+    .AddFuaPayPdf(
+        new PdfAssetsConfiguration(
+            receiptConfiguration.LogoPath,
+            receiptConfiguration.RegularFontPath,
+            receiptConfiguration.BoldFontPath))
     .AddAuditModule()
     .AddAccessModule(
         runtimeFeatures.InteractiveTestSignInEnabled)

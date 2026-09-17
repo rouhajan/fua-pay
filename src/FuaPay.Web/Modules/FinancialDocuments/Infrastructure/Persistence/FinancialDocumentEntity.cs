@@ -44,6 +44,14 @@ internal sealed class FinancialDocumentEntity
 
     public string? IssuerContactEmail { get; set; }
 
+    public int? TaxTreatment { get; set; }
+
+    public int? VatRateBasisPoints { get; set; }
+
+    public long? TaxBaseMinorUnits { get; set; }
+
+    public long? VatAmountMinorUnits { get; set; }
+
     public string? Provider { get; set; }
 
     public string? ProviderReference { get; set; }

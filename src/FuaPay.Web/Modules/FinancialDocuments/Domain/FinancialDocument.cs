@@ -4,8 +4,8 @@ namespace FuaPay.Web.Modules.FinancialDocuments.Domain;
 
 public sealed partial class FinancialDocument
 {
-    public const int CurrentSchemaVersion = 1;
-    public const int CurrentRenderVersion = 1;
+    public const int CurrentSchemaVersion = 2;
+    public const int CurrentRenderVersion = 2;
 
     public FinancialDocument(
         Guid documentId,
@@ -20,6 +20,7 @@ public sealed partial class FinancialDocument
         DateTimeOffset issuedAt,
         FinancialDocumentSettlementMethod settlementMethod,
         FinancialDocumentIssuerSnapshot? issuer,
+        FinancialDocumentTaxSnapshot? tax,
         FinancialDocumentProviderSnapshot? provider,
         FinancialDocumentJobSnapshot? job,
         int schemaVersion,
@@ -37,8 +38,13 @@ public sealed partial class FinancialDocument
             settlementMethod,
             provider,
             job);
-        ValidateVersion(schemaVersion, nameof(schemaVersion));
-        ValidateVersion(renderVersion, nameof(renderVersion));
+        ValidateVersionPair(schemaVersion, renderVersion);
+        ValidateVersionedSnapshot(
+            schemaVersion,
+            renderVersion,
+            amountMinorUnits,
+            issuer,
+            tax);
 
         var normalizedNumber = documentNumber?.Trim().ToUpperInvariant();
 
@@ -74,6 +80,7 @@ public sealed partial class FinancialDocument
         IssuedAt = issuedAt;
         SettlementMethod = settlementMethod;
         Issuer = issuer;
+        Tax = tax;
         Provider = provider;
         Job = job;
         SchemaVersion = schemaVersion;
@@ -104,6 +111,8 @@ public sealed partial class FinancialDocument
 
     public FinancialDocumentIssuerSnapshot? Issuer { get; }
 
+    public FinancialDocumentTaxSnapshot? Tax { get; }
+
     public FinancialDocumentProviderSnapshot? Provider { get; }
 
     public FinancialDocumentJobSnapshot? Job { get; }
@@ -120,7 +129,9 @@ public sealed partial class FinancialDocument
         long amountMinorUnits,
         string currency,
         DateTimeOffset financialEventAt,
-        DateTimeOffset issuedAt)
+        DateTimeOffset issuedAt,
+        FinancialDocumentIssuerSnapshot issuer,
+        FinancialDocumentTaxSnapshot tax)
     {
         return new FinancialDocument(
             documentId,
@@ -134,11 +145,60 @@ public sealed partial class FinancialDocument
             financialEventAt,
             issuedAt,
             FinancialDocumentSettlementMethod.ManualCreditTopUp,
-            null,
+            issuer,
+            tax,
             null,
             null,
             CurrentSchemaVersion,
             CurrentRenderVersion);
+    }
+
+    private static void ValidateVersionedSnapshot(
+        int schemaVersion,
+        int renderVersion,
+        long grossMinorUnits,
+        FinancialDocumentIssuerSnapshot? issuer,
+        FinancialDocumentTaxSnapshot? tax)
+    {
+        if (schemaVersion == 1 && renderVersion == 1)
+        {
+            if (tax is not null)
+            {
+                throw new ArgumentException(
+                    "Schema 1 documents cannot contain a tax snapshot.",
+                    nameof(tax));
+            }
+
+            return;
+        }
+
+        if (schemaVersion != 2 || renderVersion != 2)
+        {
+            return;
+        }
+
+        if (issuer is null)
+        {
+            throw new ArgumentException(
+                "Schema 2 documents require an issuer snapshot.",
+                nameof(issuer));
+        }
+
+        if (tax is null)
+        {
+            throw new ArgumentException(
+                "Schema 2 documents require a tax snapshot.",
+                nameof(tax));
+        }
+
+        if (!FinancialDocumentTaxPolicy.IsApprovedSnapshot(
+                grossMinorUnits,
+                tax))
+        {
+            throw new ArgumentException(
+                "Schema 2 documents require the approved tax treatment, rate and gross-inclusive breakdown.",
+                nameof(tax));
+        }
     }
 
     private static void ValidateSource(
@@ -248,11 +308,16 @@ public sealed partial class FinancialDocument
         }
     }
 
-    private static void ValidateVersion(int value, string parameterName)
+    private static void ValidateVersionPair(
+        int schemaVersion,
+        int renderVersion)
     {
-        if (value <= 0)
+        if (
+            (schemaVersion, renderVersion) is not ((1, 1) or (2, 2)))
         {
-            throw new ArgumentOutOfRangeException(parameterName);
+            throw new ArgumentException(
+                "Podporované jsou pouze dvojice schema/render 1/1 a 2/2.",
+                nameof(schemaVersion));
         }
     }
 
