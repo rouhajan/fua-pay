@@ -9,6 +9,8 @@ using FuaPay.Web.Modules.Audit;
 using FuaPay.Web.Modules.Audit.Application;
 using FuaPay.Web.Modules.Credits;
 using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.FinancialDocuments;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
 using FuaPay.Web.Modules.Jobs;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Notifications;
@@ -39,6 +41,7 @@ public sealed class ModuleRegistrationTests
             .AddAuditModule()
             .AddAccessModule()
             .AddCreditsModule()
+            .AddFinancialDocumentsModule()
             .AddJobsModule()
             .AddServiceUnitsModule()
             .AddPaymentsModule(PaymentProvider.Development)
@@ -234,6 +237,50 @@ public sealed class ModuleRegistrationTests
                 descriptor.ServiceType ==
                     typeof(IManualCreditTopUpCommandRepository));
     }
+
+    [Fact]
+    public void AddFinancialDocumentsModule_RegistersPersistenceAndNumbering()
+    {
+        var services = new ServiceCollection();
+
+        services.AddFinancialDocumentsModule();
+
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IFinancialDocumentRepository));
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IFinancialDocumentNumberAllocator));
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IFinancialDocumentQueries) &&
+                descriptor.Lifetime == ServiceLifetime.Scoped);
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IFinancialDocumentIssuanceProfile) &&
+                descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(IFinancialDocumentPdfRenderer) &&
+                descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                    typeof(FinancialDocumentDownloadService) &&
+                descriptor.Lifetime == ServiceLifetime.Scoped);
+    }
+
     [Fact]
     public void AddAccessModule_RegistersAdministrationAndQueries()
     {

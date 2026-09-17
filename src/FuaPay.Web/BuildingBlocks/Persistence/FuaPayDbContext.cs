@@ -1,6 +1,7 @@
 using FuaPay.Web.Modules.Access.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Audit.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Credits.Infrastructure.Persistence;
+using FuaPay.Web.Modules.FinancialDocuments.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Jobs.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Notifications.Infrastructure.Persistence;
 using FuaPay.Web.Modules.Payments.Infrastructure.Persistence;
@@ -52,6 +53,13 @@ public sealed class FuaPayDbContext : DbContext
     internal DbSet<ManualCreditTopUpCommandEntity>
         ManualCreditTopUpCommands =>
             Set<ManualCreditTopUpCommandEntity>();
+
+    internal DbSet<FinancialDocumentEntity> FinancialDocuments =>
+        Set<FinancialDocumentEntity>();
+
+    internal DbSet<FinancialDocumentNumberCounterEntity>
+        FinancialDocumentNumberCounters =>
+            Set<FinancialDocumentNumberCounterEntity>();
 
     internal DbSet<JobEntity> Jobs =>
         Set<JobEntity>();

@@ -82,7 +82,8 @@ internal sealed class EfManualCreditTopUpCommandRepository :
         return new PersistedManualCreditTopUpCommand(
             command,
             result,
-            row.Command.AcceptedAt);
+            row.Command.AcceptedAt,
+            row.Command.FinancialDocumentRequired);
     }
 
     public void Stage(
@@ -99,7 +100,8 @@ internal sealed class EfManualCreditTopUpCommandRepository :
                 OwnerId = command.OwnerId,
                 AmountMinorUnits = command.Amount.MinorUnits,
                 Note = command.Note,
-                AcceptedAt = acceptedAt
+                AcceptedAt = acceptedAt,
+                FinancialDocumentRequired = true
             });
     }
 }

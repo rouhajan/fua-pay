@@ -40,15 +40,15 @@ PrintCredentials__Enabled=false
 
 Receipts__Enabled=false
 Receipts__PreviewMode=false
-Receipts__Issuer__LegalName=<schválený právní název vystavitele>
-Receipts__Issuer__UnitName=<schválená součást / fakulta>
+Receipts__Issuer__LegalName=<legacy preview vystavitel>
+Receipts__Issuer__UnitName=<legacy preview součást / fakulta>
 Receipts__Issuer__AddressLine1=<ulice a číslo>
 Receipts__Issuer__AddressLine2=<PSČ a obec>
 Receipts__Issuer__Country=<země>
 Receipts__Issuer__RegistrationNumber=<ověřené IČO>
 Receipts__Issuer__VatNumber=<ověřené DIČ>
 Receipts__Issuer__ContactEmail=<kontakt pro doklad>
-Receipts__VatRatePercent=<schválená sazba>
+Receipts__VatRatePercent=<legacy preview sazba>
 Receipts__RegularFontPath=/var/lib/fuapay/fonts/<regular-font>.ttf
 Receipts__BoldFontPath=/var/lib/fuapay/fonts/<bold-font>.ttf
 ```
@@ -75,10 +75,11 @@ vypnout, nastavit nový pepper a vyžádat od zákazníků nové nastavení PINu
 dokument neprohlašuje credential feature za nasazenou na stagingu ani v produkci.
 Plaintext PIN ani pepper se nesmějí zapisovat do aplikačního logu nebo auditu.
 
-Doklady zůstávají v Production vypnuté, dokud nejsou účetní údaje a pravidlo
-DPH schválené. Při zapnutí musí být `PreviewMode=false`, nesmí zůstat preview
-IČO/DIČ a oba font soubory musí existovat mimo release. Podrobnosti jsou v
-[PDF potvrzení o úhradě](../features/payment-receipts.md).
+Tyto `Receipts__*` hodnoty řídí jen legacy preview potvrzení a nejsou zdrojem
+issueru ani DPH pro `FinancialDocuments`. Nové finanční dokumenty snapshotují
+schválený issuer a 21% daňový rozpad z kanonického profilu v modulu
+`FinancialDocuments`. Oba PDF renderery používají stejné logo a procesní font
+manager; na Linuxu musí oba font soubory existovat mimo release.
 
 ## TLS a reverzní proxy
 

@@ -1,18 +1,18 @@
 using PdfSharp.Fonts;
 
-namespace FuaPay.Web.Modules.Receipts.Infrastructure.Pdf;
+namespace FuaPay.Web.BuildingBlocks.Pdf;
 
-internal sealed class ReceiptFontResolver : IFontResolver
+internal sealed class FuaPayFontResolver : IFontResolver
 {
-    public const string FamilyName = "FuaPayReceipt";
+    internal const string FamilyName = "FuaPayPdf";
 
-    private const string RegularFace = "FuaPayReceipt-Regular";
-    private const string BoldFace = "FuaPayReceipt-Bold";
+    private const string RegularFace = "FuaPayPdf-Regular";
+    private const string BoldFace = "FuaPayPdf-Bold";
 
     private readonly byte[] _regularFont;
     private readonly byte[] _boldFont;
 
-    public ReceiptFontResolver(
+    public FuaPayFontResolver(
         string regularFontPath,
         string boldFontPath)
     {

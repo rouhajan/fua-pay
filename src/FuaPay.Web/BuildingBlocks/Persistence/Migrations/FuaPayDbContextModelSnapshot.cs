@@ -493,6 +493,10 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("amount_minor_units");
 
+                    b.Property<bool>("FinancialDocumentRequired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("financial_document_required");
+
                     b.Property<string>("Note")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -544,8 +548,8 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(320)
                         .HasColumnType("character varying(320)")
-                        .UseCollation("C")
-                        .HasColumnName("normalized_email");
+                        .HasColumnName("normalized_email")
+                        .UseCollation("C");
 
                     b.Property<DateTimeOffset?>("RevokedAt")
                         .HasColumnType("timestamp with time zone")
@@ -693,6 +697,239 @@ namespace FuaPay.Web.BuildingBlocks.Persistence.Migrations
                             t.HasCheckConstraint("ck_credits_print_reservations_timestamps_ordered", "state_changed_at >= created_at");
 
                             t.HasCheckConstraint("ck_credits_print_reservations_version_positive", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("FuaPay.Web.Modules.FinancialDocuments.Infrastructure.Persistence.FinancialDocumentEntity", b =>
+                {
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<long>("AmountMinorUnits")
+                        .HasColumnType("bigint")
+                        .HasColumnName("amount_minor_units");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character(3)")
+                        .HasColumnName("currency")
+                        .IsFixedLength();
+
+                    b.Property<string>("CustomerDisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("customer_display_name");
+
+                    b.Property<string>("CustomerEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)")
+                        .HasColumnName("customer_email");
+
+                    b.Property<Guid>("CustomerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("customer_user_id");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(15)
+                        .HasColumnType("character varying(15)")
+                        .HasColumnName("document_number");
+
+                    b.Property<int>("DocumentType")
+                        .HasColumnType("integer")
+                        .HasColumnName("document_type");
+
+                    b.Property<DateTimeOffset>("FinancialEventAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("financial_event_at");
+
+                    b.Property<DateTimeOffset>("IssuedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("issued_at");
+
+                    b.Property<string>("IssuerAddressLine1")
+                        .HasColumnType("text")
+                        .HasColumnName("issuer_address_line1");
+
+                    b.Property<string>("IssuerAddressLine2")
+                        .HasColumnType("text")
+                        .HasColumnName("issuer_address_line2");
+
+                    b.Property<string>("IssuerContactEmail")
+                        .HasColumnType("text")
+                        .HasColumnName("issuer_contact_email");
+
+                    b.Property<string>("IssuerCountry")
+                        .HasColumnType("text")
+                        .HasColumnName("issuer_country");
+
+                    b.Property<string>("IssuerLegalName")
+                        .HasColumnType("text")
+                        .HasColumnName("issuer_legal_name");
+
+                    b.Property<string>("IssuerRegistrationNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("issuer_registration_number");
+
+                    b.Property<string>("IssuerUnitName")
+                        .HasColumnType("text")
+                        .HasColumnName("issuer_unit_name");
+
+                    b.Property<string>("IssuerVatNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("issuer_vat_number");
+
+                    b.Property<string>("JobDescription")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("job_description");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("job_id");
+
+                    b.Property<string>("JobNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("job_number");
+
+                    b.Property<string>("JobTitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("job_title");
+
+                    b.Property<string>("Provider")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ProviderOrderNumber")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("provider_order_number");
+
+                    b.Property<string>("ProviderReference")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)")
+                        .HasColumnName("provider_reference");
+
+                    b.Property<int>("RenderVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("render_version");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("schema_version");
+
+                    b.Property<string>("ServiceUnitName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("service_unit_name");
+
+                    b.Property<int>("SettlementMethod")
+                        .HasColumnType("integer")
+                        .HasColumnName("settlement_method");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_id");
+
+                    b.Property<int>("SourceType")
+                        .HasColumnType("integer")
+                        .HasColumnName("source_type");
+
+                    b.Property<long?>("TaxBaseMinorUnits")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tax_base_minor_units");
+
+                    b.Property<int?>("TaxTreatment")
+                        .HasColumnType("integer")
+                        .HasColumnName("tax_treatment");
+
+                    b.Property<long?>("VatAmountMinorUnits")
+                        .HasColumnType("bigint")
+                        .HasColumnName("vat_amount_minor_units");
+
+                    b.Property<int?>("VatRateBasisPoints")
+                        .HasColumnType("integer")
+                        .HasColumnName("vat_rate_basis_points");
+
+                    b.HasKey("DocumentId")
+                        .HasName("pk_financial_documents_documents");
+
+                    b.HasIndex("DocumentNumber")
+                        .IsUnique()
+                        .HasDatabaseName("uq_financial_documents_document_number");
+
+                    b.HasIndex("SourceType", "SourceId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_financial_documents_source");
+
+                    b.ToTable("documents", "financial_documents", t =>
+                        {
+                            t.HasCheckConstraint("ck_financial_documents_amount_positive", "amount_minor_units > 0");
+
+                            t.HasCheckConstraint("ck_financial_documents_currency_valid", "currency ~ '^[A-Z]{3}$'");
+
+                            t.HasCheckConstraint("ck_financial_documents_customer_email_not_empty", "customer_email IS NULL OR length(btrim(customer_email)) > 0");
+
+                            t.HasCheckConstraint("ck_financial_documents_customer_id_not_empty", "customer_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_financial_documents_customer_name_not_empty", "length(btrim(customer_display_name)) > 0");
+
+                            t.HasCheckConstraint("ck_financial_documents_document_type_valid", "document_type IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("ck_financial_documents_id_not_empty", "document_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_financial_documents_issuer_snapshot_consistent", "(issuer_legal_name IS NULL AND issuer_unit_name IS NULL AND issuer_address_line1 IS NULL AND issuer_address_line2 IS NULL AND issuer_country IS NULL AND issuer_registration_number IS NULL AND issuer_vat_number IS NULL AND issuer_contact_email IS NULL) OR (issuer_legal_name IS NOT NULL AND issuer_unit_name IS NOT NULL AND issuer_address_line1 IS NOT NULL AND issuer_address_line2 IS NOT NULL AND issuer_country IS NOT NULL AND issuer_registration_number IS NOT NULL AND issuer_vat_number IS NOT NULL AND issuer_contact_email IS NOT NULL AND length(btrim(issuer_legal_name)) > 0 AND length(btrim(issuer_unit_name)) > 0 AND length(btrim(issuer_address_line1)) > 0 AND length(btrim(issuer_address_line2)) > 0 AND length(btrim(issuer_country)) > 0 AND length(btrim(issuer_registration_number)) > 0 AND length(btrim(issuer_vat_number)) > 0 AND length(btrim(issuer_contact_email)) > 0)");
+
+                            t.HasCheckConstraint("ck_financial_documents_job_snapshot_consistent", "(job_id IS NULL AND job_number IS NULL AND job_title IS NULL AND job_description IS NULL AND service_unit_name IS NULL) OR (job_id IS NOT NULL AND job_id <> '00000000-0000-0000-0000-000000000000'::uuid AND job_number IS NOT NULL AND job_title IS NOT NULL AND job_description IS NOT NULL AND service_unit_name IS NOT NULL AND length(btrim(job_number)) > 0 AND length(btrim(job_title)) > 0 AND length(btrim(job_description)) > 0 AND length(btrim(service_unit_name)) > 0)");
+
+                            t.HasCheckConstraint("ck_financial_documents_number_valid", "document_number ~ '^FUA-[0-9]{4}-[0-9]{6}$'");
+
+                            t.HasCheckConstraint("ck_financial_documents_number_year_matches_issued_at", "substring(document_number from 5 for 4)::integer = EXTRACT(YEAR FROM issued_at AT TIME ZONE 'Europe/Prague')::integer");
+
+                            t.HasCheckConstraint("ck_financial_documents_provider_order_not_empty", "provider_order_number IS NULL OR length(btrim(provider_order_number)) > 0");
+
+                            t.HasCheckConstraint("ck_financial_documents_provider_reference_not_empty", "provider_reference IS NULL OR length(btrim(provider_reference)) > 0");
+
+                            t.HasCheckConstraint("ck_financial_documents_settlement_valid", "settlement_method IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_financial_documents_source_id_not_empty", "source_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_financial_documents_source_type_valid", "source_type IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_financial_documents_tax_snapshot_consistent", "(schema_version = 1 AND tax_treatment IS NULL AND vat_rate_basis_points IS NULL AND tax_base_minor_units IS NULL AND vat_amount_minor_units IS NULL) OR (schema_version = 2 AND issuer_legal_name IS NOT NULL AND issuer_unit_name IS NOT NULL AND issuer_address_line1 IS NOT NULL AND issuer_address_line2 IS NOT NULL AND issuer_country IS NOT NULL AND issuer_registration_number IS NOT NULL AND issuer_vat_number IS NOT NULL AND issuer_contact_email IS NOT NULL AND tax_treatment IS NOT NULL AND vat_rate_basis_points IS NOT NULL AND tax_base_minor_units IS NOT NULL AND vat_amount_minor_units IS NOT NULL AND tax_treatment = 1 AND vat_rate_basis_points = 2100 AND tax_base_minor_units >= 0 AND vat_amount_minor_units >= 0 AND tax_base_minor_units = round(amount_minor_units::numeric * 10000 / 12100, 0)::bigint AND vat_amount_minor_units = amount_minor_units - tax_base_minor_units AND tax_base_minor_units + vat_amount_minor_units = amount_minor_units)");
+
+                            t.HasCheckConstraint("ck_financial_documents_timestamps_ordered", "issued_at >= financial_event_at");
+
+                            t.HasCheckConstraint("ck_financial_documents_type_source_consistent", "(document_type = 1 AND source_type = 1 AND settlement_method = 1 AND provider IS NULL AND provider_reference IS NULL AND provider_order_number IS NULL AND job_id IS NULL AND job_number IS NULL AND job_title IS NULL AND job_description IS NULL AND service_unit_name IS NULL) OR (document_type = 2 AND source_type = 2 AND settlement_method = 2 AND provider IS NOT NULL AND length(btrim(provider)) > 0 AND job_id IS NULL AND job_number IS NULL AND job_title IS NULL AND job_description IS NULL AND service_unit_name IS NULL) OR (document_type = 3 AND source_type = 2 AND settlement_method = 2 AND provider IS NOT NULL AND length(btrim(provider)) > 0 AND job_id IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_financial_documents_versions_positive", "(schema_version = 1 AND render_version = 1) OR (schema_version = 2 AND render_version = 2)");
+                        });
+                });
+
+            modelBuilder.Entity("FuaPay.Web.Modules.FinancialDocuments.Infrastructure.Persistence.FinancialDocumentNumberCounterEntity", b =>
+                {
+                    b.Property<int>("BusinessYear")
+                        .HasColumnType("integer")
+                        .HasColumnName("business_year");
+
+                    b.Property<int>("LastValue")
+                        .HasColumnType("integer")
+                        .HasColumnName("last_value");
+
+                    b.HasKey("BusinessYear")
+                        .HasName("pk_financial_documents_number_counters");
+
+                    b.ToTable("number_counters", "financial_documents", t =>
+                        {
+                            t.HasCheckConstraint("ck_financial_documents_counters_value_valid", "last_value BETWEEN 1 AND 999999");
+
+                            t.HasCheckConstraint("ck_financial_documents_counters_year_valid", "business_year BETWEEN 2000 AND 9999");
                         });
                 });
 

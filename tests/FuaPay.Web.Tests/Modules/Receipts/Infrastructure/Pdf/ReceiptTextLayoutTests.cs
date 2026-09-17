@@ -1,15 +1,15 @@
 using System.Globalization;
 
-using FuaPay.Web.Modules.Receipts.Infrastructure.Pdf;
+using FuaPay.Web.BuildingBlocks.Pdf;
 
 namespace FuaPay.Web.Tests.Modules.Receipts.Infrastructure.Pdf;
 
-public sealed class ReceiptTextLayoutTests
+public sealed class PdfTextLayoutTests
 {
     [Fact]
     public void Wrap_LongTokenSplitsIntoLinesWithinWidth()
     {
-        var lines = ReceiptTextLayout.Wrap(
+        var lines = PdfTextLayout.Wrap(
             "ABCD EFGHIJKLM",
             width: 4,
             measure: value => value.Length);
@@ -27,7 +27,7 @@ public sealed class ReceiptTextLayoutTests
     {
         const string text = "A\u0301B";
 
-        var lines = ReceiptTextLayout.Wrap(
+        var lines = PdfTextLayout.Wrap(
             text,
             width: 1,
             measure: value =>
@@ -40,7 +40,7 @@ public sealed class ReceiptTextLayoutTests
     public void Wrap_SingleTextElementWiderThanWidthFailsClosed()
     {
         var exception = Assert.Throws<InvalidOperationException>(
-            () => ReceiptTextLayout.Wrap(
+            () => PdfTextLayout.Wrap(
                 "A",
                 width: 0.5,
                 measure: value => value.Length));
@@ -54,7 +54,7 @@ public sealed class ReceiptTextLayoutTests
     [Fact]
     public void FitsBeforeFooter_ExactBoundaryFits()
     {
-        var result = ReceiptTextLayout.FitsBeforeFooter(
+        var result = PdfTextLayout.FitsBeforeFooter(
             contentY: 100,
             contentHeight: 18,
             contentGap: 12,
@@ -66,7 +66,7 @@ public sealed class ReceiptTextLayoutTests
     [Fact]
     public void FitsBeforeFooter_ContentCollisionDoesNotFit()
     {
-        var result = ReceiptTextLayout.FitsBeforeFooter(
+        var result = PdfTextLayout.FitsBeforeFooter(
             contentY: 101,
             contentHeight: 18,
             contentGap: 12,

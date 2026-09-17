@@ -8,6 +8,8 @@ using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Pages.Customer.Payments;
 
+using Microsoft.AspNetCore.Mvc.RazorPages;
+
 using CreditIndexModel = FuaPay.Web.Pages.Admin.Credit.IndexModel;
 using CustomerCreditIndexModel =
     FuaPay.Web.Pages.Customer.Credit.IndexModel;
@@ -78,6 +80,33 @@ public sealed class FinancialCommandPageTests
         Assert.NotEqual(Guid.Empty, adjustmentCommandId);
         Assert.NotEqual(Guid.Empty, manualTopUpCommandId);
         Assert.NotEqual(adjustmentCommandId, manualTopUpCommandId);
+    }
+
+    [Fact]
+    public async Task ManualTopUpPost_MissingCustomerOptionFailsClosed()
+    {
+        var model = new CreditIndexModel(
+            new EmptyCreditQueries(),
+            administration: null!,
+            manualTopUps: null!,
+            new EmptyAccessUserQueries());
+        var input = new CreditIndexModel.ManualCreditTopUpInput
+        {
+            CommandId = Guid.NewGuid(),
+            OwnerId = Guid.NewGuid(),
+            AmountCrowns = 25m,
+            Note = "Customer disappeared after validation"
+        };
+
+        var result = await model.OnPostManualTopUpAsync(input);
+
+        Assert.IsType<PageResult>(result);
+        Assert.False(model.ModelState.IsValid);
+        Assert.Contains(
+            model.ModelState.Keys,
+            key => key.EndsWith(
+                nameof(input.OwnerId),
+                StringComparison.Ordinal));
     }
 
     private sealed class NullPaymentRepository : IPaymentRepository
@@ -208,7 +237,7 @@ public sealed class FinancialCommandPageTests
             throw new NotSupportedException();
 
         public Task<bool> IsActiveCustomerAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            Task.FromResult(true);
 
         public Task<long> CountActiveUsersWithRoleAsync(AccessRole role, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

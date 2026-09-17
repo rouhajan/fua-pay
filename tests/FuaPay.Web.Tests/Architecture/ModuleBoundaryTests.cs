@@ -17,6 +17,7 @@ public sealed class ModuleBoundaryTests
     [Theory]
     [InlineData("Access")]
     [InlineData("Credits")]
+    [InlineData("FinancialDocuments")]
     [InlineData("Jobs")]
     [InlineData("Payments")]
     [InlineData("ServiceUnits")]
