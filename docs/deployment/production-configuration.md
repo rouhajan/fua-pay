@@ -26,10 +26,14 @@ aktivací a o rychlý code rollback na stejném hostiteli:
   vracet.
 
 Současné staging/demo prostředí je přechodný stav během vývoje, nikoli cílová
-druhá infrastruktura. Před produkčním spuštěním se musí explicitně rozhodnout,
-zda se současná demo databáze archivuje a vytvoří čistá produkční databáze.
-Testovací/acceptance historii nelze bez samostatného rozhodnutí prohlásit za
-produkční data.
+druhá infrastruktura. Pro první produkční spuštění je rozhodnutý čistý cutover:
+současná demo databáze se archivuje a produkce začne nad novou PostgreSQL
+databází vytvořenou z aktuálního migration chainu. Demo kredit, zakázky,
+platby, tiskové credentialy, auditní acceptance historie ani demo finanční
+doklady se automaticky nepřenášejí do produkce.
+
+Úplný postup a zbývající gate jsou v
+[plánu čistého produkčního cutoveru](production-cutover-plan.md).
 
 ## Povinná konfigurace
 
