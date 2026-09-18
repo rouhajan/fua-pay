@@ -30,6 +30,12 @@ finanční stav.
 ## Hranice integrací
 
 Ruční dobití je nezávislé na dostupnosti ČSOB a nevytváří falešnou platbu,
-provider transakci ani karetní doklad. FUA Print nadále pouze spotřebovává
-kredit FUA Pay přes existující PrintPayments API. Mezi FUA Print a databází
-FUA Pay se nezavádí žádná přímá databázová integrace.
+provider transakci ani falešný karetní doklad. Po FinancialDocuments cutoveru
+však nové úspěšné ruční dobití vytváří právě jeden kanonický
+`FinancialDocument` s názvem **Doklad o úhradě**, zdrojem
+`ManualCreditTopUp + CommandId` a stejným atomickým transakčním pravidlem jako
+kreditní efekt. Administrativní korekce takový doklad nevytváří.
+
+FUA Print nadále pouze spotřebovává kredit FUA Pay přes existující
+PrintPayments API. Mezi FUA Print a databází FUA Pay se nezavádí žádná přímá
+databázová integrace.
