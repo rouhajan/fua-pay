@@ -81,7 +81,23 @@ je ale nutné přesně definovat a ověřit bootstrap prvního produkčního
 Administratora a počátečních reálných ServiceUnits. Production nesmí používat
 `DevelopmentData` ani development seeder jako bootstrap mechanismus.
 
-## 4. Microsoft Entra ID
+## 4. Migrace legacy SafeQ kreditu
+
+Stávající SafeQ identity a zůstatky se nebudou hromadně automaticky spojovat s
+Entra účty podle jména nebo loginu. Produkční migrace použije adminem potvrzený,
+idempotentní claim-on-demand proces popsaný v
+[plánu migrace SafeQ kreditu](legacy-safeq-credit-migration.md).
+
+Analyzovaný historický SafeQ report obsahuje 628 unikátních legacy účtů a je
+vhodný jako párovací podklad, ale neobsahuje autoritativní aktuální zůstatek.
+Finální částky proto musí přijít z nového SafeQ balance snapshotu po freeze
+starého systému. Raw exporty s osobními údaji zůstávají mimo veřejný Git.
+
+Legacy převod má používat vlastní auditovanou operaci typu
+`Převod kreditu ze SafeQ`; nesmí se maskovat jako nové ruční dobití ani vytvářet
+nový `FinancialDocument` bez skutečného nového příjmu peněz.
+
+## 5. Microsoft Entra ID
 
 Entra integrace už na `https://fuapay.tul.cz` reálně funguje a není potřeba
 znovu navrhovat registraci aplikace.
@@ -138,7 +154,7 @@ opuštěnou pending platbu a desktop/mobile smoke.
 Browser nikdy není finanční autorita. Finanční efekt může vzniknout pouze po
 autoritativním serverovém ověření.
 
-## 6. Kredit a ruční operace
+## 7. Kredit a ruční operace
 
 Produkce zachová jediný kanonický credit ledger.
 
@@ -152,7 +168,7 @@ Produkce zachová jediný kanonický credit ledger.
 Před go-live musí projít alespoň jeden řízený test role/validace této cesty nad
 čistou produkční konfigurací bez používání demo seederu.
 
-## 7. FinancialDocuments v2
+## 8. FinancialDocuments v2
 
 Produkční doklad je neměnný databázový snapshot. PDF je pouze opakovatelný
 render a není zdrojem pravdy.
@@ -179,7 +195,7 @@ demo čísla nejsou účetní produkční historie.
 
 Linux PDF runtime musí mít schválené regular/bold fonty mimo release artefakt.
 
-## 8. FUA Print integrace
+## 9. FUA Print integrace
 
 Cílová produkce FUA Pay má mít aktivní:
 
@@ -223,7 +239,7 @@ Před produkcí se také odstraní z Customer UI technický text typu
 `Úhrada tisku`; interní reservation/job/operation identifikátory zůstávají
 pro audit a diagnostiku.
 
-## 9. Produkční runtime a secrets
+## 10. Produkční runtime a secrets
 
 Production startuje fail-closed. Minimální stav:
 
@@ -254,7 +270,7 @@ Data Protection key ring musí být po produkčním go-live persistentní přes
 všechny další release. Jeho ztráta nebo nahrazení zneplatní sessions a
 antiforgery cookies.
 
-## 10. Nginx, HTTPS a HARICA
+## 11. Nginx, HTTPS a HARICA
 
 Kanonicý veřejný endpoint zůstává `https://fuapay.tul.cz`.
 
@@ -276,7 +292,7 @@ Zachová se již ověřený HARICA/Certbot renewal model a před go-live se ově
 - forwarded headers věří pouze skutečné lokální proxy;
 - certifikátový renewal a Nginx reload jsou funkční.
 
-## 11. Release, migrace a rollback
+## 12. Release, migrace a rollback
 
 Každý produkční release:
 
@@ -296,7 +312,7 @@ Automatické migrace při startu jsou v Production vypnuté. Databázové migrac
 jsou forward-only. Code rollback smí vrátit symlink na předchozí kompatibilní
 release, ale nesmí automaticky spouštět reverse migration.
 
-## 12. Produkční backup a obnova
+## 13. Produkční backup a obnova
 
 Před čistým cutoverem:
 
@@ -309,7 +325,7 @@ Před každou budoucí schema změnou musí existovat konzistentní backup a zn�
 restore postup. TUL provozovatel musí mimo repo určit produkční RPO/RTO,
 retenci, šifrování a přístupová oprávnění.
 
-## 13. Cutover pořadí
+## 14. Cutover pořadí
 
 Doporučený finální sled je:
 
@@ -335,7 +351,7 @@ Doporučený finální sled je:
 Žádná demo data se při tomto pořadí „nečistí“ in-place a žádný finanční ledger
 se ručně neresetuje.
 
-## 14. Go-live acceptance
+## 15. Go-live acceptance
 
 Před označením systému jako Production musí být prokázáno minimálně:
 
@@ -359,7 +375,7 @@ Před označením systému jako Production musí být prokázáno minimálně:
 - backup/restore postup je známý a poslední backup identifikovatelný;
 - běžící executable odpovídá přesnému schválenému SHA.
 
-## 15. Po go-live
+## 16. Po go-live
 
 Po spuštění se průběžně sleduje:
 
@@ -376,7 +392,7 @@ Další release se nasazují stejným side-by-side modelem. Pro běžný vývoj 
 nezakládá permanentní staging server; CI, izolované PostgreSQL testy a
 kontrolované integrační acceptance slouží jako předprodukční gate.
 
-## 16. Věci, které první produkční cutover záměrně neřeší
+## 17. Věci, které první produkční cutover záměrně neřeší
 
 Bez nového explicitního rozhodnutí nejsou součástí prvního cutoveru:
 
@@ -392,7 +408,7 @@ Bez nového explicitního rozhodnutí nejsou součástí prvního cutoveru:
 - přímé DB propojení FUA Print -> FUA Pay;
 - spoléhání na utajení veřejného repozitáře.
 
-## 17. Konkrétní otevřené položky k uzavření
+## 18. Konkrétní otevřené položky k uzavření
 
 Před skutečným produkčním cutoverem zůstává explicitně:
 
