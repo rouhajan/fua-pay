@@ -12,6 +12,7 @@ Aktuální dokumentace je záměrně malá:
 - [PDF potvrzení o úhradě](features/payment-receipts.md);
 - [PostgreSQL, EF migrace a testy](development/database.md);
 - [produkční konfigurace a provoz](deployment/production-configuration.md);
+- [čistý produkční cutover](deployment/production-cutover-plan.md);
 - [release a databázové artefakty](deployment/release-artifacts.md);
 - [demo / staging deployment](deployment/demo-staging.md);
 - [ověření 2026-08-18](testing/verification-2026-08-18.md);
