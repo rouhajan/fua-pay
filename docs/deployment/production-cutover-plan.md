@@ -126,7 +126,7 @@ Před otevřením čisté produkce se znovu ověří:
 - ruční přiřazení Requester/Administrator role;
 - zablokování/odebrání role bez čekání na starou session autorizaci.
 
-## 5. ČSOB: z integration do production
+## 6. ČSOB: z integration do production
 
 Současný ověřený ČSOB provoz používá integration prostředí. Produkce nesmí
 použít integration merchant, integration signing klíče ani
@@ -337,16 +337,18 @@ Doporučený finální sled je:
 6. archivovat současnou demo DB;
 7. založit čistou produkční DB a aplikovat celý migration chain;
 8. provést bezpečný bootstrap prvního Administratora a reálných ServiceUnits;
-9. nainstalovat produkční secrets a production environment konfiguraci;
-10. aktivovat Entra a ověřit login/logout/role;
-11. po schválení ČSOB nainstalovat production merchant konfiguraci a provést
+9. zmrazit starý SafeQ provoz a vytvořit finální autoritativní balance snapshot;
+10. připravit první adminem potvrzené SafeQ -> FUA Pay páry pro legacy převod;
+11. nainstalovat produkční secrets a production environment konfiguraci;
+12. aktivovat Entra a ověřit login/logout/role;
+13. po schválení ČSOB nainstalovat production merchant konfiguraci a provést
     production payment smoke;
-12. po finálním FUA Print gate aktivovat PrintPayments + PrintCredentials;
-13. atomicky aktivovat release;
-14. ověřit `/health/live`, `/health/ready`, worker health a veřejné HTTPS;
-15. provést pouze řízené produkční smoke scénáře;
-16. otevřít systém uživatelům;
-17. ponechat bezprostředně předchozí kompatibilní release jako code rollback.
+14. po finálním FUA Print gate aktivovat PrintPayments + PrintCredentials;
+15. atomicky aktivovat release;
+16. ověřit `/health/live`, `/health/ready`, worker health a veřejné HTTPS;
+17. provést pouze řízené produkční smoke scénáře;
+18. otevřít systém uživatelům;
+19. ponechat bezprostředně předchozí kompatibilní release jako code rollback.
 
 Žádná demo data se při tomto pořadí „nečistí“ in-place a žádný finanční ledger
 se ručně neresetuje.
@@ -416,6 +418,8 @@ Před skutečným produkčním cutoverem zůstává explicitně:
 - [ ] dokončit FUA Print ↔ FUA Pay cross-repo audit;
 - [ ] dokončit finální FUA Print E2E acceptance;
 - [ ] definovat a ověřit bootstrap prvního produkčního Administratora;
+- [ ] připravit finální SafeQ balance export po freeze starého systému;
+- [ ] dokončit adminem potvrzovaný SafeQ -> FUA Pay pairing a idempotentní legacy-credit importer;
 - [ ] definovat počáteční produkční ServiceUnits/role assignment;
 - [ ] uzavřít otevřené vlastní ČSOB acceptance scénáře;
 - [ ] fresh ČSOB GET/POST echo těsně před activation;
