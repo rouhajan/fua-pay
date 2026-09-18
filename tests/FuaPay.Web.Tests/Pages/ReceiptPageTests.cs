@@ -47,6 +47,25 @@ public sealed class ReceiptPageTests
         Assert.Equal(0, renderer.RenderCount);
     }
 
+
+    [Fact]
+    public async Task OnGetAsync_DirectPaymentWithCanonicalDocumentReturnsNotFound()
+    {
+        var fixture = JobPaymentReceiptServiceTests.ReceiptFixture.Create(
+            JobSettlementType.DirectPayment,
+            financialDocumentId: Guid.NewGuid());
+        var renderer = new StubReceiptPdfRenderer();
+        var model = CreateModel(
+            fixture.Service,
+            renderer,
+            fixture.CustomerUserId);
+
+        var result = await model.OnGetAsync(fixture.JobId);
+
+        Assert.IsType<NotFoundResult>(result);
+        Assert.Equal(0, renderer.RenderCount);
+    }
+
     [Fact]
     public async Task OnGetAsync_OwnPaidJobReturnsPrivatePdf()
     {

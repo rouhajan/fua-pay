@@ -8,6 +8,7 @@ Aktuální dokumentace je záměrně malá:
 - [ČSOB eAPI](integrations/csob.md);
 - [vrácení finančního vypořádání](features/payment-returns.md);
 - [ruční dobití kreditu](features/manual-credit-topups.md);
+- [finanční doklady](features/financial-documents.md);
 - [PDF potvrzení o úhradě](features/payment-receipts.md);
 - [PostgreSQL, EF migrace a testy](development/database.md);
 - [produkční konfigurace a provoz](deployment/production-configuration.md);
@@ -23,5 +24,6 @@ Aktuální dokumentace je záměrně malá:
 - [ČSOB expiry acceptance 2026-09-14](testing/csob-expiry-acceptance-2026-09-14.md);
 - [ověření persistentního FUA Print credentialu 2026-09-15](testing/print-credential-verification-2026-09-15.md);
 - [staging acceptance ručního dobití kreditu 2026-09-15](testing/manual-credit-topup-acceptance-2026-09-15.md);
+- [FinancialDocuments v2 Stage D staging acceptance 2026-09-18](testing/financial-documents-v2-stage-d-staging-acceptance-2026-09-18.md);
 - [bezpečnost](../SECURITY.md);
 - [vendored frontendové závislosti](development/third-party-frontend-inventory.md).

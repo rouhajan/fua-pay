@@ -1,5 +1,7 @@
 using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
@@ -17,6 +19,7 @@ namespace FuaPay.Web.Pages.Customer.Payments;
 public sealed class DetailsModel : PageModel
 {
     private readonly IPaymentQueries _paymentQueries;
+    private readonly IFinancialDocumentQueries _financialDocumentQueries;
     private readonly ICreditQueries _creditQueries;
     private readonly CreditAvailabilityService _creditAvailabilityService;
     private readonly DevelopmentPaymentService _developmentPaymentService;
@@ -28,6 +31,7 @@ public sealed class DetailsModel : PageModel
 
     public DetailsModel(
         IPaymentQueries paymentQueries,
+        IFinancialDocumentQueries financialDocumentQueries,
         ICreditQueries creditQueries,
         CreditAvailabilityService creditAvailabilityService,
         DevelopmentPaymentService developmentPaymentService,
@@ -38,6 +42,7 @@ public sealed class DetailsModel : PageModel
         ReceiptConfiguration receiptConfiguration)
     {
         ArgumentNullException.ThrowIfNull(paymentQueries);
+        ArgumentNullException.ThrowIfNull(financialDocumentQueries);
         ArgumentNullException.ThrowIfNull(creditQueries);
         ArgumentNullException.ThrowIfNull(creditAvailabilityService);
         ArgumentNullException.ThrowIfNull(developmentPaymentService);
@@ -48,6 +53,7 @@ public sealed class DetailsModel : PageModel
         ArgumentNullException.ThrowIfNull(receiptConfiguration);
 
         _paymentQueries = paymentQueries;
+        _financialDocumentQueries = financialDocumentQueries;
         _creditQueries = creditQueries;
         _creditAvailabilityService = creditAvailabilityService;
         _developmentPaymentService = developmentPaymentService;
@@ -64,7 +70,9 @@ public sealed class DetailsModel : PageModel
 
     public bool JobCanBePaid { get; private set; }
 
-    public bool JobHasReceipt { get; private set; }
+    public Guid? FinancialDocumentId { get; private set; }
+
+    public bool HasLegacyJobReceiptFallback { get; private set; }
 
     public Uri? TrustedProcessUri { get; private set; }
 
@@ -281,6 +289,23 @@ public sealed class DetailsModel : PageModel
             return false;
         }
 
+        if (Payment.Status == PaymentStatus.Succeeded)
+        {
+            var documentIds = await _financialDocumentQueries
+                .FindDocumentIdsBySourceForCustomerAsync(
+                    customerUserId,
+                    FinancialDocumentSourceType.Payment,
+                    [Payment.Id],
+                    cancellationToken);
+
+            if (documentIds.TryGetValue(
+                Payment.Id,
+                out var financialDocumentId))
+            {
+                FinancialDocumentId = financialDocumentId;
+            }
+        }
+
         TrustedProcessUri = Payment.Status == PaymentStatus.Pending
             ? _providerInitiator.ResolveTrustedProcessUri(
                 Payment.Provider,
@@ -300,7 +325,8 @@ public sealed class DetailsModel : PageModel
                 job is not null &&
                 job.ProductionStatus == JobProductionStatus.Published &&
                 job.PaymentStatus == JobPaymentStatus.Unpaid;
-            JobHasReceipt =
+            HasLegacyJobReceiptFallback =
+                !FinancialDocumentId.HasValue &&
                 _receiptConfiguration.Enabled &&
                 Payment.Status == PaymentStatus.Succeeded &&
                 job is not null &&

@@ -1,5 +1,7 @@
 using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Jobs.Web;
@@ -18,6 +20,7 @@ namespace FuaPay.Web.Pages.Customer.Jobs;
 public sealed class DetailsModel : PageModel
 {
     private readonly IJobQueries _jobQueries;
+    private readonly IFinancialDocumentQueries _financialDocumentQueries;
     private readonly ICreditQueries _creditQueries;
     private readonly CreditAvailabilityService _creditAvailabilityService;
     private readonly CreditJobPaymentService _creditJobPaymentService;
@@ -27,6 +30,7 @@ public sealed class DetailsModel : PageModel
 
     public DetailsModel(
         IJobQueries jobQueries,
+        IFinancialDocumentQueries financialDocumentQueries,
         ICreditQueries creditQueries,
         CreditAvailabilityService creditAvailabilityService,
         CreditJobPaymentService creditJobPaymentService,
@@ -35,6 +39,7 @@ public sealed class DetailsModel : PageModel
         ReceiptConfiguration receiptConfiguration)
     {
         ArgumentNullException.ThrowIfNull(jobQueries);
+        ArgumentNullException.ThrowIfNull(financialDocumentQueries);
         ArgumentNullException.ThrowIfNull(creditQueries);
         ArgumentNullException.ThrowIfNull(creditAvailabilityService);
         ArgumentNullException.ThrowIfNull(creditJobPaymentService);
@@ -43,6 +48,7 @@ public sealed class DetailsModel : PageModel
         ArgumentNullException.ThrowIfNull(receiptConfiguration);
 
         _jobQueries = jobQueries;
+        _financialDocumentQueries = financialDocumentQueries;
         _creditQueries = creditQueries;
         _creditAvailabilityService = creditAvailabilityService;
         _creditJobPaymentService = creditJobPaymentService;
@@ -55,7 +61,10 @@ public sealed class DetailsModel : PageModel
 
     public CustomerJobPaymentOptions? PaymentOptions { get; private set; }
 
+    public Guid? FinancialDocumentId { get; private set; }
+
     public bool CanDownloadReceipt =>
+        !FinancialDocumentId.HasValue &&
         _receiptConfiguration.Enabled &&
         Presentation.Job.PaymentStatus == JobPaymentStatus.Paid;
 
@@ -141,8 +150,9 @@ public sealed class DetailsModel : PageModel
         Guid id,
         CancellationToken cancellationToken)
     {
+        var customerUserId = RequireCustomerUserId();
         var job = await _jobQueries.FindForCustomerAsync(
-            RequireCustomerUserId(),
+            customerUserId,
             id,
             cancellationToken);
 
@@ -154,6 +164,26 @@ public sealed class DetailsModel : PageModel
         Presentation = await _composer.ComposeAsync(
             job,
             cancellationToken);
+
+        if (
+            job.PaymentStatus == JobPaymentStatus.Paid &&
+            job.SettlementType == JobSettlementType.DirectPayment &&
+            job.SettlementReferenceId.HasValue)
+        {
+            var documentIds = await _financialDocumentQueries
+                .FindDocumentIdsBySourceForCustomerAsync(
+                    customerUserId,
+                    FinancialDocumentSourceType.Payment,
+                    [job.SettlementReferenceId.Value],
+                    cancellationToken);
+
+            if (documentIds.TryGetValue(
+                job.SettlementReferenceId.Value,
+                out var financialDocumentId))
+            {
+                FinancialDocumentId = financialDocumentId;
+            }
+        }
 
         if (
             job.ProductionStatus ==

@@ -1,6 +1,8 @@
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
@@ -14,6 +16,7 @@ public sealed class JobPaymentReceiptService
     private readonly IJobQueries _jobQueries;
     private readonly ICreditQueries _creditQueries;
     private readonly IPaymentQueries _paymentQueries;
+    private readonly IFinancialDocumentQueries _financialDocumentQueries;
     private readonly IAccessUserQueries _accessUserQueries;
     private readonly IServiceUnitQueries _serviceUnitQueries;
     private readonly ReceiptConfiguration _configuration;
@@ -22,6 +25,7 @@ public sealed class JobPaymentReceiptService
         IJobQueries jobQueries,
         ICreditQueries creditQueries,
         IPaymentQueries paymentQueries,
+        IFinancialDocumentQueries financialDocumentQueries,
         IAccessUserQueries accessUserQueries,
         IServiceUnitQueries serviceUnitQueries,
         ReceiptConfiguration configuration)
@@ -29,6 +33,7 @@ public sealed class JobPaymentReceiptService
         ArgumentNullException.ThrowIfNull(jobQueries);
         ArgumentNullException.ThrowIfNull(creditQueries);
         ArgumentNullException.ThrowIfNull(paymentQueries);
+        ArgumentNullException.ThrowIfNull(financialDocumentQueries);
         ArgumentNullException.ThrowIfNull(accessUserQueries);
         ArgumentNullException.ThrowIfNull(serviceUnitQueries);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -36,6 +41,7 @@ public sealed class JobPaymentReceiptService
         _jobQueries = jobQueries;
         _creditQueries = creditQueries;
         _paymentQueries = paymentQueries;
+        _financialDocumentQueries = financialDocumentQueries;
         _accessUserQueries = accessUserQueries;
         _serviceUnitQueries = serviceUnitQueries;
         _configuration = configuration;
@@ -70,6 +76,21 @@ public sealed class JobPaymentReceiptService
             ?? throw Inconsistent(job, "chybí reference úhrady");
         var settledAt = job.SettledAt
             ?? throw Inconsistent(job, "chybí čas úhrady");
+
+        if (settlementType == JobSettlementType.DirectPayment)
+        {
+            var documentIds = await _financialDocumentQueries
+                .FindDocumentIdsBySourceForCustomerAsync(
+                    customerUserId,
+                    FinancialDocumentSourceType.Payment,
+                    [settlementReferenceId],
+                    cancellationToken);
+
+            if (documentIds.ContainsKey(settlementReferenceId))
+            {
+                return null;
+            }
+        }
 
         var users = await _accessUserQueries.FindOptionsAsync(
             [job.CustomerUserId],

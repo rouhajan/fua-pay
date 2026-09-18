@@ -35,9 +35,24 @@
                     <tbody>
                     @foreach (var movement in Model.Movements.Items)
                     {
+                        var hasFinancialDocument =
+                            Model.FinancialDocumentIdsByOperationId.TryGetValue(
+                                movement.OperationId,
+                                out var financialDocumentId);
                         <tr>
                             <td class="credit-history-date">@DashboardDisplay.FormatDate(movement.RecordedAt)</td>
-                            <td class="credit-history-description">@movement.Description</td>
+                            <td class="credit-history-description">
+                                @movement.Description
+                                @if (hasFinancialDocument)
+                                {
+                                    <br />
+                                    <a asp-page="/Customer/FinancialDocuments/Download"
+                                       asp-route-id="@financialDocumentId"
+                                       class="text-link">
+                                        Doklad o úhradě
+                                    </a>
+                                }
+                            </td>
                             <td class="credit-history-amount"><strong class="@DashboardDisplay.MovementCssClass(movement.Type)">@DashboardDisplay.FormatMovementAmount(movement)</strong></td>
                             <td class="credit-history-balance" data-label="Zůstatek">@DashboardDisplay.FormatMoney(movement.BalanceAfterMinorUnits)</td>
                         </tr>

@@ -136,6 +136,153 @@ public sealed class FinancialDocumentTests
     }
 
     [Fact]
+    public void CreateCardWalletTopUp_UsesCanonicalShapeAndVersions()
+    {
+        var paymentId = Guid.NewGuid();
+        var provider = new FinancialDocumentProviderSnapshot(
+            "Csob",
+            "pay-id",
+            "123456789");
+
+        var document = FinancialDocument.CreateCardWalletTopUp(
+            Guid.NewGuid(),
+            "FUA-2026-000001",
+            paymentId,
+            new FinancialDocumentCustomerSnapshot(
+                Guid.NewGuid(),
+                "Customer",
+                "customer@example.test"),
+            2_500,
+            "CZK",
+            IssuedAt.AddMinutes(-1),
+            IssuedAt,
+            CreateTestIssuer(),
+            FinancialDocumentTaxPolicy.CreateApprovedSnapshot(2_500),
+            provider);
+
+        Assert.Equal(
+            FinancialDocumentType.CardWalletTopUp,
+            document.DocumentType);
+        Assert.Equal(
+            FinancialDocumentSourceType.Payment,
+            document.SourceType);
+        Assert.Equal(paymentId, document.SourceId);
+        Assert.Equal(
+            FinancialDocumentSettlementMethod.PaymentProvider,
+            document.SettlementMethod);
+        Assert.Equal(
+            FinancialDocument.CurrentSchemaVersion,
+            document.SchemaVersion);
+        Assert.Equal(
+            FinancialDocument.CurrentRenderVersion,
+            document.RenderVersion);
+        Assert.Same(provider, document.Provider);
+        Assert.Null(document.Job);
+    }
+
+    [Fact]
+    public void CreateDirectJobCardPayment_UsesCanonicalShapeAndVersions()
+    {
+        var paymentId = Guid.NewGuid();
+        var provider = new FinancialDocumentProviderSnapshot(
+            "Csob",
+            "pay-id",
+            "123456789");
+        var job = new FinancialDocumentJobSnapshot(
+            Guid.NewGuid(),
+            "FUA-2026-000001",
+            "Model",
+            "Tisk modelu",
+            "Dílna");
+
+        var document = FinancialDocument.CreateDirectJobCardPayment(
+            Guid.NewGuid(),
+            "FUA-2026-000001",
+            paymentId,
+            new FinancialDocumentCustomerSnapshot(
+                Guid.NewGuid(),
+                "Customer",
+                null),
+            2_500,
+            "CZK",
+            IssuedAt.AddMinutes(-1),
+            IssuedAt,
+            CreateTestIssuer(),
+            FinancialDocumentTaxPolicy.CreateApprovedSnapshot(2_500),
+            provider,
+            job);
+
+        Assert.Equal(
+            FinancialDocumentType.DirectJobCardPayment,
+            document.DocumentType);
+        Assert.Equal(
+            FinancialDocumentSourceType.Payment,
+            document.SourceType);
+        Assert.Equal(paymentId, document.SourceId);
+        Assert.Equal(
+            FinancialDocumentSettlementMethod.PaymentProvider,
+            document.SettlementMethod);
+        Assert.Equal(
+            FinancialDocument.CurrentSchemaVersion,
+            document.SchemaVersion);
+        Assert.Equal(
+            FinancialDocument.CurrentRenderVersion,
+            document.RenderVersion);
+        Assert.Same(provider, document.Provider);
+        Assert.Same(job, document.Job);
+    }
+
+    [Fact]
+    public void CreateDirectJobCardPayment_RequiresProviderAndJobSnapshots()
+    {
+        var customer = new FinancialDocumentCustomerSnapshot(
+            Guid.NewGuid(),
+            "Customer",
+            null);
+        var issuer = CreateTestIssuer();
+        var tax = FinancialDocumentTaxPolicy.CreateApprovedSnapshot(2_500);
+        var provider = new FinancialDocumentProviderSnapshot(
+            "Csob",
+            "pay-id",
+            "123456789");
+        var job = new FinancialDocumentJobSnapshot(
+            Guid.NewGuid(),
+            "FUA-2026-000001",
+            "Model",
+            "Tisk modelu",
+            "Dílna");
+
+        Assert.Throws<ArgumentException>(
+            () => FinancialDocument.CreateDirectJobCardPayment(
+                Guid.NewGuid(),
+                "FUA-2026-000001",
+                Guid.NewGuid(),
+                customer,
+                2_500,
+                "CZK",
+                IssuedAt,
+                IssuedAt,
+                issuer,
+                tax,
+                null!,
+                job));
+        Assert.Throws<ArgumentException>(
+            () => FinancialDocument.CreateDirectJobCardPayment(
+                Guid.NewGuid(),
+                "FUA-2026-000001",
+                Guid.NewGuid(),
+                customer,
+                2_500,
+                "CZK",
+                IssuedAt,
+                IssuedAt,
+                issuer,
+                tax,
+                provider,
+                null!));
+    }
+
+    [Fact]
     public void Constructor_ManualTopUpRejectsInventedProviderOrJob()
     {
         Assert.Throws<ArgumentException>(

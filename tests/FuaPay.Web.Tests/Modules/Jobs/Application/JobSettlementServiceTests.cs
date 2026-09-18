@@ -11,7 +11,7 @@ public sealed class JobSettlementServiceTests
         new(2026, 7, 26, 16, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task ConfirmAsync_PublishedJob_Saves()
+    public async Task ConfirmAndGetAsync_PublishedJob_ReturnsSavedJob()
     {
         var job = CreatePublishedJob();
         var referenceId = Guid.NewGuid();
@@ -23,12 +23,13 @@ public sealed class JobSettlementServiceTests
 
         var service = CreateService(repository);
 
-        var wasApplied = await service.ConfirmAsync(
+        var (settledJob, wasApplied) = await service.ConfirmAndGetAsync(
             job.Id,
             JobSettlementType.Credit,
             referenceId);
 
         Assert.True(wasApplied);
+        Assert.Same(job, settledJob);
         Assert.Equal(JobPaymentStatus.Paid, job.PaymentStatus);
         Assert.Equal(JobSettlementType.Credit, job.SettlementType);
         Assert.Equal(referenceId, job.SettlementReferenceId);

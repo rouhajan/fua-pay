@@ -74,6 +74,112 @@ public sealed class FinancialDocumentPersistenceTests :
     }
 
     [Fact]
+    public async Task Queries_MapOwnedDocumentIdsByExactSourceTypeWithoutTracking()
+    {
+        var customerUserId = Guid.NewGuid();
+        var foreignCustomerUserId = Guid.NewGuid();
+        var sharedSourceId = Guid.NewGuid();
+        var secondPaymentSourceId = Guid.NewGuid();
+        var foreignPaymentSourceId = Guid.NewGuid();
+        var unknownSourceId = Guid.NewGuid();
+        var issuedAt = UtcInstant(PersistenceYear, 5, 2, 10, 0);
+        var firstPaymentDocument = CreateCurrentWalletDocument(
+            "FUA-2096-900010",
+            sharedSourceId,
+            customerUserId,
+            issuedAt);
+        var secondPaymentDocument = CreateCurrentWalletDocument(
+            "FUA-2096-900011",
+            secondPaymentSourceId,
+            customerUserId,
+            issuedAt.AddMinutes(1));
+        var sameSourceManualDocument = CreateCurrentManualDocument(
+            "FUA-2096-900012",
+            sharedSourceId,
+            customerUserId,
+            issuedAt.AddMinutes(2));
+        var foreignPaymentDocument = CreateCurrentWalletDocument(
+            "FUA-2096-900013",
+            foreignPaymentSourceId,
+            foreignCustomerUserId,
+            issuedAt.AddMinutes(3));
+
+        try
+        {
+            await PersistAsync(
+                firstPaymentDocument,
+                secondPaymentDocument,
+                sameSourceManualDocument,
+                foreignPaymentDocument);
+            using var scope = _factory.Services.CreateScope();
+            var queries = scope.ServiceProvider
+                .GetRequiredService<IFinancialDocumentQueries>();
+
+            var paymentDocuments =
+                await queries.FindDocumentIdsBySourceForCustomerAsync(
+                    customerUserId,
+                    FinancialDocumentSourceType.Payment,
+                    [
+                        sharedSourceId,
+                        secondPaymentSourceId,
+                        sharedSourceId,
+                        foreignPaymentSourceId,
+                        unknownSourceId,
+                        Guid.Empty
+                    ]);
+            var manualDocuments =
+                await queries.FindDocumentIdsBySourceForCustomerAsync(
+                    customerUserId,
+                    FinancialDocumentSourceType.ManualCreditTopUp,
+                    [sharedSourceId]);
+            var wrongSourceType =
+                await queries.FindDocumentIdsBySourceForCustomerAsync(
+                    customerUserId,
+                    FinancialDocumentSourceType.ManualCreditTopUp,
+                    [secondPaymentSourceId]);
+            var foreignOwner =
+                await queries.FindDocumentIdsBySourceForCustomerAsync(
+                    foreignCustomerUserId,
+                    FinancialDocumentSourceType.Payment,
+                    [sharedSourceId, secondPaymentSourceId]);
+            var empty = await queries.FindDocumentIdsBySourceForCustomerAsync(
+                customerUserId,
+                FinancialDocumentSourceType.Payment,
+                []);
+            var onlyEmpty =
+                await queries.FindDocumentIdsBySourceForCustomerAsync(
+                    customerUserId,
+                    FinancialDocumentSourceType.Payment,
+                    [Guid.Empty, Guid.Empty]);
+
+            Assert.Equal(2, paymentDocuments.Count);
+            Assert.Equal(
+                firstPaymentDocument.DocumentId,
+                paymentDocuments[sharedSourceId]);
+            Assert.Equal(
+                secondPaymentDocument.DocumentId,
+                paymentDocuments[secondPaymentSourceId]);
+            Assert.Equal(
+                sameSourceManualDocument.DocumentId,
+                manualDocuments[sharedSourceId]);
+            Assert.Empty(wrongSourceType);
+            Assert.Empty(foreignOwner);
+            Assert.Empty(empty);
+            Assert.Empty(onlyEmpty);
+            Assert.Empty(scope.ServiceProvider
+                .GetRequiredService<FuaPayDbContext>()
+                .ChangeTracker.Entries());
+        }
+        finally
+        {
+            await DeleteDocumentsBySourceAsync(
+                sharedSourceId,
+                secondPaymentSourceId,
+                foreignPaymentSourceId);
+        }
+    }
+
+    [Fact]
     public async Task TaxColumns_AreAdditiveAndConstraintEnforcesApprovedMathematicalSplit()
     {
         var sourceId = Guid.NewGuid();
@@ -706,6 +812,50 @@ public sealed class FinancialDocumentPersistenceTests :
             null,
             1,
             1);
+
+    private static FinancialDocument CreateCurrentManualDocument(
+        string documentNumber,
+        Guid sourceId,
+        Guid customerUserId,
+        DateTimeOffset issuedAt) =>
+        FinancialDocument.CreateManualCreditTopUp(
+            Guid.NewGuid(),
+            documentNumber,
+            sourceId,
+            new FinancialDocumentCustomerSnapshot(
+                customerUserId,
+                "Testovací zákazník",
+                "customer@example.test"),
+            2_500,
+            "CZK",
+            issuedAt.AddMinutes(-1),
+            issuedAt,
+            CreateTestIssuer(),
+            FinancialDocumentTaxPolicy.CreateApprovedSnapshot(2_500));
+
+    private static FinancialDocument CreateCurrentWalletDocument(
+        string documentNumber,
+        Guid sourceId,
+        Guid customerUserId,
+        DateTimeOffset issuedAt) =>
+        FinancialDocument.CreateCardWalletTopUp(
+            Guid.NewGuid(),
+            documentNumber,
+            sourceId,
+            new FinancialDocumentCustomerSnapshot(
+                customerUserId,
+                "Testovací zákazník",
+                "wallet-customer@example.test"),
+            3_500,
+            "CZK",
+            issuedAt.AddMinutes(-1),
+            issuedAt,
+            CreateTestIssuer(),
+            FinancialDocumentTaxPolicy.CreateApprovedSnapshot(3_500),
+            new FinancialDocumentProviderSnapshot(
+                "Csob",
+                "test-wallet-reference",
+                "209600010"));
 
     private static FinancialDocument CreateDirectJobPaymentDocument(
         string documentNumber,

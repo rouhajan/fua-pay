@@ -1,6 +1,6 @@
 # Demo / staging deployment
 
-Status: 2026-09-15
+Status: 2026-09-18
 
 Tento soubor popisuje aktuální staging runtime a staging deployment evidence.
 Kanonické vytváření/installace release artefaktu je v
@@ -14,41 +14,44 @@ a následná úspěšná expiry acceptance v
 
 ## Aktuální runtime
 
-Ověřeno přímo na staging VM 2026-09-15 po deploymentu aktuálního `main`:
+Ověřeno přímo na staging VM 2026-09-18 po deploymentu FinancialDocuments
+Stage D release kandidáta:
 
 - URL: `https://fuapay.tul.cz`.
 - Alternate URL: `https://fuapay.fa.tul.cz` -> canonical URL.
-- Git `main`: `9ecee2d9c57d88a2969d42094e49597b41f1642c`.
+- Aktivní runtime SHA:
+  `a6d012012679992e221769d8719460a81cb88e29`.
 - Aktivní release:
-  `/opt/fuapay/releases/9ecee2d9c57d88a2969d42094e49597b41f1642c`.
-- Běžící executable:
-  `/opt/fuapay/releases/9ecee2d9c57d88a2969d42094e49597b41f1642c/FuaPay.Web`.
+  `/opt/fuapay/releases/a6d012012679992e221769d8719460a81cb88e29`.
+- Běžící executable přesně odpovídá aktivnímu release.
 - `fuapay.service`: active.
 - Service account: `fuapay:fuapay`.
 - Kestrel: `127.0.0.1:5080` behind Nginx.
 - Configuration: `/etc/fuapay/staging.env`.
 - Database: `fuapay_demo`.
-- Databáze má 21 aplikovaných EF migrací; dvě nové migrace nasazené 2026-09-15
-  jsou `20260913162532_AddManualCreditTopUps` a
-  `20260914080618_AddPersistentPrintCredentials`.
+- Databáze má 24 aplikovaných EF migrací; Stage D nepřidal novou migraci.
 - `Database__ApplyMigrationsOnStart=false`.
 - Microsoft Entra login: live and in use.
 - Payment provider: ČSOB integration.
 - Simulated payments: disabled.
 - `/health/ready`: `Healthy`.
-- `/health/workers/csob-reconciliation`: `Healthy`; při post-activation gate byl
-  poslední úspěšný cyklus `2026-09-15T12:48:20.5141938+00:00`, bez failed cycle.
+- `/health/workers/csob-reconciliation`: `Healthy`, bez failed cycle.
 - Canonical HTTPS smoke: HTTP 200.
 - Plain HTTP canonical URL: HTTP 301.
 - Alternate HTTPS URL: HTTP 301.
-- Ve `/etc/fuapay/staging.env` nejsou položky `PrintPayments__*` ani
-  `PrintCredentials__*`; committed defaults obou feature jsou `Enabled=false`.
+- FinancialDocuments live acceptance:
+  card wallet top-up PASS, direct card job payment PASS, negative
+  Failed/Cancelled/Expired boundary PASS, repeated PDF/read idempotence PASS.
+- Detailní evidence:
+  [FinancialDocuments v2 Stage D staging acceptance 2026-09-18](../testing/financial-documents-v2-stage-d-staging-acceptance-2026-09-18.md).
+- Mobile smoke byl 2026-09-18 explicitně odložen a není označen jako PASS.
 - Production ČSOB traffic and production database workload: not active.
+- PrintPayments / PrintCredentials zůstávají provozně vypnuté do samostatného
+  FUA Print E2E auditu a acceptance.
 
-ČSOB 30min expiry acceptance na předchozím release `bc868276...` dne
-2026-09-14 je PASS: browser return `130/6`, následný podepsaný server status
-`0/6`, interní stav `Expired` a žádný finanční efekt. Konkrétní root cause
-incidentu z 2026-09-13 zůstává neprokázaný.
+Poznámka: dokumentační commit, který tento stav zapisuje, není nový runtime
+deployment. Staging zůstává na přesném kódu `a6d0120...` až do dalšího
+výslovného deploymentu.
 
 ## Staging PostgreSQL deployment/auth model
 

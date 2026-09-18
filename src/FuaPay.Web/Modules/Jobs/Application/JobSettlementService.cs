@@ -29,6 +29,21 @@ public sealed class JobSettlementService
         Guid settlementReferenceId,
         CancellationToken cancellationToken = default)
     {
+        var (_, wasApplied) = await ConfirmAndGetAsync(
+            jobId,
+            settlementType,
+            settlementReferenceId,
+            cancellationToken);
+
+        return wasApplied;
+    }
+
+    public async Task<(Job Job, bool WasApplied)> ConfirmAndGetAsync(
+        Guid jobId,
+        JobSettlementType settlementType,
+        Guid settlementReferenceId,
+        CancellationToken cancellationToken = default)
+    {
         ValidateJobId(jobId);
 
         var job = await _repository.FindByIdAsync(
@@ -48,7 +63,7 @@ public sealed class JobSettlementService
 
         if (!wasApplied)
         {
-            return false;
+            return (job, false);
         }
 
         _auditTrail.Stage(AuditEntry.ForProcess(
@@ -63,7 +78,7 @@ public sealed class JobSettlementService
             job,
             cancellationToken);
 
-        return true;
+        return (job, true);
     }
 
     private static void ValidateJobId(Guid jobId)

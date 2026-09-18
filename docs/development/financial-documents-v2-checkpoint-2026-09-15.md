@@ -1,10 +1,58 @@
 # FinancialDocuments v2 – implementation checkpoint 2026-09-15
 
-Status: authoritative continuation checkpoint for `feature/financial-documents-v2`.
+Status: authoritative continuation checkpoint for `feature/financial-documents-v2`; updated 2026-09-18 after Stage D core staging acceptance.
 
 This file exists so work can resume after a chat/session interruption without reconstructing design decisions from memory. It records only verified repository state, agreed invariants, the next implementation sequence, explicit stop conditions, and the definition of done.
 
 The normative financial-document contract is `docs/features/financial-documents.md`. If this checkpoint and that contract ever conflict, stop and reconcile the documentation before changing runtime code.
+
+
+## 2026-09-18 Stage D staging acceptance update
+
+Stage D core runtime acceptance is now proven on exact staging SHA
+`a6d012012679992e221769d8719460a81cb88e29`.
+
+Durable evidence is recorded in
+[`docs/testing/financial-documents-v2-stage-d-staging-acceptance-2026-09-18.md`](../testing/financial-documents-v2-stage-d-staging-acceptance-2026-09-18.md).
+
+Verified live outcomes include:
+
+- deployment artifact / SHA / backup / side-by-side install / activation gates;
+- staging DB at 24/24 migrations, with no Stage D schema change;
+- card wallet top-up -> exactly one credit effect and one
+  `CardWalletTopUp` FinancialDocument;
+- direct card job payment -> exactly one direct settlement and one
+  `DirectJobCardPayment` FinancialDocument;
+- document numbers `FUA-2026-000002` and `FUA-2026-000003` continued the
+  existing annual sequence after the earlier manual-top-up
+  `FUA-2026-000001`;
+- both PDFs rendered the persisted issuer/tax/job snapshots correctly;
+- repeated PDF downloads and page refreshes did not create another document,
+  money effect or document number;
+- Failed (5), Cancelled (2) and Expired (1) staging ČSOB payments had zero
+  FinancialDocuments; no payment-backed document pointed at any non-Succeeded
+  payment;
+- the known payment detail polling limitation remains: status can change to
+  Succeeded without a full reload, while the newly available document block
+  appears after a normal page refresh;
+- a separate old payment-recovery rest was reproduced on
+  `PLT-2026-000010`: an historical `Created` payment with an
+  `Uncertain` initiation and no provider reference/process URI remains a
+  blocking job payment and sends "Zaplatit přímo" back to the stuck payment
+  detail. No data was manually modified; a fresh job was used for Stage D
+  acceptance.
+
+Not claimed as complete in this checkpoint:
+
+- mobile smoke was explicitly skipped on 2026-09-18;
+- live immutable-snapshot mutation after profile/config change was not repeated
+  during this acceptance;
+- project-level ČSOB production activation and FUA Print E2E remain separate.
+
+Work now moves to the FUA Print runtime / persistent email + print-code path.
+FUA Pay remains the sole financial authority, and PrintPayments /
+PrintCredentials must not be enabled until the real runtime/client and credit
+lifecycle are proven end-to-end.
 
 ## Repository anchors
 

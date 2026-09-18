@@ -54,7 +54,21 @@
         <p class="preserve-lines">@job.Description</p>
     </section>
 
-    @if (Model.CanDownloadReceipt)
+    @if (Model.FinancialDocumentId.HasValue)
+    {
+        <section class="data-panel">
+            <div class="data-panel-header"><h2>Doklad o úhradě</h2></div>
+            <p>Formální doklad k této úhradě je k dispozici jako PDF.</p>
+            <div class="form-actions">
+                <a asp-page="/Customer/FinancialDocuments/Download"
+                   asp-route-id="@Model.FinancialDocumentId.Value"
+                   class="secondary-button">
+                    Stáhnout PDF
+                </a>
+            </div>
+        </section>
+    }
+    else if (Model.CanDownloadReceipt)
     {
         <section class="data-panel">
             <div class="data-panel-header"><h2>Potvrzení o úhradě</h2></div>

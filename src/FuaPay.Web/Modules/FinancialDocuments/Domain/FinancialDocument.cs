@@ -153,6 +153,73 @@ public sealed partial class FinancialDocument
             CurrentRenderVersion);
     }
 
+    public static FinancialDocument CreateCardWalletTopUp(
+        Guid documentId,
+        string documentNumber,
+        Guid paymentId,
+        FinancialDocumentCustomerSnapshot customer,
+        long amountMinorUnits,
+        string currency,
+        DateTimeOffset financialEventAt,
+        DateTimeOffset issuedAt,
+        FinancialDocumentIssuerSnapshot issuer,
+        FinancialDocumentTaxSnapshot tax,
+        FinancialDocumentProviderSnapshot provider)
+    {
+        return new FinancialDocument(
+            documentId,
+            documentNumber,
+            FinancialDocumentType.CardWalletTopUp,
+            FinancialDocumentSourceType.Payment,
+            paymentId,
+            customer,
+            amountMinorUnits,
+            currency,
+            financialEventAt,
+            issuedAt,
+            FinancialDocumentSettlementMethod.PaymentProvider,
+            issuer,
+            tax,
+            provider,
+            null,
+            CurrentSchemaVersion,
+            CurrentRenderVersion);
+    }
+
+    public static FinancialDocument CreateDirectJobCardPayment(
+        Guid documentId,
+        string documentNumber,
+        Guid paymentId,
+        FinancialDocumentCustomerSnapshot customer,
+        long amountMinorUnits,
+        string currency,
+        DateTimeOffset financialEventAt,
+        DateTimeOffset issuedAt,
+        FinancialDocumentIssuerSnapshot issuer,
+        FinancialDocumentTaxSnapshot tax,
+        FinancialDocumentProviderSnapshot provider,
+        FinancialDocumentJobSnapshot job)
+    {
+        return new FinancialDocument(
+            documentId,
+            documentNumber,
+            FinancialDocumentType.DirectJobCardPayment,
+            FinancialDocumentSourceType.Payment,
+            paymentId,
+            customer,
+            amountMinorUnits,
+            currency,
+            financialEventAt,
+            issuedAt,
+            FinancialDocumentSettlementMethod.PaymentProvider,
+            issuer,
+            tax,
+            provider,
+            job,
+            CurrentSchemaVersion,
+            CurrentRenderVersion);
+    }
+
     private static void ValidateVersionedSnapshot(
         int schemaVersion,
         int renderVersion,

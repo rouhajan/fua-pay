@@ -16,6 +16,44 @@ internal sealed class EfFinancialDocumentQueries : IFinancialDocumentQueries
         _dbContext = dbContext;
     }
 
+    public async Task<IReadOnlyDictionary<Guid, Guid>>
+        FindDocumentIdsBySourceForCustomerAsync(
+            Guid customerUserId,
+            FinancialDocumentSourceType sourceType,
+            IEnumerable<Guid> sourceIds,
+            CancellationToken cancellationToken = default)
+    {
+        ValidateId(customerUserId, nameof(customerUserId));
+        ValidateSourceType(sourceType);
+        ArgumentNullException.ThrowIfNull(sourceIds);
+
+        var normalizedSourceIds = sourceIds
+            .Where(sourceId => sourceId != Guid.Empty)
+            .Distinct()
+            .ToArray();
+
+        if (normalizedSourceIds.Length == 0)
+        {
+            return new Dictionary<Guid, Guid>();
+        }
+
+        return await _dbContext.FinancialDocuments
+            .AsNoTracking()
+            .Where(document =>
+                document.CustomerUserId == customerUserId &&
+                document.SourceType == (int)sourceType &&
+                normalizedSourceIds.Contains(document.SourceId))
+            .Select(document => new
+            {
+                document.SourceId,
+                document.DocumentId
+            })
+            .ToDictionaryAsync(
+                document => document.SourceId,
+                document => document.DocumentId,
+                cancellationToken);
+    }
+
     public async Task<FinancialDocument?> FindByIdForCustomerAsync(
         Guid documentId,
         Guid customerUserId,
@@ -61,6 +99,17 @@ internal sealed class EfFinancialDocumentQueries : IFinancialDocumentQueries
             throw new ArgumentException(
                 "ID nesmí být prázdné.",
                 parameterName);
+        }
+    }
+
+    private static void ValidateSourceType(
+        FinancialDocumentSourceType sourceType)
+    {
+        if (
+            sourceType == FinancialDocumentSourceType.Unknown ||
+            !Enum.IsDefined(sourceType))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceType));
         }
     }
 }

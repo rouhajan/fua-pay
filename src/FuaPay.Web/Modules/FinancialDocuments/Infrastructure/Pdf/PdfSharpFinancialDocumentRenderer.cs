@@ -158,11 +158,12 @@ internal sealed class PdfSharpFinancialDocumentRenderer :
 
         if (document.DocumentType is not (
             FinancialDocumentType.ManualCreditTopUp or
+            FinancialDocumentType.CardWalletTopUp or
             FinancialDocumentType.DirectJobCardPayment))
         {
             throw new FinancialDocumentRenderUnavailableException(
                 FinancialDocumentRenderUnavailableReason.UnsupportedDocumentType,
-                $"Document type '{document.DocumentType}' is not renderable in Stage C.");
+                $"Document type '{document.DocumentType}' is not renderable.");
         }
     }
 
@@ -355,7 +356,9 @@ internal sealed record FinancialDocumentPdfContent(
         return new FinancialDocumentPdfContent(
             "Doklad o úhradě",
             document.DocumentNumber,
-            document.DocumentType == FinancialDocumentType.ManualCreditTopUp
+            document.DocumentType is (
+                FinancialDocumentType.ManualCreditTopUp or
+                FinancialDocumentType.CardWalletTopUp)
                 ? "Dobití kreditu"
                 : "Úhrada zakázky",
             details,

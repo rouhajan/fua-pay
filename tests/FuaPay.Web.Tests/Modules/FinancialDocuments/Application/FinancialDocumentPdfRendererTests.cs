@@ -59,37 +59,40 @@ public sealed class FinancialDocumentPdfRendererTests
     }
 
     [Fact]
-    public void Render_CardWalletTypeIsExplicitlyUnsupportedInStageC()
+    public void Render_CardWalletTopUpProducesOnePagePdfWithoutJobDetails()
     {
-        var document = new FinancialDocument(
-            Guid.NewGuid(),
-            "FUA-2026-000001",
-            FinancialDocumentType.CardWalletTopUp,
-            FinancialDocumentSourceType.Payment,
-            Guid.NewGuid(),
-            Customer(),
-            12_100,
-            "CZK",
-            IssuedAt,
-            IssuedAt,
-            FinancialDocumentSettlementMethod.PaymentProvider,
-            Issuer(),
-            FinancialDocumentTaxPolicy.CreateApprovedSnapshot(12_100),
-            new FinancialDocumentProviderSnapshot("ČSOB", "SECRET-PAY-ID", "SECRET-VS"),
-            null,
-            2,
-            2);
+        var document = CreateDocument(
+            FinancialDocumentType.CardWalletTopUp);
 
-        var error = Assert.Throws<FinancialDocumentRenderUnavailableException>(
-            () => CreateRenderer().Render(document));
+        var result = CreateRenderer().Render(document);
+        var content = FinancialDocumentPdfContent.Create(document);
 
         Assert.Equal(
-            FinancialDocumentRenderUnavailableReason.UnsupportedDocumentType,
-            error.Reason);
+            $"doklad-o-uhrade-{document.DocumentNumber}.pdf",
+            result.FileName);
+        Assert.Equal(
+            "%PDF",
+            System.Text.Encoding.ASCII.GetString(result.Content, 0, 4));
+        using var stream = new MemoryStream(result.Content);
+        using var pdf = PdfReader.Open(stream, PdfDocumentOpenMode.Import);
+        Assert.Single(pdf.Pages);
+        Assert.Equal("Dobití kreditu", content.Purpose);
+        Assert.Contains(
+            content.Details,
+            detail =>
+                detail.Label == "Způsob úhrady" &&
+                detail.Value == "Platební karta");
+        Assert.DoesNotContain(
+            content.Details,
+            detail => detail.Label is
+                "Název zakázky" or
+                "Pracoviště" or
+                "Číslo zakázky");
     }
 
     [Theory]
     [InlineData(FinancialDocumentType.ManualCreditTopUp)]
+    [InlineData(FinancialDocumentType.CardWalletTopUp)]
     [InlineData(FinancialDocumentType.DirectJobCardPayment)]
     public void Content_UsesOnlyApprovedVisibleSnapshotFields(
         FinancialDocumentType type)
@@ -117,12 +120,15 @@ public sealed class FinancialDocumentPdfRendererTests
         Assert.DoesNotContain(document.Customer.DisplayName, visible);
         Assert.DoesNotContain(document.Customer.Email!, visible);
         Assert.DoesNotContain(document.SourceId.ToString(), visible);
+        Assert.DoesNotContain("Csob", visible);
         Assert.DoesNotContain("SECRET-PAY-ID", visible);
         Assert.DoesNotContain("SECRET-VS", visible);
         Assert.DoesNotContain("SECRET-DESCRIPTION", visible);
 
         if (type == FinancialDocumentType.DirectJobCardPayment)
         {
+            Assert.Contains("Úhrada zakázky", visible);
+            Assert.Contains("Platební karta", visible);
             Assert.Contains("Model fakulty", visible);
             Assert.Contains("Ateliér", visible);
             Assert.Contains("ZAK-2026-001", visible);
@@ -130,6 +136,14 @@ public sealed class FinancialDocumentPdfRendererTests
         else
         {
             Assert.Contains("Dobití kreditu", visible);
+            Assert.Contains(
+                type == FinancialDocumentType.ManualCreditTopUp
+                    ? "Ruční dobití kreditu"
+                    : "Platební karta",
+                visible);
+            Assert.DoesNotContain("Model fakulty", visible);
+            Assert.DoesNotContain("Ateliér", visible);
+            Assert.DoesNotContain("ZAK-2026-001", visible);
         }
     }
 
@@ -228,7 +242,7 @@ public sealed class FinancialDocumentPdfRendererTests
             issuer,
             FinancialDocumentTaxPolicy.CreateApprovedSnapshot(12_100),
             new FinancialDocumentProviderSnapshot(
-                "ČSOB",
+                "Csob",
                 "SECRET-PAY-ID",
                 "SECRET-VS"),
             new FinancialDocumentJobSnapshot(
@@ -244,11 +258,14 @@ public sealed class FinancialDocumentPdfRendererTests
         FinancialDocumentType type)
     {
         var direct = type == FinancialDocumentType.DirectJobCardPayment;
+        var payment = type is
+            FinancialDocumentType.CardWalletTopUp or
+            FinancialDocumentType.DirectJobCardPayment;
         return new FinancialDocument(
             Guid.NewGuid(),
             "FUA-2026-000001",
             type,
-            direct
+            payment
                 ? FinancialDocumentSourceType.Payment
                 : FinancialDocumentSourceType.ManualCreditTopUp,
             Guid.NewGuid(),
@@ -257,14 +274,14 @@ public sealed class FinancialDocumentPdfRendererTests
             "CZK",
             IssuedAt,
             IssuedAt,
-            direct
+            payment
                 ? FinancialDocumentSettlementMethod.PaymentProvider
                 : FinancialDocumentSettlementMethod.ManualCreditTopUp,
             Issuer(),
             FinancialDocumentTaxPolicy.CreateApprovedSnapshot(12_100),
-            direct
+            payment
                 ? new FinancialDocumentProviderSnapshot(
-                    "ČSOB",
+                    "Csob",
                     "SECRET-PAY-ID",
                     "SECRET-VS")
                 : null,

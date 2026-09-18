@@ -7,7 +7,10 @@ using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
+using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Modules.Receipts.Application;
@@ -384,6 +387,171 @@ public sealed class CustomerPaymentStage2Tests
     }
 
     [Fact]
+    public async Task Details_SucceededCardWalletTopUpUsesExactOwnedDocumentLookup()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, PaymentStatus.Succeeded);
+        var documentId = Guid.NewGuid();
+        var documents = new RecordingFinancialDocumentQueries(
+            customerUserId,
+            FinancialDocumentSourceType.Payment,
+            payment.Id,
+            documentId);
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            financialDocumentQueries: documents);
+
+        var result = await model.OnGetAsync(payment.Id);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Equal(documentId, model.FinancialDocumentId);
+        Assert.False(model.HasLegacyJobReceiptFallback);
+        Assert.Equal(1, documents.SourceLookupCalls);
+        Assert.Equal(customerUserId, documents.LastCustomerUserId);
+        Assert.Equal(
+            FinancialDocumentSourceType.Payment,
+            documents.LastSourceType);
+        Assert.Equal([payment.Id], documents.LastSourceIds);
+    }
+
+    [Fact]
+    public async Task Details_DirectJobCanonicalDocumentSuppressesLegacyReceipt()
+    {
+        var customerUserId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var payment = CreateDetail(
+            customerUserId,
+            PaymentStatus.Succeeded,
+            PaymentPurposeType.Job,
+            jobId);
+        var documentId = Guid.NewGuid();
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            financialDocumentQueries:
+                new RecordingFinancialDocumentQueries(
+                    customerUserId,
+                    FinancialDocumentSourceType.Payment,
+                    payment.Id,
+                    documentId),
+            jobQueries: new RecordingJobQueries(
+                CreateSettledDirectPaymentJob(
+                    customerUserId,
+                    jobId,
+                    payment.Id)),
+            receiptConfiguration: ReceiptConfiguration(enabled: true));
+
+        var result = await model.OnGetAsync(payment.Id);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Equal(documentId, model.FinancialDocumentId);
+        Assert.False(model.HasLegacyJobReceiptFallback);
+    }
+
+    [Fact]
+    public async Task Details_HistoricalDirectJobWithoutDocumentUsesLegacyReceiptFallback()
+    {
+        var customerUserId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var payment = CreateDetail(
+            customerUserId,
+            PaymentStatus.Succeeded,
+            PaymentPurposeType.Job,
+            jobId);
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            financialDocumentQueries:
+                new RecordingFinancialDocumentQueries(),
+            jobQueries: new RecordingJobQueries(
+                CreateSettledDirectPaymentJob(
+                    customerUserId,
+                    jobId,
+                    payment.Id)),
+            receiptConfiguration: ReceiptConfiguration(enabled: true));
+
+        var result = await model.OnGetAsync(payment.Id);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Null(model.FinancialDocumentId);
+        Assert.True(model.HasLegacyJobReceiptFallback);
+    }
+
+    [Fact]
+    public async Task Details_PendingPaymentDoesNotLookUpFormalDocument()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, PaymentStatus.Pending);
+        var documents = new RecordingFinancialDocumentQueries();
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            financialDocumentQueries: documents);
+
+        var result = await model.OnGetAsync(payment.Id);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Null(model.FinancialDocumentId);
+        Assert.Equal(0, documents.SourceLookupCalls);
+    }
+
+    [Theory]
+    [InlineData(PaymentStatus.Failed)]
+    [InlineData(PaymentStatus.Cancelled)]
+    [InlineData(PaymentStatus.Expired)]
+    public async Task Details_UnsuccessfulPaymentDoesNotLookUpFormalDocument(
+        PaymentStatus status)
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, status);
+        var documents = new RecordingFinancialDocumentQueries();
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            financialDocumentQueries: documents);
+
+        var result = await model.OnGetAsync(payment.Id);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Null(model.FinancialDocumentId);
+        Assert.Equal(0, documents.SourceLookupCalls);
+    }
+
+    [Fact]
+    public async Task Details_ForeignOrMissingPaymentDoesNotLeakDocumentLookup()
+    {
+        var ownerId = Guid.NewGuid();
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(ownerId, PaymentStatus.Succeeded);
+        var foreignDocuments = new RecordingFinancialDocumentQueries();
+        var foreignModel = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            financialDocumentQueries: foreignDocuments);
+        var missingDocuments = new RecordingFinancialDocumentQueries();
+        var missingModel = CreateDetailsModel(
+            new RecordingPaymentQueries(payment: null),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            financialDocumentQueries: missingDocuments);
+
+        var foreign = await foreignModel.OnGetAsync(payment.Id);
+        var missing = await missingModel.OnGetAsync(Guid.NewGuid());
+
+        Assert.IsType<NotFoundResult>(foreign);
+        Assert.IsType<NotFoundResult>(missing);
+        Assert.Equal(0, foreignDocuments.SourceLookupCalls);
+        Assert.Equal(0, missingDocuments.SourceLookupCalls);
+    }
+
+    [Fact]
     public void DetailsStatusHandler_RemainsCustomerAuthorized()
     {
         var authorize = Assert.Single(
@@ -475,6 +643,38 @@ public sealed class CustomerPaymentStage2Tests
         Assert.DoesNotContain("<script>", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DetailsPage_UsesCanonicalDownloadBeforeLegacyReceiptFallback()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(
+                FindRepositoryRoot(),
+                "src",
+                "FuaPay.Web",
+                "Pages",
+                "Customer",
+                "Payments",
+                "Details.cshtml"),
+            Encoding.UTF8);
+
+        Assert.Contains(
+            "asp-page=\"/Customer/FinancialDocuments/Download\"",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Model.FinancialDocumentId.HasValue",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "else if (Model.HasLegacyJobReceiptFallback",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "asp-page=\"/Customer/Jobs/Receipt\"",
+            source,
+            StringComparison.Ordinal);
+    }
+
     private static PaymentCreationOutcome CreateOutcome(
         PaymentPurposeType purposeType,
         PaymentCreationDisposition disposition,
@@ -501,13 +701,15 @@ public sealed class CustomerPaymentStage2Tests
 
     private static PaymentDetail CreateDetail(
         Guid customerUserId,
-        PaymentStatus status)
+        PaymentStatus status,
+        PaymentPurposeType purposeType = PaymentPurposeType.CreditTopUp,
+        Guid? jobId = null)
     {
         return new PaymentDetail(
             Guid.NewGuid(),
             customerUserId,
-            PaymentPurposeType.CreditTopUp,
-            JobId: null,
+            purposeType,
+            jobId,
             AmountMinorUnits: 25_000,
             PaymentProvider.Csob,
             status,
@@ -525,23 +727,73 @@ public sealed class CustomerPaymentStage2Tests
         IPaymentProviderInitiator provider,
         Guid customerUserId,
         ICreditQueries? creditQueries = null,
-        CreditAvailabilityService? creditAvailabilityService = null)
+        CreditAvailabilityService? creditAvailabilityService = null,
+        IFinancialDocumentQueries? financialDocumentQueries = null,
+        IJobQueries? jobQueries = null,
+        ReceiptConfiguration? receiptConfiguration = null)
     {
         return new PaymentDetailsModel(
             queries,
+            financialDocumentQueries ??
+                new RecordingFinancialDocumentQueries(),
             creditQueries ?? new RecordingCreditQueries(0),
             creditAvailabilityService ?? new CreditAvailabilityService(
                 new RecordingCreditAvailabilityRepository(0)),
             UnusedDependency<DevelopmentPaymentService>(),
-            new UnusedJobQueries(),
+            jobQueries ?? new UnusedJobQueries(),
             UnusedDependency<PaymentCreationService>(),
             new DevelopmentPaymentAvailability(false),
             provider,
-            UnusedDependency<ReceiptConfiguration>())
+            receiptConfiguration ?? ReceiptConfiguration(enabled: false))
         {
             PageContext = CreatePageContext(customerUserId)
         };
     }
+
+    private static JobDetail CreateSettledDirectPaymentJob(
+        Guid customerUserId,
+        Guid jobId,
+        Guid paymentId) =>
+        new(
+            jobId,
+            "3D-2026-000001",
+            Guid.NewGuid(),
+            customerUserId,
+            customerUserId,
+            ServiceType.ThreeDPrint,
+            "Model",
+            "Description",
+            25_000,
+            JobProductionStatus.Published,
+            JobPaymentStatus.Paid,
+            JobSettlementType.DirectPayment,
+            paymentId,
+            TestTime.AddDays(-1),
+            TestTime.AddHours(-1),
+            TestTime,
+            null,
+            null,
+            null,
+            null,
+            Version: 1);
+
+    private static ReceiptConfiguration ReceiptConfiguration(bool enabled) =>
+        new(
+            enabled,
+            PreviewMode: false,
+            new ReceiptIssuerConfiguration(
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty),
+            VatRatePercent: 21,
+            LogoPath: string.Empty,
+            RegularFontPath: null,
+            BoldFontPath: null);
 
     private static CurrentCreditViewComponent CreateCurrentCreditComponent(
         Guid customerUserId,
@@ -605,6 +857,78 @@ public sealed class CustomerPaymentStage2Tests
         }
 
         throw new DirectoryNotFoundException("FuaPay.slnx was not found.");
+    }
+
+    private sealed class RecordingFinancialDocumentQueries :
+        IFinancialDocumentQueries
+    {
+        private readonly Guid? _customerUserId;
+        private readonly FinancialDocumentSourceType? _sourceType;
+        private readonly Guid? _sourceId;
+        private readonly Guid? _documentId;
+
+        public RecordingFinancialDocumentQueries()
+        {
+        }
+
+        public RecordingFinancialDocumentQueries(
+            Guid customerUserId,
+            FinancialDocumentSourceType sourceType,
+            Guid sourceId,
+            Guid documentId)
+        {
+            _customerUserId = customerUserId;
+            _sourceType = sourceType;
+            _sourceId = sourceId;
+            _documentId = documentId;
+        }
+
+        public int SourceLookupCalls { get; private set; }
+
+        public Guid? LastCustomerUserId { get; private set; }
+
+        public FinancialDocumentSourceType? LastSourceType { get; private set; }
+
+        public IReadOnlyList<Guid> LastSourceIds { get; private set; } = [];
+
+        public Task<IReadOnlyDictionary<Guid, Guid>>
+            FindDocumentIdsBySourceForCustomerAsync(
+                Guid customerUserId,
+                FinancialDocumentSourceType sourceType,
+                IEnumerable<Guid> sourceIds,
+                CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SourceLookupCalls++;
+            LastCustomerUserId = customerUserId;
+            LastSourceType = sourceType;
+            LastSourceIds = sourceIds.ToArray();
+
+            IReadOnlyDictionary<Guid, Guid> result =
+                _customerUserId == customerUserId &&
+                _sourceType == sourceType &&
+                _sourceId.HasValue &&
+                _documentId.HasValue &&
+                LastSourceIds.Contains(_sourceId.Value)
+                    ? new Dictionary<Guid, Guid>
+                    {
+                        [_sourceId.Value] = _documentId.Value
+                    }
+                    : new Dictionary<Guid, Guid>();
+
+            return Task.FromResult(result);
+        }
+
+        public Task<FinancialDocument?> FindByIdForCustomerAsync(
+            Guid documentId,
+            Guid customerUserId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FinancialDocument?> FindByIdForAdminAsync(
+            Guid documentId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class RecordingCreditQueries : ICreditQueries
@@ -778,6 +1102,56 @@ public sealed class CustomerPaymentStage2Tests
         public Task<JobDetail?> FindForCustomerAsync(
             Guid customerUserId,
             Guid jobId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<JobPage<JobListItem>> ListForCustomerAsync(
+            Guid customerUserId,
+            JobListFilter filter,
+            JobPageRequest page,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<ManagementJobSummary> GetManagementSummaryAsync(
+            JobManagementActor actor,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<JobDetail?> FindForManagementAsync(
+            JobManagementActor actor,
+            Guid jobId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<JobPage<JobListItem>> ListForManagementAsync(
+            JobManagementActor actor,
+            JobListFilter filter,
+            JobPageRequest page,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class RecordingJobQueries : IJobQueries
+    {
+        private readonly JobDetail _job;
+
+        public RecordingJobQueries(JobDetail job)
+        {
+            _job = job;
+        }
+
+        public Task<JobDetail?> FindForCustomerAsync(
+            Guid customerUserId,
+            Guid jobId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<JobDetail?>(
+                _job.CustomerUserId == customerUserId &&
+                _job.Id == jobId
+                    ? _job
+                    : null);
+
+        public Task<CustomerJobSummary> GetCustomerSummaryAsync(
+            Guid customerUserId,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

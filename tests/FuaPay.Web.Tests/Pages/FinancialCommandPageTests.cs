@@ -1,13 +1,20 @@
+using System.Security.Claims;
+using System.Text;
+
 using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.Credits.Domain;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
 using FuaPay.Web.Pages.Customer.Payments;
 
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 using CreditIndexModel = FuaPay.Web.Pages.Admin.Credit.IndexModel;
@@ -26,9 +33,115 @@ public sealed class FinancialCommandPageTests
     {
         var model = new CustomerCreditIndexModel(
             new EmptyCreditQueries(),
+            new RecordingFinancialDocumentQueries(),
             new PaymentCreationAvailability(isAvailable));
 
         Assert.Equal(isAvailable, model.CanCreatePayment);
+    }
+
+    [Fact]
+    public async Task CustomerCreditIndex_MapsCurrentPageManualTopUpsInOneOwnedBatch()
+    {
+        var ownerId = Guid.NewGuid();
+        var manualOperationId = Guid.NewGuid();
+        var cardWalletOperationId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var cardWalletDocumentId = Guid.NewGuid();
+        var movements = new RecordingCustomerCreditQueries(
+            [
+                Movement(manualOperationId, "Ruční dobití"),
+                Movement(manualOperationId, "Duplicitní zdroj"),
+                Movement(cardWalletOperationId, "Karetní dobití"),
+                Movement(Guid.Empty, "Bez operace")
+            ]);
+        var documents = new RecordingFinancialDocumentQueries(
+            new Dictionary<
+                (FinancialDocumentSourceType SourceType, Guid SourceId),
+                Guid>
+            {
+                [(FinancialDocumentSourceType.ManualCreditTopUp,
+                    manualOperationId)] = documentId,
+                [(FinancialDocumentSourceType.Payment,
+                    cardWalletOperationId)] = cardWalletDocumentId
+            });
+        var model = new CustomerCreditIndexModel(
+            movements,
+            documents,
+            new PaymentCreationAvailability(true))
+        {
+            PageContext = CreatePageContext(ownerId)
+        };
+
+        await model.OnGetAsync();
+
+        Assert.Equal(ownerId, movements.LastOwnerId);
+        Assert.Equal(1, documents.SourceLookupCalls);
+        Assert.Equal(ownerId, documents.LastCustomerUserId);
+        Assert.Equal(
+            FinancialDocumentSourceType.ManualCreditTopUp,
+            documents.LastSourceType);
+        Assert.Equal(
+            [manualOperationId, cardWalletOperationId],
+            documents.LastSourceIds);
+        Assert.Equal(
+            documentId,
+            model.FinancialDocumentIdsByOperationId[manualOperationId]);
+        Assert.DoesNotContain(
+            cardWalletOperationId,
+            model.FinancialDocumentIdsByOperationId.Keys);
+        Assert.DoesNotContain(
+            Guid.Empty,
+            model.FinancialDocumentIdsByOperationId.Keys);
+    }
+
+    [Fact]
+    public async Task CustomerCreditIndex_EmptyPageUsesEmptyManualDocumentBatch()
+    {
+        var ownerId = Guid.NewGuid();
+        var documents = new RecordingFinancialDocumentQueries();
+        var model = new CustomerCreditIndexModel(
+            new RecordingCustomerCreditQueries([]),
+            documents,
+            new PaymentCreationAvailability(true))
+        {
+            PageContext = CreatePageContext(ownerId)
+        };
+
+        await model.OnGetAsync();
+
+        Assert.Equal(1, documents.SourceLookupCalls);
+        Assert.Equal(ownerId, documents.LastCustomerUserId);
+        Assert.Equal(
+            FinancialDocumentSourceType.ManualCreditTopUp,
+            documents.LastSourceType);
+        Assert.Empty(documents.LastSourceIds);
+        Assert.Empty(model.FinancialDocumentIdsByOperationId);
+    }
+
+    [Fact]
+    public void CustomerCreditIndex_RendersMappedDocumentThroughSecureDownload()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(
+                FindRepositoryRoot(),
+                "src",
+                "FuaPay.Web",
+                "Pages",
+                "Customer",
+                "Credit",
+                "Index.cshtml"),
+            Encoding.UTF8);
+
+        Assert.Contains(
+            "Model.FinancialDocumentIdsByOperationId.TryGetValue",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "asp-page=\"/Customer/FinancialDocuments/Download\"",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains("Doklad o úhradě", source, StringComparison.Ordinal);
+        Assert.Contains("class=\"text-link\"", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -107,6 +220,58 @@ public sealed class FinancialCommandPageTests
             key => key.EndsWith(
                 nameof(input.OwnerId),
                 StringComparison.Ordinal));
+    }
+
+    private static CreditMovementListItem Movement(
+        Guid operationId,
+        string description) =>
+        new(
+            operationId,
+            CreditMovementType.Credit,
+            AmountMinorUnits: 2_500,
+            BalanceAfterMinorUnits: 5_000,
+            description,
+            DateTimeOffset.UtcNow,
+            Sequence: 1);
+
+    private static PageContext CreatePageContext(Guid customerUserId)
+    {
+        var principal = new ClaimsPrincipal(
+            new ClaimsIdentity(
+                [
+                    new Claim(
+                        ClaimTypes.NameIdentifier,
+                        customerUserId.ToString()),
+                    new Claim(
+                        ClaimTypes.Role,
+                        AccessRole.Customer.ToString())
+                ],
+                authenticationType: "test"));
+
+        return new PageContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = principal
+            }
+        };
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "FuaPay.slnx")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("FuaPay.slnx was not found.");
     }
 
     private sealed class NullPaymentRepository : IPaymentRepository
@@ -195,6 +360,114 @@ public sealed class FinancialCommandPageTests
             throw new NotSupportedException();
 
         public Task<JobPage<JobListItem>> ListForManagementAsync(JobManagementActor actor, JobListFilter filter, JobPageRequest page, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class RecordingCustomerCreditQueries : ICreditQueries
+    {
+        private readonly IReadOnlyList<CreditMovementListItem> _movements;
+
+        public RecordingCustomerCreditQueries(
+            IReadOnlyList<CreditMovementListItem> movements)
+        {
+            _movements = movements;
+        }
+
+        public Guid? LastOwnerId { get; private set; }
+
+        public Task<CreditAccountSummary?> FindAccountForOwnerAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken = default)
+        {
+            LastOwnerId = ownerId;
+            return Task.FromResult<CreditAccountSummary?>(null);
+        }
+
+        public Task<CreditMovementPage> ListMovementsForOwnerAsync(
+            Guid ownerId,
+            CreditMovementPageRequest page,
+            CancellationToken cancellationToken = default)
+        {
+            LastOwnerId = ownerId;
+            return Task.FromResult(new CreditMovementPage(
+                _movements,
+                page.Offset,
+                page.Limit,
+                _movements.Count));
+        }
+
+        public Task<CreditAdministrationMovementPage>
+            ListAdministrationMovementsAsync(
+                CreditAdministrationMovementFilter filter,
+                CreditMovementPageRequest page,
+                CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CreditMovementListItem?> FindMovementForOwnerAsync(
+            Guid ownerId,
+            Guid operationId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class RecordingFinancialDocumentQueries :
+        IFinancialDocumentQueries
+    {
+        private readonly IReadOnlyDictionary<
+            (FinancialDocumentSourceType SourceType, Guid SourceId),
+            Guid> _documentIds;
+
+        public RecordingFinancialDocumentQueries(
+            IReadOnlyDictionary<
+                (FinancialDocumentSourceType SourceType, Guid SourceId),
+                Guid>? documentIds = null)
+        {
+            _documentIds = documentIds ??
+                new Dictionary<
+                    (FinancialDocumentSourceType SourceType, Guid SourceId),
+                    Guid>();
+        }
+
+        public int SourceLookupCalls { get; private set; }
+
+        public Guid? LastCustomerUserId { get; private set; }
+
+        public FinancialDocumentSourceType? LastSourceType { get; private set; }
+
+        public IReadOnlyList<Guid> LastSourceIds { get; private set; } = [];
+
+        public Task<IReadOnlyDictionary<Guid, Guid>>
+            FindDocumentIdsBySourceForCustomerAsync(
+                Guid customerUserId,
+                FinancialDocumentSourceType sourceType,
+                IEnumerable<Guid> sourceIds,
+                CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SourceLookupCalls++;
+            LastCustomerUserId = customerUserId;
+            LastSourceType = sourceType;
+            LastSourceIds = sourceIds.ToArray();
+
+            IReadOnlyDictionary<Guid, Guid> result = LastSourceIds
+                .Where(sourceId =>
+                    _documentIds.ContainsKey((sourceType, sourceId)))
+                .ToDictionary(
+                    sourceId => sourceId,
+                    sourceId => _documentIds[(sourceType, sourceId)]);
+
+            return Task.FromResult(result);
+        }
+
+        public Task<FinancialDocument?> FindByIdForCustomerAsync(
+            Guid documentId,
+            Guid customerUserId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FinancialDocument?> FindByIdForAdminAsync(
+            Guid documentId,
+            CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 

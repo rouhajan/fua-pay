@@ -1,5 +1,7 @@
 using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 using FuaPay.Web.Modules.Payments.Application;
 
 using Microsoft.AspNetCore.Authorization;
@@ -13,15 +15,19 @@ public sealed class IndexModel : PageModel
     private const int PageSize = 30;
 
     private readonly ICreditQueries _queries;
+    private readonly IFinancialDocumentQueries _financialDocumentQueries;
     private readonly PaymentCreationAvailability _paymentAvailability;
 
     public IndexModel(
         ICreditQueries queries,
+        IFinancialDocumentQueries financialDocumentQueries,
         PaymentCreationAvailability paymentAvailability)
     {
         ArgumentNullException.ThrowIfNull(queries);
+        ArgumentNullException.ThrowIfNull(financialDocumentQueries);
         ArgumentNullException.ThrowIfNull(paymentAvailability);
         _queries = queries;
+        _financialDocumentQueries = financialDocumentQueries;
         _paymentAvailability = paymentAvailability;
     }
 
@@ -31,6 +37,12 @@ public sealed class IndexModel : PageModel
 
     public CreditMovementPage Movements { get; private set; } =
         new([], 0, PageSize, 0);
+
+    public IReadOnlyDictionary<Guid, Guid> FinancialDocumentIdsByOperationId
+    {
+        get;
+        private set;
+    } = new Dictionary<Guid, Guid>();
 
     public async Task OnGetAsync(
         int offset = 0,
@@ -50,5 +62,19 @@ public sealed class IndexModel : PageModel
                 Math.Max(0, offset),
                 PageSize),
             cancellationToken);
+
+        var operationIds = Movements.Items
+            .Select(movement => movement.OperationId)
+            .Where(operationId => operationId != Guid.Empty)
+            .Distinct()
+            .ToArray();
+
+        FinancialDocumentIdsByOperationId =
+            await _financialDocumentQueries
+                .FindDocumentIdsBySourceForCustomerAsync(
+                    ownerId,
+                    FinancialDocumentSourceType.ManualCreditTopUp,
+                    operationIds,
+                    cancellationToken);
     }
 }
