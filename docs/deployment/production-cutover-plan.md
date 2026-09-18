@@ -93,9 +93,11 @@ vhodný jako párovací podklad, ale neobsahuje autoritativní aktuální zůsta
 Finální částky proto musí přijít z nového SafeQ balance snapshotu po freeze
 starého systému. Raw exporty s osobními údaji zůstávají mimo veřejný Git.
 
-Legacy převod má používat vlastní auditovanou operaci typu
-`Převod kreditu ze SafeQ`; nesmí se maskovat jako nové ruční dobití ani vytvářet
-nový `FinancialDocument` bez skutečného nového příjmu peněz.
+Legacy převod se bude evidovat jako existující **Administrativní korekce** s
+jasným důvodem `Převod zůstatku ze SafeQ`. Nejde o nové ruční dobití ani nový
+externí příjem, proto při této operaci nevzniká nový `FinancialDocument`.
+Párování identity zůstává read-only a každý konkrétní SafeQ -> FUA Pay pár musí
+před finančním zápisem potvrdit administrátor.
 
 ## 5. Microsoft Entra ID
 
@@ -419,7 +421,7 @@ Před skutečným produkčním cutoverem zůstává explicitně:
 - [ ] dokončit finální FUA Print E2E acceptance;
 - [ ] definovat a ověřit bootstrap prvního produkčního Administratora;
 - [ ] připravit finální SafeQ balance export po freeze starého systému;
-- [ ] dokončit adminem potvrzovaný SafeQ -> FUA Pay pairing a idempotentní legacy-credit importer;
+- [ ] dokončit read-only SafeQ -> FUA Pay matching/report nástroj a provozní postup ručně potvrzených administrativních korekcí;
 - [ ] definovat počáteční produkční ServiceUnits/role assignment;
 - [ ] uzavřít otevřené vlastní ČSOB acceptance scénáře;
 - [ ] fresh ČSOB GET/POST echo těsně před activation;
