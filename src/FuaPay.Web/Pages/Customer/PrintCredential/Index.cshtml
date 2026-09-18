@@ -41,33 +41,15 @@
             <div class="data-panel-header">
                 <div>
                     <h2>@(Model.Credential.IsActiveForCurrentEmail ? "Změnit tiskový kód" : "Nastavit tiskový kód")</h2>
-                    <span>Kód zůstává platný, dokud jej nezměníte nebo nezneplatníte.</span>
+                    @if (Model.Credential.CanConfigure)
+                    {
+                        <span>
+                            Pro tisk použijete e-mail <strong>@Model.Credential.CurrentEmail</strong>.
+                            Kód zůstává platný, dokud jej nezměníte nebo nezneplatníte.
+                        </span>
+                    }
                 </div>
             </div>
-
-            <dl class="detail-grid">
-                <div>
-                    <dt>Aktuální e-mail profilu FUA Pay</dt>
-                    <dd>@(Model.Credential.CanConfigure ? Model.Credential.CurrentEmail : "Není k dispozici pro nastavení")</dd>
-                </div>
-                <div>
-                    <dt>Stav</dt>
-                    <dd>
-                        @if (Model.Credential.IsActiveForCurrentEmail)
-                        {
-                            <text>Aktivní pro aktuální e-mail profilu</text>
-                        }
-                        else if (Model.Credential.HasActiveCredential)
-                        {
-                            <text>Aktivní uložený kód; pro aktuální profil není použitelný</text>
-                        }
-                        else
-                        {
-                            <text>Nenastaven</text>
-                        }
-                    </dd>
-                </div>
-            </dl>
 
             @if (Model.Credential.CanConfigure)
             {
