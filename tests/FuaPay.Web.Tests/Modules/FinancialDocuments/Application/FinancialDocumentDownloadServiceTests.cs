@@ -59,6 +59,15 @@ public sealed class FinancialDocumentDownloadServiceTests
 
         public int AdminReads { get; private set; }
 
+        public Task<IReadOnlyDictionary<Guid, Guid>>
+            FindDocumentIdsBySourceForCustomerAsync(
+                Guid customerUserId,
+                FinancialDocumentSourceType sourceType,
+                IEnumerable<Guid> sourceIds,
+                CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, Guid>>(
+                new Dictionary<Guid, Guid>());
+
         public Task<FinancialDocument?> FindByIdForCustomerAsync(
             Guid documentId,
             Guid customerUserId,
