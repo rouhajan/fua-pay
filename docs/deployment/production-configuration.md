@@ -3,6 +3,34 @@
 Repozitář připravuje aplikaci k řízenému nasazení, ale neobsahuje ani nemění
 živý server `fuapay.tul.cz`. Production startuje fail-closed.
 
+## Cílový provozní model: jeden server
+
+FUA Pay nemá mít samostatný dlouhodobě provozovaný staging server ani druhou
+trvale běžící aplikační instanci. Cílový model je jeden produkční VM/server a
+jedna aktivní `fuapay.service`.
+
+Bezpečnost nasazení se neopírá o druhý server, ale o vrstvené ověření před
+aktivací a o rychlý code rollback na stejném hostiteli:
+
+- CI, CodeQL, repository verification a PostgreSQL integration testy proběhnou
+  před nasazením nad izolovanými testovacími databázemi;
+- release se jednou sestaví, zabalí a kryptograficky ověří;
+- na serveru se nový release instaluje side-by-side do
+  `/opt/fuapay/releases/<SHA>`, zatímco aktivní release zůstává beze změny;
+- před aktivací se ověří artefakt, konfigurace, migrace, backup a oprávnění;
+- `/opt/fuapay/current` se přepne atomicky na nový release a restartuje se
+  jediná `fuapay.service`;
+- po aktivaci musí projít bounded health a smoke gate; při chybě se vrátí
+  `/opt/fuapay/current` na předchozí ověřený release;
+- databázové migrace jsou forward-only a code rollback je nesmí automaticky
+  vracet.
+
+Současné staging/demo prostředí je přechodný stav během vývoje, nikoli cílová
+druhá infrastruktura. Před produkčním spuštěním se musí explicitně rozhodnout,
+zda se současná demo databáze archivuje a vytvoří čistá produkční databáze.
+Testovací/acceptance historii nelze bez samostatného rozhodnutí prohlásit za
+produkční data.
+
 ## Povinná konfigurace
 
 Hodnoty níže mají přijít ze service environment/secret store. Skutečná hesla,
@@ -114,10 +142,13 @@ Doporučený řízený postup:
 4. Vygenerovat, zkontrolovat a BOM-aware připravit EF migration SQL podle
    stejného kanonického postupu; execution artefakt aplikovat jako samostatný
    oprávněný databázový krok s `ON_ERROR_STOP=1`.
-5. Nasadit artefakt s výše uvedenou chráněnou konfigurací a zachovat
-   Data Protection key ring.
-6. Ověřit `/health/live` a `/health/ready`, OIDC login/logout, role a jednu
-   řízenou platební cestu. Teprve potom přepnout provoz.
+5. Nainstalovat nový release side-by-side vedle aktivního release, zachovat
+   chráněnou konfiguraci a Data Protection key ring a provést pre-activation
+   kontroly.
+6. Atomicky přepnout `/opt/fuapay/current`, restartovat jedinou
+   `fuapay.service` a ověřit bounded `/health/live`, `/health/ready`,
+   OIDC login/logout, role a řízený smoke scénář. Při selhání vrátit pouze kód
+   na předchozí ověřený release; databázovou migraci automaticky nevracet.
 
 Automatické migrace při startu jsou v produkčním vzoru vypnuté. Rollback kódu
 nesmí automaticky vracet databázovou migraci; kompatibilitu a případný forward
