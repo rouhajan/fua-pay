@@ -2,6 +2,8 @@ using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
@@ -53,6 +55,22 @@ public sealed class JobPaymentReceiptServiceTests
         Assert.Equal("ČSOB", receipt.PaymentProvider);
         Assert.Equal("csob-pay-id", receipt.ProviderReference);
         Assert.Equal(fixture.SettlementReferenceId, receipt.SettlementReferenceId);
+    }
+
+
+    [Fact]
+    public async Task CreateForCustomerJobAsync_DirectPaymentWithCanonicalDocumentReturnsNull()
+    {
+        var fixture = ReceiptFixture.Create(
+            JobSettlementType.DirectPayment,
+            financialDocumentId: Guid.NewGuid());
+
+        var receipt = await fixture.Service.CreateForCustomerJobAsync(
+            fixture.CustomerUserId,
+            fixture.JobId);
+
+        Assert.Null(receipt);
+        Assert.Equal(1, fixture.FinancialDocumentQueries.SourceLookupCount);
     }
 
     [Fact]
@@ -250,6 +268,7 @@ public sealed class JobPaymentReceiptServiceTests
             StubJobQueries jobQueries,
             StubCreditQueries creditQueries,
             StubPaymentQueries paymentQueries,
+            StubFinancialDocumentQueries financialDocumentQueries,
             JobPaymentReceiptService service)
         {
             CustomerUserId = customerUserId;
@@ -259,6 +278,7 @@ public sealed class JobPaymentReceiptServiceTests
             JobQueries = jobQueries;
             CreditQueries = creditQueries;
             PaymentQueries = paymentQueries;
+            FinancialDocumentQueries = financialDocumentQueries;
             Service = service;
         }
 
@@ -269,12 +289,14 @@ public sealed class JobPaymentReceiptServiceTests
         public StubJobQueries JobQueries { get; }
         public StubCreditQueries CreditQueries { get; }
         public StubPaymentQueries PaymentQueries { get; }
+        public StubFinancialDocumentQueries FinancialDocumentQueries { get; }
         public JobPaymentReceiptService Service { get; }
 
         public static ReceiptFixture Create(
             JobSettlementType? settlementType,
             JobPaymentStatus paymentStatus = JobPaymentStatus.Paid,
-            bool receiptsEnabled = true)
+            bool receiptsEnabled = true,
+            Guid? financialDocumentId = null)
         {
             var customerUserId = Guid.NewGuid();
             var creatorUserId = Guid.NewGuid();
@@ -339,6 +361,11 @@ public sealed class JobPaymentReceiptServiceTests
                     null,
                     2)
             };
+            var financialDocumentQueries =
+                new StubFinancialDocumentQueries(
+                    customerUserId,
+                    settlementReferenceId,
+                    financialDocumentId);
             var accessQueries = new StubAccessUserQueries(
                 new AccessUserOption(
                     customerUserId,
@@ -375,6 +402,7 @@ public sealed class JobPaymentReceiptServiceTests
                 jobQueries,
                 creditQueries,
                 paymentQueries,
+                financialDocumentQueries,
                 accessQueries,
                 serviceUnitQueries,
                 configuration);
@@ -387,8 +415,66 @@ public sealed class JobPaymentReceiptServiceTests
                 jobQueries,
                 creditQueries,
                 paymentQueries,
+                financialDocumentQueries,
                 service);
         }
+    }
+
+
+    internal sealed class StubFinancialDocumentQueries :
+        IFinancialDocumentQueries
+    {
+        private readonly Guid _customerUserId;
+        private readonly Guid _sourceId;
+        private readonly Guid? _documentId;
+
+        public StubFinancialDocumentQueries(
+            Guid customerUserId,
+            Guid sourceId,
+            Guid? documentId)
+        {
+            _customerUserId = customerUserId;
+            _sourceId = sourceId;
+            _documentId = documentId;
+        }
+
+        public int SourceLookupCount { get; private set; }
+
+        public Task<IReadOnlyDictionary<Guid, Guid>>
+            FindDocumentIdsBySourceForCustomerAsync(
+                Guid customerUserId,
+                FinancialDocumentSourceType sourceType,
+                IEnumerable<Guid> sourceIds,
+                CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SourceLookupCount++;
+            var requested = sourceIds.ToHashSet();
+
+            IReadOnlyDictionary<Guid, Guid> result =
+                _documentId.HasValue &&
+                customerUserId == _customerUserId &&
+                sourceType == FinancialDocumentSourceType.Payment &&
+                requested.Contains(_sourceId)
+                    ? new Dictionary<Guid, Guid>
+                    {
+                        [_sourceId] = _documentId.Value
+                    }
+                    : new Dictionary<Guid, Guid>();
+
+            return Task.FromResult(result);
+        }
+
+        public Task<FinancialDocument?> FindByIdForCustomerAsync(
+            Guid documentId,
+            Guid customerUserId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FinancialDocument?> FindByIdForAdminAsync(
+            Guid documentId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     internal sealed class StubJobQueries : IJobQueries

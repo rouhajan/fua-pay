@@ -5,6 +5,8 @@ using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Application;
+using FuaPay.Web.Modules.FinancialDocuments.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Jobs.Web;
@@ -64,6 +66,7 @@ public sealed class CustomerJobDetailsModelTests
 
         var model = new DetailsModel(
             new StubJobQueries(job),
+            new StubFinancialDocumentQueries(),
             new StubCreditQueries(account),
             availabilityService,
             UnusedDependency<CreditJobPaymentService>(),
@@ -86,6 +89,91 @@ public sealed class CustomerJobDetailsModelTests
         Assert.Equal(550, options.CreditBalanceMinorUnits);
         Assert.False(options.HasSufficientCredit);
         Assert.Equal(150, options.MissingCreditMinorUnits);
+    }
+
+
+    [Fact]
+    public async Task OnGetAsync_DirectPaymentWithCanonicalDocumentPrefersFinancialDocument()
+    {
+        var customerUserId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var paymentId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var job = CreatePaidDirectJob(
+            customerUserId,
+            jobId,
+            paymentId,
+            now);
+        var model = CreatePaidDirectModel(
+            job,
+            new StubFinancialDocumentQueries(
+                customerUserId,
+                paymentId,
+                documentId),
+            receiptsEnabled: true);
+
+        var result = await model.OnGetAsync(jobId);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Equal(documentId, model.FinancialDocumentId);
+        Assert.False(model.CanDownloadReceipt);
+    }
+
+    [Fact]
+    public async Task OnGetAsync_HistoricalDirectPaymentWithoutDocumentKeepsLegacyReceipt()
+    {
+        var customerUserId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var paymentId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var job = CreatePaidDirectJob(
+            customerUserId,
+            jobId,
+            paymentId,
+            now);
+        var model = CreatePaidDirectModel(
+            job,
+            new StubFinancialDocumentQueries(),
+            receiptsEnabled: true);
+
+        var result = await model.OnGetAsync(jobId);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Null(model.FinancialDocumentId);
+        Assert.True(model.CanDownloadReceipt);
+    }
+
+    [Fact]
+    public void DetailsPage_PrefersCanonicalDocumentBeforeLegacyReceipt()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(
+                FindRepositoryRoot(),
+                "src",
+                "FuaPay.Web",
+                "Pages",
+                "Customer",
+                "Jobs",
+                "Details.cshtml"));
+
+        var canonical = source.IndexOf(
+            "Model.FinancialDocumentId.HasValue",
+            StringComparison.Ordinal);
+        var legacy = source.IndexOf(
+            "else if (Model.CanDownloadReceipt)",
+            StringComparison.Ordinal);
+
+        Assert.True(canonical >= 0);
+        Assert.True(legacy > canonical);
+        Assert.Contains(
+            "asp-page=\"/Customer/FinancialDocuments/Download\"",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "asp-page=\"./Receipt\"",
+            source,
+            StringComparison.Ordinal);
     }
 
     private static PageContext CreatePageContext(Guid customerUserId)
@@ -111,9 +199,86 @@ public sealed class CustomerJobDetailsModelTests
         };
     }
 
-    private static ReceiptConfiguration DisabledReceiptConfiguration() =>
+
+    private static DetailsModel CreatePaidDirectModel(
+        JobDetail job,
+        IFinancialDocumentQueries financialDocumentQueries,
+        bool receiptsEnabled)
+    {
+        var account = new CreditAccountSummary(
+            Guid.NewGuid(),
+            job.CustomerUserId,
+            BalanceMinorUnits: 0,
+            Version: 1);
+
+        return new DetailsModel(
+            new StubJobQueries(job),
+            financialDocumentQueries,
+            new StubCreditQueries(account),
+            new CreditAvailabilityService(
+                new StubCreditAvailabilityRepository(new Money(0))),
+            UnusedDependency<CreditJobPaymentService>(),
+            new JobPresentationComposer(
+                new EmptyAccessUserQueries(),
+                new EmptyServiceUnitQueries()),
+            UnusedDependency<PaymentCreationService>(),
+            ReceiptConfiguration(receiptsEnabled))
+        {
+            PageContext = CreatePageContext(job.CustomerUserId)
+        };
+    }
+
+    private static JobDetail CreatePaidDirectJob(
+        Guid customerUserId,
+        Guid jobId,
+        Guid paymentId,
+        DateTimeOffset now) =>
         new(
-            Enabled: false,
+            Id: jobId,
+            Number: "3D-2026-000002",
+            ServiceUnitId: Guid.NewGuid(),
+            CustomerUserId: customerUserId,
+            CreatedByUserId: customerUserId,
+            ServiceType: ServiceType.ThreeDPrint,
+            Title: "Uhrazená zakázka",
+            Description: "Test precedence dokladu",
+            PriceMinorUnits: 1_000,
+            ProductionStatus: JobProductionStatus.Published,
+            PaymentStatus: JobPaymentStatus.Paid,
+            SettlementType: JobSettlementType.DirectPayment,
+            SettlementReferenceId: paymentId,
+            CreatedAt: now.AddHours(-2),
+            PublishedAt: now.AddHours(-1),
+            SettledAt: now,
+            ProductionStartedAt: null,
+            ReadyForPickupAt: null,
+            CompletedAt: null,
+            CancelledAt: null,
+            Version: 1);
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "FuaPay.slnx")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("FuaPay.slnx was not found.");
+    }
+
+    private static ReceiptConfiguration DisabledReceiptConfiguration() =>
+        ReceiptConfiguration(enabled: false);
+
+    private static ReceiptConfiguration ReceiptConfiguration(bool enabled) =>
+        new(
+            Enabled: enabled,
             PreviewMode: false,
             Issuer: new ReceiptIssuerConfiguration(
                 LegalName: string.Empty,
@@ -132,6 +297,65 @@ public sealed class CustomerJobDetailsModelTests
     private static T UnusedDependency<T>()
         where T : class =>
         (T)RuntimeHelpers.GetUninitializedObject(typeof(T));
+
+
+    private sealed class StubFinancialDocumentQueries :
+        IFinancialDocumentQueries
+    {
+        private readonly Guid? _customerUserId;
+        private readonly Guid? _sourceId;
+        private readonly Guid? _documentId;
+
+        public StubFinancialDocumentQueries()
+        {
+        }
+
+        public StubFinancialDocumentQueries(
+            Guid customerUserId,
+            Guid sourceId,
+            Guid documentId)
+        {
+            _customerUserId = customerUserId;
+            _sourceId = sourceId;
+            _documentId = documentId;
+        }
+
+        public Task<IReadOnlyDictionary<Guid, Guid>>
+            FindDocumentIdsBySourceForCustomerAsync(
+                Guid customerUserId,
+                FinancialDocumentSourceType sourceType,
+                IEnumerable<Guid> sourceIds,
+                CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var requested = sourceIds.ToHashSet();
+
+            IReadOnlyDictionary<Guid, Guid> result =
+                _customerUserId == customerUserId &&
+                sourceType == FinancialDocumentSourceType.Payment &&
+                _sourceId.HasValue &&
+                _documentId.HasValue &&
+                requested.Contains(_sourceId.Value)
+                    ? new Dictionary<Guid, Guid>
+                    {
+                        [_sourceId.Value] = _documentId.Value
+                    }
+                    : new Dictionary<Guid, Guid>();
+
+            return Task.FromResult(result);
+        }
+
+        public Task<FinancialDocument?> FindByIdForCustomerAsync(
+            Guid documentId,
+            Guid customerUserId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FinancialDocument?> FindByIdForAdminAsync(
+            Guid documentId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
 
     private sealed class StubJobQueries : IJobQueries
     {
