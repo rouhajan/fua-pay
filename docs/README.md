@@ -13,6 +13,7 @@ Aktuální dokumentace je záměrně malá:
 - [PostgreSQL, EF migrace a testy](development/database.md);
 - [produkční konfigurace a provoz](deployment/production-configuration.md);
 - [čistý produkční cutover](deployment/production-cutover-plan.md);
+- [legacy SafeQ kreditní migrace](deployment/legacy-safeq-credit-migration.md);
 - [release a databázové artefakty](deployment/release-artifacts.md);
 - [demo / staging deployment](deployment/demo-staging.md);
 - [ověření 2026-08-18](testing/verification-2026-08-18.md);
