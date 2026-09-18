@@ -105,144 +105,121 @@ delta reconciliation; jednoduchý jednorázový import pak nestačí.
 ## Finanční semantika v FUA Pay
 
 Převod existujícího SafeQ zůstatku není nový příjem peněz v okamžiku cutoveru.
-Nemá proto používat:
+Má se evidovat jako převod/oprava počátečního stavu, ne jako nové dobití.
 
-- běžné administrátorské ruční dobití;
-- ČSOB Payment;
-- falešnou zakázku;
-- automatické vystavení nového `FinancialDocument`.
+Výchozí produkční postup proto používá existující **Administrativní korekci**:
 
-Protože jde o jednorázovou migraci, preferovaná implementace je co nejmenší:
-žádné nové administrátorské UI a pokud review nepotvrdí jinou potřebu, ani
-žádná nová produkční migrační tabulka.
+- kladná korekce připíše převáděný SafeQ zůstatek;
+- nevzniká ČSOB Payment;
+- nevzniká falešná zakázka;
+- nevzniká nový `FinancialDocument`;
+- operace zůstává neměnným kreditním pohybem a je auditovaná.
 
-Repository-owned jednorázový CLI importer použije existující `CreditService`
-a auditní infrastrukturu. Každý SafeQ účet dostane deterministické
-`operationId` odvozené z pevného migračního namespace a stabilního SafeQ user
-ID. Existující globální unique constraint nad
-`credits.movements.operation_id` tak zabrání druhému finančnímu efektu při
-opakovaném spuštění.
+Důvod korekce musí jednoznačně říkat, že jde o legacy převod, například:
 
-Jeden potvrzený převod musí v jedné business transakci vytvořit:
+`Převod zůstatku ze SafeQ při migraci, SafeQ ID <id>, snapshot <id>`
 
-- kladný canonical credit movement;
-- auditní událost `credit.legacy-safeq-transfer`;
-- auditní vazbu na SafeQ user ID, identifikaci/hash finálního balance snapshotu,
-  cílový FUA Pay UserId, částku a schvalujícího administrátora.
+Zákaznické UI nemá zobrazovat technické GUID ani interní identifikátory. Pro
+zákazníka má být pohyb prezentovaný lidsky jako `Převod zůstatku ze SafeQ`.
 
-Schválený vstupní CSV, jeho SHA-256 a výstupní report importu se archivují mimo
-veřejný Git. Durable credit movement + audit + immutable schválený importní
-artefakt tvoří evidenci převodu bez přidávání permanentního aplikačního UI.
+Pokud účetní/provozní vlastník před cutoverem stanoví jinou evidenční semantiku,
+musí být výslovně schválena a tento dokument se před prvním převodem upraví.
 
-Uživatelský popis kreditního pohybu je:
+## Ochranné invarianty
 
-`Převod kreditu ze SafeQ`
+Párovací nástroj je read-only. Samotný finanční převod vzniká až po explicitním
+lidském schválení konkrétního páru a následném provedení administrativní
+korekce.
 
-a nesmí obsahovat technické interní GUID.
+Platí minimálně:
 
-Tento převod sám nevytváří `FinancialDocument`, protože při cutoveru nevzniká
-nový externí příjem. Pokud účetní/provozní vlastník vyžádá jinou evidenci
-legacy zůstatků, musí být před implementací výslovně schválena jako samostatné
-pravidlo.
-
-## Idempotence a ochranné invarianty
-
-Import musí fail-closed vynutit minimálně:
-
-- jeden `SafeQ user ID + balance snapshot` lze finančně převést nejvýše jednou;
-- replay stejného import commandu nevytvoří druhý pohyb;
-- stejný legacy účet s jinou částkou je konflikt;
-- cílový FUA Pay účet musí existovat a být aktivní Customer;
-- částka se převádí v celých minor units CZK;
-- více než dvě desetinná místa se odmítnou;
-- záporný zůstatek se automaticky nepřevádí a vyžaduje ruční rozhodnutí;
-- nulový zůstatek nevytváří kreditní pohyb;
-- nejasné párování nikdy nevytváří finanční efekt;
-- audit a credit movement vzniknou ve stejné transakční business operaci.
-
-Více legacy SafeQ účtů směrovaných na jeden FUA Pay UserId se nesmí automaticky
-sloučit. Takový případ musí být explicitně schválen a každý zdrojový SafeQ účet
-zůstane samostatně dohledatelný.
+- cílový FUA Pay účet musí už existovat po legitimním Entra přihlášení;
+- SafeQ login/jméno nikdy nejsou automatickou autoritou identity;
+- nejasné párování nevytváří finanční efekt;
+- částka pochází výhradně z finálního SafeQ balance snapshotu;
+- nulový zůstatek není potřeba zapisovat;
+- záporný nebo jinak nestandardní zůstatek vyžaduje samostatné ruční rozhodnutí;
+- jeden SafeQ účet se nesmí bez výslovného review převést vícekrát;
+- více SafeQ účtů pro jeden FUA Pay účet se nesmí automaticky sloučit;
+- schválené párování a provedená korekce musí být dohledatelné v pracovní
+  migrační evidenci.
 
 ## Doporučený provozní workflow
 
-Pro první produkční rollout se předem nepřipravuje kredit žádnému člověku, který
-se do čistého FUA Pay ještě nepřihlásil.
+Pro první produkční rollout se předem nepřipravuje kredit nikomu, kdo se do
+čistého FUA Pay ještě nepřihlásil.
 
-Doporučený claim-on-demand proces s provozním cílem 24–48 hodin:
+Výchozí claim-on-demand proces s cílem odbavit člověka do 24–48 hodin:
 
-1. otevřít čistý FUA Pay;
-2. vyzvat studenty a pracovníky, kteří chtějí služby používat, aby se přihlásili
-   přes TUL Entra;
-3. JIT vytvoří standardní FUA Pay Customer účet; tím vznikne jediný přípustný
-   cíl budoucího legacy převodu;
-4. admin v běžném existujícím přehledu uživatelů nebo pomocí read-only exportu
-   uvidí nově přihlášené Customer účty;
-5. offline párovací tabulka navrhne možné SafeQ kandidáty podle loginu/jména a
-   dalších pomocných údajů, ale nic automaticky neschválí;
-6. admin ručně potvrdí konkrétní pár SafeQ user ID -> FUA Pay UserId a částku z
-   finálního balance snapshotu;
-7. potvrzené řádky se uloží do malého schváleného import CSV;
-8. CLI importer nejprve spustí read-only `validate`/dry-run a vypíše přesně
-   `APPLY / ALREADY_APPLIED / CONFLICT / INVALID`;
-9. teprve po kontrole se explicitně spustí `apply`;
-10. idempotentní importer provede `Převod kreditu ze SafeQ`;
-11. admin zkontroluje import report a zákazník následně uvidí nový kreditní
-    pohyb a zůstatek.
+1. student nebo pracovník se sám přihlásí do FUA Pay přes TUL Entra;
+2. JIT vytvoří standardní Customer účet a stabilní FUA Pay `UserId`;
+3. administrátor kdykoli spustí read-only párování **aktuálně existujících FUA
+   Pay Customer účtů** proti SafeQ migračnímu podkladu;
+4. nástroj u každého nepřevedeného FUA Pay účtu nabídne SafeQ kandidáty a
+   rozdělí je například na `JASNÉ`, `KONTROLA` a `BEZ SHODY`;
+5. skóre může využít přesný login/e-mailový local-part, normalizované tokeny
+   jména, diakritiku, různé pořadí částí jména a jednoznačnost kandidáta;
+6. i `JASNÉ` shody se pouze předvyberou - nic se finančně nepřipíše bez
+   lidského potvrzení;
+7. administrátor jasné shody rychle vizuálně prolétne a schválí; nejasné řeší
+   po jednom jako `ano / ne / odložit`;
+8. pro schválené páry se z finálního SafeQ balance snapshotu vezme přesná částka;
+9. převod se provede existující **Administrativní korekcí** s důvodem
+   `Převod zůstatku ze SafeQ...`;
+10. pracovní tabulka zaznamená, že konkrétní SafeQ účet byl spárován, schválen a
+    převeden;
+11. zákazník následně vidí nový zůstatek a lidsky pojmenovaný kreditní pohyb.
 
-Importer lze spouštět jednou denně nebo podle potřeby po malých batchích.
-Student kvůli migraci nedělá nic kromě prvního Entra přihlášení; deklarovaná
-24–48hodinová prodleva je čistě čas na ruční pairing a kontrolovaný import.
+Párování lze spouštět opakovaně každý den. Nově přihlášení uživatelé se pouze
+objeví mezi kandidáty; uživatel, který se nikdy nepřihlásil, se vůbec neřeší.
 
-Recent účty lze odbavovat prioritně. Dormant účty zůstanou v immutable migračním
-podkladu a nic se jim nevytvoří, dokud se jejich vlastník skutečně nepřihlásí.
+Recent účty lze odbavovat prioritně. Dormant účty zůstávají v migračním podkladu
+a mohou být řešeny až ve chvíli, kdy se jejich vlastník skutečně přihlásí.
 
-Tento model minimalizuje riziko chybného hromadného párování a nevyžaduje
-spoléhat na heuristiku jméno/příjmení.
+Heuristika musí počítat s víceslovnými a kulturně odlišnými jmény, změnou pořadí
+částí jména, diakritikou a historicky nepravidelnými SafeQ loginy. Jejím cílem
+je zrychlit lidské review, ne nahradit autoritu Entra identity.
 
 ## Implementační forma
 
-Nejmenší důstojná varianta je:
+Výchozí varianta záměrně nepřidává žádné nové migrační UI, endpoint ani
+produkční databázovou tabulku.
 
-- offline párovací tabulka pro review;
-- schválený import CSV obsahující stabilní SafeQ ID, cílový FUA Pay UserId,
-  částku, snapshot/batch identifikaci a schvalujícího administrátora;
-- malý repository-owned one-time CLI nástroj například v `tools/`;
-- dvě explicitní fáze `validate` a `apply`;
-- uvnitř aplikace pouze malá legacy-transfer aplikační operace nad existujícím
-  `CreditService` + `IAuditTrail`, bez Razor Page, endpointu nebo menu;
-- idempotence pomocí deterministického `operationId` a již existujícího
-  databázového unique constraintu.
+Stačí:
 
-`validate` musí být bez finančního zápisu a ověřit minimálně existenci a aktivní
-Customer roli cíle, shodu řádku s finálním SafeQ snapshotem, duplicity vstupu a
-stav případného již existujícího deterministického pohybu.
+- offline SafeQ párovací tabulka mimo veřejný Git;
+- malý repository-owned **read-only matching/report tool**, který načte
+  existující FUA Pay Customer účty a porovná je se SafeQ podkladem;
+- výstup s kandidáty, vysvětlením shody a stavem
+  `JASNÉ / KONTROLA / BEZ SHODY`;
+- lidské potvrzení páru administrátorem;
+- samotný finanční zápis přes již existující administrativní korekci.
 
-`apply` smí zpracovat pouze řádky, které prošly validací. Replay stejného
-převodu se rozpozná jako `ALREADY_APPLIED`; pokud už stejné deterministické
-`operationId` existuje s jiným vlastníkem, částkou nebo popisem, jde o
-`CONFLICT` a nic se automaticky neopravuje.
+Pro nižší stovky legacy účtů je ruční provedení schválených korekcí přijatelný
+a nejméně invazivní výchozí model.
 
-Importer nesmí být obecný SQL skript, který přímo přidává řádky do
-`credits.movements`. Musí respektovat aplikační invarianty a vytvořit
-auditovatelnou business operaci.
-
-CLI není součástí webového UI ani běžného zákaznického/admin provozu. Po uzavření
-migračního období se už nespouští; může zůstat v historii/repu pro audit a
-reprodukovatelnost, ale nevytváří žádnou runtime plochu v aplikaci.
+Pokud by objem v prvních dnech ukázal, že ruční přepis schválených částek je
+nepraktický, lze později doplnit jednorázový batch/CLI nástroj. Ten ale smí
+automatizovat pouze **již schválené páry** a musí použít stejnou semantiku
+administrativní korekce; nesmí zavádět automatické rozhodování identity.
 
 ## Acceptance před použitím
 
-Před prvním skutečným převodem se automaticky a ručně ověří:
+Před prvním skutečným převodem se ověří minimálně:
 
-- validní transfer přidá přesnou částku právě jednou;
-- replay nepřidá nic;
-- jiná částka pro stejný SafeQ source je konflikt;
-- neexistující/neaktivní Customer je odmítnut;
-- nulová/záporná/neplatná částka neprojde automaticky;
-- transakční chyba nezanechá movement bez migration evidence ani naopak;
-- Customer vidí pouze lidský popis `Převod kreditu ze SafeQ`;
-- Administrator vidí auditní vazbu na legacy zdroj a schvalujícího admina;
-- `FinancialDocument` se při legacy transferu nevytvoří;
-- součet schválených importovaných částek se shoduje s import reportem;
-- source snapshot hash a batch ID jsou archivované mimo veřejný Git.
+- matching tool je read-only vůči finančním datům;
+- zobrazí pouze FUA Pay účty, které už skutečně existují po Entra přihlášení;
+- přesná shoda jména/loginu sama nic nepřipíše;
+- nejednoznačné případy zůstanou k ručnímu rozhodnutí;
+- schválený pár lze jednoznačně dohledat zpět na SafeQ user ID a balance
+  snapshot;
+- administrativní korekce připíše přesně schválenou částku;
+- korekce nevytvoří `FinancialDocument`;
+- audit zachytí administrátora a důvod legacy převodu;
+- Customer UI nezobrazuje technické GUID a ukazuje lidský význam
+  `Převod zůstatku ze SafeQ`;
+- pracovní migrační evidence zabrání nechtěnému druhému převodu téhož SafeQ
+  účtu;
+- součet skutečně provedených převodů lze porovnat se součtem schválených
+  položek.
+
