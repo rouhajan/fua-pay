@@ -4,7 +4,7 @@
     ViewData["Title"] = "Tiskový kód";
 }
 
-<section class="functional-page">
+<section class="functional-page narrow-page">
     <header class="functional-header">
         <div>
             <p class="panel-kicker">Zákazník</p>
@@ -41,56 +41,42 @@
             <div class="data-panel-header">
                 <div>
                     <h2>@(Model.Credential.IsActiveForCurrentEmail ? "Změnit tiskový kód" : "Nastavit tiskový kód")</h2>
-                    <span>Kód zůstává platný, dokud jej nezměníte nebo nezneplatníte.</span>
+                    @if (Model.Credential.CanConfigure)
+                    {
+                        <span>
+                            Pro tisk použijete e-mail <strong>@Model.Credential.CurrentEmail</strong>.
+                            Kód zůstává platný, dokud jej nezměníte nebo nezneplatníte.
+                        </span>
+                    }
                 </div>
             </div>
 
-            <dl class="detail-grid">
-                <div>
-                    <dt>Aktuální e-mail profilu FUA Pay</dt>
-                    <dd>@(Model.Credential.CanConfigure ? Model.Credential.CurrentEmail : "Není k dispozici pro nastavení")</dd>
-                </div>
-                <div>
-                    <dt>Stav</dt>
-                    <dd>
-                        @if (Model.Credential.IsActiveForCurrentEmail)
-                        {
-                            <text>Aktivní pro aktuální e-mail profilu</text>
-                        }
-                        else if (Model.Credential.HasActiveCredential)
-                        {
-                            <text>Aktivní uložený kód; pro aktuální profil není použitelný</text>
-                        }
-                        else
-                        {
-                            <text>Nenastaven</text>
-                        }
-                    </dd>
-                </div>
-            </dl>
-
             @if (Model.Credential.CanConfigure)
             {
-                <form method="post" asp-page-handler="Set" class="stacked-form">
-                    <div asp-validation-summary="ModelOnly" class="validation-summary"></div>
-                    <div class="form-field">
-                        <label asp-for="Input.PrintCode">Nový šestimístný kód</label>
+                <form method="post" asp-page-handler="Set" class="form-stack">
+                    <div asp-validation-summary="ModelOnly" class="message-box is-error"></div>
+                    <label>
+                        <span>Nový šestimístný kód</span>
                         <input asp-for="Input.PrintCode" inputmode="numeric" autocomplete="new-password" maxlength="6" />
                         <span asp-validation-for="Input.PrintCode"></span>
-                    </div>
-                    <div class="form-field">
-                        <label asp-for="Input.Confirmation">Kód znovu</label>
+                    </label>
+                    <label>
+                        <span>Kód znovu</span>
                         <input asp-for="Input.Confirmation" inputmode="numeric" autocomplete="new-password" maxlength="6" />
                         <span asp-validation-for="Input.Confirmation"></span>
+                    </label>
+                    <div class="form-actions">
+                        <button type="submit" class="primary-action-button">Uložit tiskový kód</button>
                     </div>
-                    <button type="submit" class="primary-action-button">Uložit tiskový kód</button>
                 </form>
             }
 
             @if (Model.Credential.HasActiveCredential)
             {
-                <form method="post" asp-page-handler="Revoke" class="stacked-form">
-                    <button type="submit" class="text-button">Zneplatnit tiskový kód</button>
+                <form method="post" asp-page-handler="Revoke" class="compact-form">
+                    <div class="form-actions">
+                        <button type="submit" class="danger-button">Zneplatnit tiskový kód</button>
+                    </div>
                 </form>
             }
         </section>
