@@ -220,26 +220,29 @@ demo čísla nejsou účetní produkční historie.
 
 Linux PDF runtime musí mít schválené regular/bold fonty mimo release artefakt.
 
-## 9. FUA Print integrace
+## 9. Pozdější aktivace FUA Print
 
-Cílová produkce FUA Pay má mít aktivní:
+První produkční go-live FUA Pay probíhá s tiskovou integrací vypnutou:
 
 ```text
-PrintPayments__Enabled=true
-PrintCredentials__Enabled=true
+PrintPayments__Enabled=false
+PrintCredentials__Enabled=false
 ```
 
-a produkční:
+FUA Print není podmínkou prvního produkčního cutoveru. Aktivuje se jako
+samostatný pozdější provozní milník. Při jeho aktivaci se oba přepínače zapnou
+společně a doplní se produkční:
 
 - stabilní `PrintSourceId`;
 - service bearer credential, jehož SHA-256 je v FUA Pay konfiguraci;
 - tajný `PrintCredentials__PepperBase64` o alespoň 32 náhodných bytech.
 
 Pepper a service credential nesmějí být v Git/release ani v logu. Pepper musí
-po go-live zůstat stabilní; jeho ztráta zneplatní uložené PIN verifiery.
+po aktivaci FUA Print zůstat stabilní; jeho ztráta zneplatní uložené PIN
+verifiery.
 
-Čistá produkce nepřenese dnešní demo tiskové PINy. Uživatel si po prvním
-produkčním přihlášení nastaví vlastní nový šestiznakový kód.
+Čistá produkce nepřenese dnešní demo tiskové PINy. Po pozdější aktivaci FUA
+Print si uživatel nastaví vlastní nový šestiznakový kód.
 
 Před zapnutím produkční tiskové cesty se dokončí cross-repo FUA Pay ↔ FUA Print
 audit a acceptance:
@@ -288,14 +291,15 @@ V tomto prvním produkčním profilu nejsou potřeba ČSOB merchant ID, klíče,
 ani return URL; ČSOB return processing a reconciliation worker neběží a CSP
 nepovoluje externí payment `form-action` origin.
 
-Mimo release musí zůstat minimálně:
+Mimo release musí pro první produkční go-live zůstat minimálně:
 
 - PostgreSQL connection string / hesla;
 - Entra Client Secret;
-- FUA Print service credential/hash konfigurace;
-- PrintCredentials pepper;
 - Data Protection key ring;
 - PDF fonty.
+
+FUA Print service credential/hash konfigurace a `PrintCredentials` pepper se
+doplní až při samostatné pozdější aktivaci FUA Print.
 
 ČSOB merchant private key a gateway public key se do produkčního secret store
 doplní až pro samostatnou pozdější aktivaci ČSOB.
@@ -363,7 +367,7 @@ retenci, šifrování a přístupová oprávnění.
 
 Doporučený finální sled je:
 
-1. dokončit drobné UX nálezy a cross-repo FUA Print audit;
+1. dokončit drobné UX nálezy;
 2. vybrat přesný release candidate SHA;
 3. provést full repository/DB/security gate;
 4. vytvořit release a migration artefakty;
@@ -373,8 +377,8 @@ Doporučený finální sled je:
 8. nainstalovat produkční secrets a profil `Payments__Provider=None`,
    `Csob__Enabled=false`;
 9. aktivovat Entra a ověřit login/logout/role;
-10. po finálním FUA Print gate aktivovat PrintPayments +
-    PrintCredentials;
+10. ponechat `PrintPayments__Enabled=false` a
+    `PrintCredentials__Enabled=false` pro první produkční go-live;
 11. atomicky aktivovat release;
 12. ověřit `/health/live`, `/health/ready` a veřejné HTTPS;
 13. provést pouze řízené produkční smoke scénáře;
@@ -404,11 +408,10 @@ Před označením systému jako Production musí být prokázáno minimálně:
 - PDF doklad se opakovaným stažením nemění a nevytváří nový dokument;
 - `Payments__Provider=None` a `Csob__Enabled=false` startují fail-closed bez
   zákaznických karetních entry pointů, ČSOB runtime a externích CSP originů;
-- ruční top-up, úhrada zakázky kreditem a případně samostatně přijatý FUA Print
-  zůstávají na dostupnosti karet nezávislé;
-- FUA Print Reserve/Capture/Release E2E PASS;
-- tisk neodečte kredit dvakrát;
-- neprovedený tisk kredit nestrhne;
+- ruční top-up a úhrada zakázky kreditem zůstávají na dostupnosti karet
+  nezávislé;
+- `PrintPayments__Enabled=false` a `PrintCredentials__Enabled=false` zůstávají
+  pro první produkční go-live vypnuté;
 - kreditní historie používá lidské popisy bez interních GUID;
 - desktop a mobilní smoke hlavních Customer toků PASS;
 - backup/restore postup je známý a poslední backup identifikovatelný;
@@ -453,8 +456,6 @@ Bez nového explicitního rozhodnutí nejsou součástí prvního cutoveru:
 Před prvním produkčním go-live zůstává explicitně:
 
 - [x] opravit zákaznický popis tiskového debit pohybu na lidský text — merge, staging deployment i Customer smoke ověřeny 2026-09-19; budoucí čistý production cutover zůstává samostatným gate;
-- [ ] dokončit FUA Print ↔ FUA Pay cross-repo audit;
-- [ ] dokončit finální FUA Print E2E acceptance;
 - [ ] definovat a ověřit bootstrap prvního produkčního Administratora;
 - [ ] definovat počáteční produkční ServiceUnits/role assignment;
 - [ ] potvrdit produkční FinancialDocument číselnou řadu nad čistou DB;
@@ -463,6 +464,15 @@ Před prvním produkčním go-live zůstává explicitně:
 - [ ] ověřit Nginx/TLS/HARICA stav;
 - [ ] final release candidate full gate;
 - [ ] kontrolovaný go-live smoke a provozní monitoring.
+
+Samostatně před pozdější aktivací FUA Print zůstává:
+
+- [ ] dokončit FUA Print ↔ FUA Pay cross-repo audit;
+- [ ] dokončit finální FUA Print E2E acceptance;
+- [ ] doplnit produkční PrintSource/service credential/hash konfiguraci a
+  `PrintCredentials` pepper;
+- [ ] aktivovat společně `PrintPayments__Enabled=true` a
+  `PrintCredentials__Enabled=true` a provést kontrolovaný FUA Print smoke.
 
 Samostatně před prvním skutečným SafeQ převodem zůstává:
 
