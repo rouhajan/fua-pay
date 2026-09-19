@@ -54,6 +54,10 @@ public sealed class FuaPayDbContext : DbContext
         ManualCreditTopUpCommands =>
             Set<ManualCreditTopUpCommandEntity>();
 
+    internal DbSet<LegacySafeQCreditTransferEntity>
+        LegacySafeQCreditTransfers =>
+            Set<LegacySafeQCreditTransferEntity>();
+
     internal DbSet<FinancialDocumentEntity> FinancialDocuments =>
         Set<FinancialDocumentEntity>();
 

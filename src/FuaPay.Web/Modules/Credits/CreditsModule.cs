@@ -19,6 +19,7 @@ public static class CreditsModule
         services.AddScoped<CreditService>();
         services.AddScoped<CreditAdministrationService>();
         services.AddScoped<ManualCreditTopUpService>();
+        services.AddScoped<LegacySafeQCreditTransferService>();
         services.AddScoped<PrintReservationService>();
         services.AddScoped<PrintCredentialService>();
         services.AddScoped<PrintCredentialReservationService>();
@@ -35,6 +36,9 @@ public static class CreditsModule
         services.AddScoped<
             IManualCreditTopUpCommandRepository,
             EfManualCreditTopUpCommandRepository>();
+        services.AddScoped<
+            ILegacySafeQCreditTransferRepository,
+            EfLegacySafeQCreditTransferRepository>();
         services.AddScoped<
             IPrintReservationRepository,
             EfPrintReservationRepository>();
