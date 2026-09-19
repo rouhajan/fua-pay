@@ -1,6 +1,6 @@
 # Demo / staging deployment
 
-Status: 2026-09-18
+Status: 2026-09-19
 
 Tento soubor popisuje aktuální staging runtime a staging deployment evidence.
 Kanonické vytváření/installace release artefaktu je v
@@ -14,44 +14,94 @@ a následná úspěšná expiry acceptance v
 
 ## Aktuální runtime
 
-Ověřeno přímo na staging VM 2026-09-18 po deploymentu FinancialDocuments
-Stage D release kandidáta:
+Ověřeno přímo na staging VM 2026-09-19 po deploymentu
+`cc142e23a200e72831284605d8553962b160a984`:
 
 - URL: `https://fuapay.tul.cz`.
 - Alternate URL: `https://fuapay.fa.tul.cz` -> canonical URL.
 - Aktivní runtime SHA:
-  `a6d012012679992e221769d8719460a81cb88e29`.
+  `cc142e23a200e72831284605d8553962b160a984`.
 - Aktivní release:
-  `/opt/fuapay/releases/a6d012012679992e221769d8719460a81cb88e29`.
+  `/opt/fuapay/releases/cc142e23a200e72831284605d8553962b160a984`.
 - Běžící executable přesně odpovídá aktivnímu release.
 - `fuapay.service`: active.
 - Service account: `fuapay:fuapay`.
 - Kestrel: `127.0.0.1:5080` behind Nginx.
 - Configuration: `/etc/fuapay/staging.env`.
 - Database: `fuapay_demo`.
-- Databáze má 24 aplikovaných EF migrací; Stage D nepřidal novou migraci.
+- Databáze má 24 aplikovaných EF migrací; tento release nepřidal novou migraci.
 - `Database__ApplyMigrationsOnStart=false`.
 - Microsoft Entra login: live and in use.
 - Payment provider: ČSOB integration.
 - Simulated payments: disabled.
+- `PrintPayments__Enabled=true`.
+- `PrintCredentials__Enabled=true`.
 - `/health/ready`: `Healthy`.
 - `/health/workers/csob-reconciliation`: `Healthy`, bez failed cycle.
 - Canonical HTTPS smoke: HTTP 200.
-- Plain HTTP canonical URL: HTTP 301.
-- Alternate HTTPS URL: HTTP 301.
-- FinancialDocuments live acceptance:
+- Plain HTTP canonical URL: HTTP 301 na canonical HTTPS.
+- Alternate HTTPS URL: HTTP 301 na canonical URL.
+- FinancialDocuments live acceptance z 2026-09-18 zůstává platná:
   card wallet top-up PASS, direct card job payment PASS, negative
   Failed/Cancelled/Expired boundary PASS, repeated PDF/read idempotence PASS.
 - Detailní evidence:
   [FinancialDocuments v2 Stage D staging acceptance 2026-09-18](../testing/financial-documents-v2-stage-d-staging-acceptance-2026-09-18.md).
+- Customer smoke 2026-09-19 nad existujícím zachyceným tiskem za 18 Kč:
+  dashboard i kreditní historie zobrazují `Úhrada tisku`, technický
+  `Capture print reservation <GUID>` se zákazníkovi nezobrazuje a částka ani
+  zůstatek se nezměnily.
 - Mobile smoke byl 2026-09-18 explicitně odložen a není označen jako PASS.
 - Production ČSOB traffic and production database workload: not active.
-- PrintPayments / PrintCredentials zůstávají provozně vypnuté do samostatného
-  FUA Print E2E auditu a acceptance.
 
-Poznámka: dokumentační commit, který tento stav zapisuje, není nový runtime
-deployment. Staging zůstává na přesném kódu `a6d0120...` až do dalšího
-výslovného deploymentu.
+## 2026-09-19 code-only deployment `cc142e23...`
+
+Release byl vytvořen z čistého `main`
+`cc142e23a200e72831284605d8553962b160a984`.
+Před packagingem prošel lokální `./scripts/verify.ps1`:
+
+- Release build PASS;
+- format verification PASS;
+- `FuaPay.Web.Tests`: 1030/1030 PASS;
+- EF pending-model check: žádné změny.
+
+Self-contained `linux-x64` artefakt:
+
+- soubor:
+  `fuapay-cc142e23a200e72831284605d8553962b160a984-linux-x64.tar.gz`;
+- velikost: `123514292` bytes;
+- SHA-256:
+  `35951EFCD2C5DADBE9295177A1F6082AE92FFCEBD7B75A2B8E4FF93D5AB0A743`;
+- archive verification: 12 adresářů mode `0770`, 403 běžných souborů mode
+  `0660`, `FuaPay.Web` mode `0750`.
+
+Po přenosu server znovu ověřil přesnou velikost a SHA-256; `gzip -t` i úplný
+tar listing prošly. Release byl nainstalován side-by-side jako
+`fuapay:fuapay`; ownership, directory/file modes, executable bit a nepřítomnost
+`appsettings.Development.json` prošly před aktivací.
+
+Předchozí aktivní release
+`a6d012012679992e221769d8719460a81cb88e29` byl explicitně ověřen jako
+rollback baseline. Databáze měla před aktivací 24 EF migrací a protože mezi
+oběma releasy není nová EF migrace, žádné migration SQL se při tomto deploymentu
+nespouštělo.
+
+`/opt/fuapay/current` byl atomicky přepnut na nový release a
+`fuapay.service` restartována. Post-activation gate ověřil:
+
+- služba active;
+- skutečně běžící executable přesně z nového release;
+- `/health/ready` Healthy;
+- ČSOB reconciliation worker Healthy bez failed cycle;
+- databáze stále přesně 24 migrací;
+- `PrintPayments__Enabled=true`;
+- `PrintCredentials__Enabled=true`;
+- canonical HTTPS 200;
+- canonical HTTP 301 na HTTPS;
+- alternate HTTPS 301 na canonical URL.
+
+Následný Customer smoke nad existujícím placeným tiskem za 18 Kč ověřil
+`Úhrada tisku` na dashboardu i v kreditní historii, bez technického reservation
+GUID v Customer UI a beze změny částky nebo zůstatku.
 
 ## Staging PostgreSQL deployment/auth model
 
