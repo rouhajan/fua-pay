@@ -222,4 +222,3 @@ Před prvním skutečným převodem se ověří minimálně:
   účtu;
 - součet skutečně provedených převodů lze porovnat se součtem schválených
   položek.
-
