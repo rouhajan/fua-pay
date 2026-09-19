@@ -5,7 +5,7 @@ using Microsoft.Extensions.Hosting;
 namespace FuaPay.Web.Hosting;
 
 public sealed record PaymentProviderSelection(
-    PaymentProvider Provider,
+    PaymentProvider? Provider,
     bool DevelopmentPaymentUiEnabled)
 {
     public static PaymentProviderSelection Resolve(
@@ -19,6 +19,22 @@ public sealed record PaymentProviderSelection(
         ArgumentNullException.ThrowIfNull(runtimeFeatures);
 
         var configured = configuration["Payments:Provider"]?.Trim();
+
+        if (string.Equals(
+                configured,
+                "None",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            if (csobGatewayEnabled)
+            {
+                throw new InvalidOperationException(
+                    "Payments:Provider=None cannot be combined with an enabled CSOB gateway.");
+            }
+
+            return new PaymentProviderSelection(
+                Provider: null,
+                DevelopmentPaymentUiEnabled: false);
+        }
 
         if (string.Equals(
                 configured,
@@ -58,6 +74,6 @@ public sealed record PaymentProviderSelection(
         }
 
         throw new InvalidOperationException(
-            "Payments:Provider musí explicitně vybrat právě jeden podporovaný provider: Development nebo Csob.");
+            "Payments:Provider musí explicitně vybrat podporovanou hodnotu: None, Development nebo Csob.");
     }
 }

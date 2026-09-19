@@ -12,14 +12,15 @@ public static class PaymentsModule
 {
     public static IServiceCollection AddPaymentsModule(
         this IServiceCollection services,
-        PaymentProvider activeProvider,
+        PaymentProvider? activeProvider,
         bool developmentPaymentUiEnabled = false)
     {
         ArgumentNullException.ThrowIfNull(services);
 
         if (
-            activeProvider == PaymentProvider.Unknown ||
-            !Enum.IsDefined(activeProvider))
+            activeProvider.HasValue &&
+            (activeProvider == PaymentProvider.Unknown ||
+             !Enum.IsDefined(activeProvider.Value)))
         {
             throw new ArgumentOutOfRangeException(nameof(activeProvider));
         }
@@ -58,7 +59,9 @@ public static class PaymentsModule
             provider => provider.GetRequiredService<
                 PaymentSettlementService>());
         services.AddScoped<DevelopmentPaymentService>();
-        if (activeProvider == PaymentProvider.Development)
+        if (
+            activeProvider is null ||
+            activeProvider == PaymentProvider.Development)
         {
             if (services.Any(
                     descriptor =>
@@ -69,10 +72,20 @@ public static class PaymentsModule
                     "Je nakonfigurováno více aktivních payment provider initiatorů.");
             }
 
-            services.AddScoped<DevelopmentPaymentProviderInitiator>();
-            services.AddScoped<IPaymentProviderInitiator>(
-                provider => provider.GetRequiredService<
-                    DevelopmentPaymentProviderInitiator>());
+            if (activeProvider is null)
+            {
+                services.AddScoped<UnavailablePaymentProviderInitiator>();
+                services.AddScoped<IPaymentProviderInitiator>(
+                    provider => provider.GetRequiredService<
+                        UnavailablePaymentProviderInitiator>());
+            }
+            else
+            {
+                services.AddScoped<DevelopmentPaymentProviderInitiator>();
+                services.AddScoped<IPaymentProviderInitiator>(
+                    provider => provider.GetRequiredService<
+                        DevelopmentPaymentProviderInitiator>());
+            }
         }
         services.AddScoped<IPaymentRepository, EfPaymentRepository>();
         services.AddScoped<

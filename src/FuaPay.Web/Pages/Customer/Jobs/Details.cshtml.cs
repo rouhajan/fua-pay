@@ -26,6 +26,7 @@ public sealed class DetailsModel : PageModel
     private readonly CreditJobPaymentService _creditJobPaymentService;
     private readonly JobPresentationComposer _composer;
     private readonly PaymentCreationService _paymentCreationService;
+    private readonly PaymentCreationAvailability _paymentAvailability;
     private readonly ReceiptConfiguration _receiptConfiguration;
 
     public DetailsModel(
@@ -36,6 +37,7 @@ public sealed class DetailsModel : PageModel
         CreditJobPaymentService creditJobPaymentService,
         JobPresentationComposer composer,
         PaymentCreationService paymentCreationService,
+        PaymentCreationAvailability paymentAvailability,
         ReceiptConfiguration receiptConfiguration)
     {
         ArgumentNullException.ThrowIfNull(jobQueries);
@@ -45,6 +47,7 @@ public sealed class DetailsModel : PageModel
         ArgumentNullException.ThrowIfNull(creditJobPaymentService);
         ArgumentNullException.ThrowIfNull(composer);
         ArgumentNullException.ThrowIfNull(paymentCreationService);
+        ArgumentNullException.ThrowIfNull(paymentAvailability);
         ArgumentNullException.ThrowIfNull(receiptConfiguration);
 
         _jobQueries = jobQueries;
@@ -54,6 +57,7 @@ public sealed class DetailsModel : PageModel
         _creditJobPaymentService = creditJobPaymentService;
         _composer = composer;
         _paymentCreationService = paymentCreationService;
+        _paymentAvailability = paymentAvailability;
         _receiptConfiguration = receiptConfiguration;
     }
 
@@ -62,6 +66,8 @@ public sealed class DetailsModel : PageModel
     public CustomerJobPaymentOptions? PaymentOptions { get; private set; }
 
     public Guid? FinancialDocumentId { get; private set; }
+
+    public bool CanCreateCardPayment => _paymentAvailability.IsEnabled;
 
     public bool CanDownloadReceipt =>
         !FinancialDocumentId.HasValue &&
@@ -81,6 +87,11 @@ public sealed class DetailsModel : PageModel
         Guid id,
         CancellationToken cancellationToken = default)
     {
+        if (!CanCreateCardPayment)
+        {
+            return NotFound();
+        }
+
         try
         {
             var outcome = await _paymentCreationService.CreateJobPaymentAsync(

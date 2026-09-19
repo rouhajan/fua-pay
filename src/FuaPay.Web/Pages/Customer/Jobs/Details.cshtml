@@ -94,7 +94,10 @@
             <div class="payment-callout-copy">
                 <p class="panel-kicker">Úhrada</p>
                 <h2>Zakázka čeká na zaplacení</h2>
-                <p>Vyberte kredit nebo přímou platbu. Neúspěšný platební pokus zakázku nezruší.</p>
+                @if (Model.CanCreateCardPayment)
+                {
+                    <p>Vyberte kredit nebo přímou platbu. Neúspěšný platební pokus zakázku nezruší.</p>
+                }
 
                 <dl class="payment-balance-summary">
                     <div>
@@ -134,7 +137,7 @@
                         </button>
                     </form>
                 }
-                else
+                else if (Model.CanCreateCardPayment)
                 {
                     <a asp-page="/Customer/Payments/CreateTopUp"
                        asp-route-view="customer"
@@ -143,13 +146,16 @@
                     </a>
                 }
 
-                <form method="post"
-                      asp-page-handler="CreateDirectPayment"
-                      asp-route-id="@job.Id">
-                    <button type="submit" class="secondary-button">
-                        Zaplatit přímo
-                    </button>
-                </form>
+                @if (Model.CanCreateCardPayment)
+                {
+                    <form method="post"
+                          asp-page-handler="CreateDirectPayment"
+                          asp-route-id="@job.Id">
+                        <button type="submit" class="secondary-button">
+                            Zaplatit přímo
+                        </button>
+                    </form>
+                }
             </div>
         </section>
     }

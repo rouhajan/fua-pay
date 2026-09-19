@@ -8,6 +8,21 @@ namespace FuaPay.Web.Tests.Hosting;
 public sealed class PaymentProviderSelectionTests
 {
     [Fact]
+    public void Resolve_ExplicitNoneWithDisabledCsob_DisablesCardPayments()
+    {
+        var result = PaymentProviderSelection.Resolve(
+            "Production",
+            Configuration("None"),
+            RuntimeFeatures(simulatedPaymentsEnabled: false),
+            csobGatewayEnabled: false);
+
+        Assert.Null(result.Provider);
+        Assert.False(result.DevelopmentPaymentUiEnabled);
+        Assert.DoesNotContain("None", Enum.GetNames<PaymentProvider>());
+        Assert.DoesNotContain("Disabled", Enum.GetNames<PaymentProvider>());
+    }
+
+    [Fact]
     public void Resolve_ExplicitDevelopmentConfiguration_SelectsDevelopment()
     {
         var result = PaymentProviderSelection.Resolve(
@@ -34,11 +49,14 @@ public sealed class PaymentProviderSelectionTests
     }
 
     [Theory]
-    [InlineData(null, "Development", true, false)]
+    [InlineData(null, "Production", false, false)]
+    [InlineData("", "Production", false, false)]
+    [InlineData("Unknown", "Production", false, false)]
+    [InlineData("None", "Production", false, true)]
     [InlineData("Development", "Production", true, false)]
     [InlineData("Development", "Development", false, false)]
     [InlineData("Development", "Development", true, true)]
-    [InlineData("Csob", "Development", true, false)]
+    [InlineData("Csob", "Production", false, false)]
     public void Resolve_InvalidOrConflictingConfigurationFailsAtStartup(
         string? provider,
         string environmentName,

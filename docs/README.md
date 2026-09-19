@@ -15,7 +15,7 @@ Aktuální dokumentace je záměrně malá:
 - [čistý produkční cutover](deployment/production-cutover-plan.md);
 - [legacy SafeQ kreditní migrace](deployment/legacy-safeq-credit-migration.md);
 - [release a databázové artefakty](deployment/release-artifacts.md);
-- [demo / staging deployment](deployment/demo-staging.md);
+- [historická evidence přechodného demo / staging deploymentu](deployment/demo-staging.md);
 - [ověření 2026-08-18](testing/verification-2026-08-18.md);
 - [security servicing 2026-08-20](testing/verification-2026-08-20.md);
 - [GitHub repository hardening 2026-08-20](testing/github-repository-hardening-2026-08-20.md);

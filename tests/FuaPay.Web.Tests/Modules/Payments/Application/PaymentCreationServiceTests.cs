@@ -179,7 +179,7 @@ public sealed class PaymentCreationServiceTests
     }
 
     [Fact]
-    public async Task CreateCreditTopUpAsync_RejectsDisabledProviderForNewPayment()
+    public async Task CreateCreditTopUpAsync_UnavailableProviderHasNoFinancialEffect()
     {
         var harness = new CreationHarness(providerEnabled: false);
 
@@ -191,6 +191,36 @@ public sealed class PaymentCreationServiceTests
 
         Assert.Equal(0, harness.OrderNumbers.AllocateCalls);
         Assert.Equal(0, harness.Payments.AddPreparedCalls);
+        Assert.Equal(0, harness.Payments.SaveCalls);
+        Assert.Null(harness.Payments.AddedPayment);
+        Assert.Null(harness.Initiations.Stored);
+        Assert.Equal(0, harness.Initiations.SaveCalls);
+        Assert.Equal(0, harness.Provider.InitializeCalls);
+        Assert.Equal(0, harness.Provider.VerifyCalls);
+    }
+
+    [Fact]
+    public async Task CreateJobPaymentAsync_UnavailableProviderHasNoFinancialEffect()
+    {
+        var customerUserId = Guid.NewGuid();
+        var job = CreateJobDetail(customerUserId);
+        var harness = new CreationHarness(
+            jobQueries: new StubJobQueries { Job = job },
+            providerEnabled: false);
+
+        await Assert.ThrowsAsync<PaymentProviderUnavailableException>(
+            () => harness.Service.CreateJobPaymentAsync(
+                customerUserId,
+                job.Id));
+
+        Assert.Equal(0, harness.OrderNumbers.AllocateCalls);
+        Assert.Equal(0, harness.Payments.AddPreparedCalls);
+        Assert.Equal(0, harness.Payments.SaveCalls);
+        Assert.Null(harness.Payments.AddedPayment);
+        Assert.Null(harness.Initiations.Stored);
+        Assert.Equal(0, harness.Initiations.SaveCalls);
+        Assert.Equal(0, harness.Provider.InitializeCalls);
+        Assert.Equal(0, harness.Provider.VerifyCalls);
     }
 
     [Fact]
@@ -426,6 +456,8 @@ public sealed class PaymentCreationServiceTests
 
         public int AddPreparedCalls { get; private set; }
 
+        public int SaveCalls { get; private set; }
+
         public void Seed(
             Payment payment,
             PaymentInitiation initiation)
@@ -493,6 +525,7 @@ public sealed class PaymentCreationServiceTests
             Payment payment,
             CancellationToken cancellationToken = default)
         {
+            SaveCalls++;
             return Task.CompletedTask;
         }
     }
@@ -501,6 +534,8 @@ public sealed class PaymentCreationServiceTests
         IPaymentInitiationRepository
     {
         public PaymentInitiation? Stored { get; set; }
+
+        public int SaveCalls { get; private set; }
 
         public Task<PaymentInitiation?> FindByPaymentIdAsync(
             Guid paymentId,
@@ -514,6 +549,7 @@ public sealed class PaymentCreationServiceTests
             PaymentInitiation initiation,
             CancellationToken cancellationToken = default)
         {
+            SaveCalls++;
             Stored = initiation;
             return Task.CompletedTask;
         }

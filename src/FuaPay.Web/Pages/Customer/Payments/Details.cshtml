@@ -162,12 +162,16 @@
                         jiná úhrada.
                     </p>
                 }
-                else
+                else if (Model.CanCreatePayment)
                 {
                     <p>
                         Kredit nebyl dobit. Můžete vytvořit nové dobití
                         s jinou částkou nebo platební pokus zopakovat.
                     </p>
+                }
+                else
+                {
+                    <p>Kredit nebyl dobit.</p>
                 }
             </div>
 
@@ -192,7 +196,7 @@
                         Zpět k možnostem úhrady
                     </a>
                 }
-                else
+                else if (Model.CanCreatePayment)
                 {
                     <a asp-page="/Customer/Payments/CreateTopUp"
                        asp-route-view="customer"

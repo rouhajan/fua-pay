@@ -20,6 +20,8 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using CreditIndexModel = FuaPay.Web.Pages.Admin.Credit.IndexModel;
 using CustomerCreditIndexModel =
     FuaPay.Web.Pages.Customer.Credit.IndexModel;
+using CustomerPaymentsIndexModel =
+    FuaPay.Web.Pages.Customer.Payments.IndexModel;
 
 namespace FuaPay.Web.Tests.Pages;
 
@@ -37,6 +39,57 @@ public sealed class FinancialCommandPageTests
             new PaymentCreationAvailability(isAvailable));
 
         Assert.Equal(isAvailable, model.CanCreatePayment);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CustomerPaymentsIndex_PreservesHistoryAndUsesPaymentCreationAvailability(
+        bool isAvailable)
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = new PaymentListItem(
+            Guid.NewGuid(),
+            customerUserId,
+            PaymentPurposeType.CreditTopUp,
+            JobId: null,
+            AmountMinorUnits: 50_000,
+            PaymentProvider.Csob,
+            PaymentStatus.Succeeded,
+            ProviderReference: "pay1234567890",
+            FailureReason: null,
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+        var model = new CustomerPaymentsIndexModel(
+            new FixedCustomerPaymentQueries(payment),
+            new PaymentCreationAvailability(isAvailable))
+        {
+            PageContext = CreatePageContext(customerUserId)
+        };
+
+        await model.OnGetAsync();
+
+        Assert.Equal(isAvailable, model.CanCreatePayment);
+        Assert.Equal(payment, Assert.Single(model.Payments.Items));
+    }
+
+    [Fact]
+    public void CustomerPaymentsIndex_RendersTopUpActionOnlyWhenCreationIsAvailable()
+    {
+        var source = ReadPageSource(
+            "Customer",
+            "Payments",
+            "Index.cshtml");
+
+        Assert.Contains(
+            "@if (Model.CanCreatePayment)",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "asp-page=\"./CreateTopUp\"",
+            source,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -168,13 +221,45 @@ public sealed class FinancialCommandPageTests
                 NullAuditTrail.Instance,
                 new NullOrderNumberAllocator(),
                 provider,
-                initiationService));
+                initiationService),
+            new PaymentCreationAvailability(true));
 
         model.OnGet();
         var renderedRequestId = model.CreationRequestId;
 
         Assert.NotEqual(Guid.Empty, renderedRequestId);
         Assert.Equal(renderedRequestId, model.CreationRequestId);
+    }
+
+    [Fact]
+    public void TopUpGet_DisabledReturnsNotFoundWithoutRenderingForm()
+    {
+        var model = new CreateTopUpModel(
+            UnusedDependency<PaymentCreationService>(),
+            new PaymentCreationAvailability(false));
+
+        var result = model.OnGet();
+
+        Assert.IsType<Microsoft.AspNetCore.Mvc.NotFoundResult>(result);
+        Assert.Equal(Guid.Empty, model.CreationRequestId);
+    }
+
+    [Fact]
+    public async Task TopUpPost_DisabledRejectsBeforePaymentCreationService()
+    {
+        var customerUserId = Guid.NewGuid();
+        var model = new CreateTopUpModel(
+            UnusedDependency<PaymentCreationService>(),
+            new PaymentCreationAvailability(false))
+        {
+            PageContext = CreatePageContext(customerUserId),
+            CreationRequestId = Guid.NewGuid(),
+            AmountCrowns = 500m
+        };
+
+        var result = await model.OnPostAsync();
+
+        Assert.IsType<Microsoft.AspNetCore.Mvc.NotFoundResult>(result);
     }
 
     [Fact]
@@ -257,6 +342,25 @@ public sealed class FinancialCommandPageTests
         };
     }
 
+    private static T UnusedDependency<T>()
+        where T : class =>
+        (T)System.Runtime.CompilerServices.RuntimeHelpers
+            .GetUninitializedObject(typeof(T));
+
+    private static string ReadPageSource(params string[] relativePath)
+    {
+        return File.ReadAllText(
+            Path.Combine(
+                [
+                    FindRepositoryRoot(),
+                    "src",
+                    "FuaPay.Web",
+                    "Pages",
+                    .. relativePath
+                ]),
+            Encoding.UTF8);
+    }
+
     private static string FindRepositoryRoot()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
@@ -295,6 +399,46 @@ public sealed class FinancialCommandPageTests
             throw new NotSupportedException();
 
         public Task SaveAsync(Payment payment, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class FixedCustomerPaymentQueries : IPaymentQueries
+    {
+        private readonly PaymentListItem _payment;
+
+        public FixedCustomerPaymentQueries(PaymentListItem payment)
+        {
+            _payment = payment;
+        }
+
+        public Task<PaymentPage> ListForCustomerAsync(
+            Guid customerUserId,
+            PaymentListFilter filter,
+            PaymentPageRequest page,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PaymentPage(
+                _payment.CustomerUserId == customerUserId
+                    ? [_payment]
+                    : [],
+                page.Offset,
+                page.Limit,
+                _payment.CustomerUserId == customerUserId ? 1 : 0));
+
+        public Task<PaymentPage> ListForAdministrationAsync(
+            PaymentListFilter filter,
+            PaymentPageRequest page,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PaymentDetail?> FindForCustomerAsync(
+            Guid customerUserId,
+            Guid paymentId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PaymentDetail?> FindForAdministrationAsync(
+            Guid paymentId,
+            CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 

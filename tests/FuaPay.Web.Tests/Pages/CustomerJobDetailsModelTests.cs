@@ -1,7 +1,10 @@
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
 
+using FuaPay.Web.BuildingBlocks.Application;
+using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Domain;
+using FuaPay.Web.BuildingBlocks.Notifications;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Credits.Application;
@@ -16,7 +19,9 @@ using FuaPay.Web.Modules.ServiceUnits.Application;
 using FuaPay.Web.Pages.Customer.Jobs;
 
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 
 namespace FuaPay.Web.Tests.Pages;
 
@@ -74,6 +79,7 @@ public sealed class CustomerJobDetailsModelTests
                 new EmptyAccessUserQueries(),
                 new EmptyServiceUnitQueries()),
             UnusedDependency<PaymentCreationService>(),
+            new PaymentCreationAvailability(true),
             DisabledReceiptConfiguration())
         {
             PageContext = CreatePageContext(customerUserId)
@@ -89,6 +95,183 @@ public sealed class CustomerJobDetailsModelTests
         Assert.Equal(550, options.CreditBalanceMinorUnits);
         Assert.False(options.HasSufficientCredit);
         Assert.Equal(150, options.MissingCreditMinorUnits);
+    }
+
+    [Theory]
+    [InlineData(1_000, false, true)]
+    [InlineData(100, false, false)]
+    [InlineData(1_000, true, true)]
+    [InlineData(100, true, false)]
+    public async Task OnGetAsync_CardAvailabilityDoesNotChangeCreditPaymentOptions(
+        long availableCreditMinorUnits,
+        bool cardPaymentsEnabled,
+        bool hasSufficientCredit)
+    {
+        var customerUserId = Guid.NewGuid();
+        var job = CreatePublishedUnpaidJob(customerUserId);
+        var account = new CreditAccountSummary(
+            Guid.NewGuid(),
+            customerUserId,
+            availableCreditMinorUnits,
+            Version: 1);
+        var model = new DetailsModel(
+            new StubJobQueries(job),
+            new StubFinancialDocumentQueries(),
+            new StubCreditQueries(account),
+            new CreditAvailabilityService(
+                new StubCreditAvailabilityRepository(Money.Zero)),
+            UnusedDependency<CreditJobPaymentService>(),
+            new JobPresentationComposer(
+                new EmptyAccessUserQueries(),
+                new EmptyServiceUnitQueries()),
+            UnusedDependency<PaymentCreationService>(),
+            new PaymentCreationAvailability(cardPaymentsEnabled),
+            DisabledReceiptConfiguration())
+        {
+            PageContext = CreatePageContext(customerUserId)
+        };
+
+        var result = await model.OnGetAsync(job.Id);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Equal(cardPaymentsEnabled, model.CanCreateCardPayment);
+        Assert.Equal(
+            hasSufficientCredit,
+            Assert.IsType<CustomerJobPaymentOptions>(
+                model.PaymentOptions).HasSufficientCredit);
+    }
+
+    [Fact]
+    public async Task CreateDirectPaymentPost_DisabledReturnsNotFoundBeforeCreationService()
+    {
+        var customerUserId = Guid.NewGuid();
+        var job = CreatePublishedUnpaidJob(customerUserId);
+        var model = new DetailsModel(
+            new StubJobQueries(job),
+            new StubFinancialDocumentQueries(),
+            new StubCreditQueries(new CreditAccountSummary(
+                Guid.NewGuid(),
+                customerUserId,
+                BalanceMinorUnits: 1_000,
+                Version: 1)),
+            new CreditAvailabilityService(
+                new StubCreditAvailabilityRepository(Money.Zero)),
+            UnusedDependency<CreditJobPaymentService>(),
+            new JobPresentationComposer(
+                new EmptyAccessUserQueries(),
+                new EmptyServiceUnitQueries()),
+            UnusedDependency<PaymentCreationService>(),
+            new PaymentCreationAvailability(false),
+            DisabledReceiptConfiguration())
+        {
+            PageContext = CreatePageContext(customerUserId)
+        };
+
+        var result = await model.OnPostCreateDirectPaymentAsync(job.Id);
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task PayCreditPost_RemainsAvailableWhenCardPaymentsAreDisabled()
+    {
+        var customerUserId = Guid.NewGuid();
+        var job = CreatePublishedUnpaidJob(customerUserId);
+        var pageContext = CreatePageContext(customerUserId);
+        var creditPaymentService = new CreditJobPaymentService(
+            new UnusedJobRepository(),
+            new UnusedJobPaymentCoordination(),
+            UnusedDependency<CreditService>(),
+            new SuccessfulCreditPaymentTransaction(),
+            NullAuditTrail.Instance,
+            NullNotificationOutbox.Instance);
+        var model = new DetailsModel(
+            new StubJobQueries(job),
+            new StubFinancialDocumentQueries(),
+            new StubCreditQueries(new CreditAccountSummary(
+                Guid.NewGuid(),
+                customerUserId,
+                BalanceMinorUnits: 1_000,
+                Version: 1)),
+            new CreditAvailabilityService(
+                new StubCreditAvailabilityRepository(Money.Zero)),
+            creditPaymentService,
+            new JobPresentationComposer(
+                new EmptyAccessUserQueries(),
+                new EmptyServiceUnitQueries()),
+            UnusedDependency<PaymentCreationService>(),
+            new PaymentCreationAvailability(false),
+            DisabledReceiptConfiguration())
+        {
+            PageContext = pageContext,
+            TempData = new TempDataDictionary(
+                pageContext.HttpContext,
+                new MemoryTempDataProvider())
+        };
+
+        var result = await model.OnPostPayCreditAsync(job.Id);
+
+        Assert.IsType<RedirectToPageResult>(result);
+        Assert.Equal(
+            "Zakázka byla uhrazena kreditem.",
+            model.TempData["StatusMessage"]);
+    }
+
+    [Fact]
+    public void DetailsPage_GatesOnlyCardActionsOnPaymentCreationAvailability()
+    {
+        var pageSource = File.ReadAllText(
+            Path.Combine(
+                FindRepositoryRoot(),
+                "src",
+                "FuaPay.Web",
+                "Pages",
+                "Customer",
+                "Jobs",
+                "Details.cshtml"));
+        var modelSource = File.ReadAllText(
+            Path.Combine(
+                FindRepositoryRoot(),
+                "src",
+                "FuaPay.Web",
+                "Pages",
+                "Customer",
+                "Jobs",
+                "Details.cshtml.cs"));
+
+        Assert.Contains(
+            "else if (Model.CanCreateCardPayment)",
+            pageSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "@if (Model.CanCreateCardPayment)",
+            pageSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "asp-page-handler=\"PayCredit\"",
+            pageSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "asp-page-handler=\"CreateDirectPayment\"",
+            pageSource,
+            StringComparison.Ordinal);
+
+        var payCreditStart = modelSource.IndexOf(
+            "OnPostPayCreditAsync",
+            StringComparison.Ordinal);
+        var loadStart = modelSource.IndexOf(
+            "private async Task<bool> LoadAsync",
+            StringComparison.Ordinal);
+        Assert.True(payCreditStart >= 0);
+        Assert.True(loadStart > payCreditStart);
+        Assert.DoesNotContain(
+            "PaymentCreationAvailability",
+            modelSource[payCreditStart..loadStart],
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "CanCreateCardPayment",
+            modelSource[payCreditStart..loadStart],
+            StringComparison.Ordinal);
     }
 
 
@@ -222,6 +405,7 @@ public sealed class CustomerJobDetailsModelTests
                 new EmptyAccessUserQueries(),
                 new EmptyServiceUnitQueries()),
             UnusedDependency<PaymentCreationService>(),
+            new PaymentCreationAvailability(true),
             ReceiptConfiguration(receiptsEnabled))
         {
             PageContext = CreatePageContext(job.CustomerUserId)
@@ -250,6 +434,31 @@ public sealed class CustomerJobDetailsModelTests
             CreatedAt: now.AddHours(-2),
             PublishedAt: now.AddHours(-1),
             SettledAt: now,
+            ProductionStartedAt: null,
+            ReadyForPickupAt: null,
+            CompletedAt: null,
+            CancelledAt: null,
+            Version: 1);
+
+    private static JobDetail CreatePublishedUnpaidJob(
+        Guid customerUserId) =>
+        new(
+            Id: Guid.NewGuid(),
+            Number: "3D-2026-000003",
+            ServiceUnitId: Guid.NewGuid(),
+            CustomerUserId: customerUserId,
+            CreatedByUserId: customerUserId,
+            ServiceType: ServiceType.ThreeDPrint,
+            Title: "Neuhrazená zakázka",
+            Description: "Test dostupnosti plateb",
+            PriceMinorUnits: 700,
+            ProductionStatus: JobProductionStatus.Published,
+            PaymentStatus: JobPaymentStatus.Unpaid,
+            SettlementType: null,
+            SettlementReferenceId: null,
+            CreatedAt: DateTimeOffset.UtcNow.AddHours(-1),
+            PublishedAt: DateTimeOffset.UtcNow,
+            SettledAt: null,
             ProductionStartedAt: null,
             ReadyForPickupAt: null,
             CompletedAt: null,
@@ -549,5 +758,66 @@ public sealed class CustomerJobDetailsModelTests
                 Guid userId,
                 CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class SuccessfulCreditPaymentTransaction :
+        IApplicationTransaction
+    {
+        public Task<T> ExecuteAsync<T>(
+            Func<CancellationToken, Task<T>> operation,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Assert.Equal(typeof(bool), typeof(T));
+            return Task.FromResult((T)(object)true);
+        }
+    }
+
+    private sealed class UnusedJobRepository : IJobRepository
+    {
+        public Task<Job?> FindByIdAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task AddAsync(
+            Job job,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task SaveAsync(
+            Job job,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class UnusedJobPaymentCoordination :
+        IJobPaymentCoordination
+    {
+        public Task<bool> LockJobAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<bool> HasBlockingDirectPaymentAsync(
+            Guid jobId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class MemoryTempDataProvider : ITempDataProvider
+    {
+        private Dictionary<string, object> _values = [];
+
+        public IDictionary<string, object> LoadTempData(
+            HttpContext context) =>
+            new Dictionary<string, object>(_values);
+
+        public void SaveTempData(
+            HttpContext context,
+            IDictionary<string, object> values)
+        {
+            _values = new Dictionary<string, object>(values);
+        }
     }
 }

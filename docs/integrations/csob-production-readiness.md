@@ -1,10 +1,11 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-15
+Status: 2026-09-19
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
-stavu FUA Pay až k bezpečnému production cutoveru. Stabilní technický kontrakt je
-v [`csob.md`](csob.md); staging deployment evidence je v
+stavu až k bezpečné aktivaci produkčního ČSOB provozu. Není checklistem prvního
+produkčního spuštění FUA Pay bez karetních plateb. Stabilní technický kontrakt je
+v [`csob.md`](csob.md); historická staging deployment evidence je v
 [`../deployment/demo-staging.md`](../deployment/demo-staging.md). Incident
 2026-09-13 je zachycen v
 [`csob-incident-2026-09-13.md`](csob-incident-2026-09-13.md) a následná úspěšná
@@ -13,6 +14,25 @@ expiry acceptance v
 
 Oficiální ČSOB activation checklist:
 https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environment
+
+## Dva nezávislé milníky
+
+1. FUA Pay může přejít do produkce s `Payments__Provider=None` a
+   `Csob__Enabled=false`. Nové karetní platby, ČSOB return processing a
+   reconciliation worker jsou vypnuté; tento checklist první go-live neblokuje.
+2. Produkční ČSOB traffic se aktivuje později až po dokončení všech relevantních
+   bodů tohoto checklistu a přepnutí na `Payments__Provider=Csob` a
+   `Csob__Enabled=true` s produkčními credentials.
+
+Pokud pozdější integration acceptance vyžaduje plný browser/return tok, použije
+se pouze časově omezený non-production FUA Pay runtime na serveru s čerstvou
+izolovanou dočasnou PostgreSQL databází a rolí, integration ČSOB credentials/API
+a odděleným endpointem, portem nebo proxy route podle ověřených provozních
+možností. Nikdy nesmí použít produkční DB ani její restore. Po testovacím okně se
+runtime zastaví a odstraní; permanentní druhý staging FUA Pay se nezakládá.
+Přesná veřejná return URL zůstává provozním/bankovním omezením do jejího
+ověření; žádný konkrétní hostname, `PathBase` ani systemd model zde není
+prohlášen za schválený.
 
 ## A. Aktuálně prokázaný stav
 
@@ -47,8 +67,8 @@ https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environ
 - [ ] Production traffic není aktivní a nesmí být aktivován před dokončením
       zbytku tohoto checklistu.
 
-Aktuální staging runtime je po deploymentu 2026-09-15
-`9ecee2d9c57d88a2969d42094e49597b41f1642c`. Databáze má 21 aplikovaných EF
+Historický staging runtime po deploymentu 2026-09-15 běžel na revision
+`9ecee2d9c57d88a2969d42094e49597b41f1642c`. Databáze tehdy měla 21 aplikovaných EF
 migrací. Readiness, reconciliation worker, running-executable check i veřejný
 HTTP/HTTPS smoke po tomto deploymentu prošly. Incident 2026-09-13 tedy již není
 aktivní availability blocker; jeho konkrétní root cause ale zůstává neprokázaný.
@@ -119,8 +139,8 @@ je samostatná autoritativní hranice. Živý reverse scénář byl na stagingu 
 ### Rozhodnutí, která nejsou automaticky součástí tohoto passu
 
 - Refund není povinný ČSOB activation scénář. In-app card refund se implementuje
-  jen pokud ho FUA Pay potřebuje pro první production release; jinak se výslovně
-  zdokumentuje operátorský postup.
+  jen pokud bude schválen pro pozdější produkční karetní provoz; jinak se
+  výslovně zdokumentuje operátorský postup.
 - Nezavádět websocket/SSE jen kvůli jednomu stavu platby. Pro současný rozsah je
   preferovaný jednoduchý bounded polling malého status endpointu.
 
@@ -148,7 +168,7 @@ Podle oficiální wiki upravené 2026-06-30:
       kontrole ČSOB.
 - [ ] Počkat na potvrzení ČSOB, že production environment je aktivovaný.
 
-## D. FUA Pay vlastní integrační acceptance před production cutoverem
+## D. FUA Pay vlastní integrační acceptance před aktivací produkčního ČSOB
 
 Tyto scénáře nejsou náhradou bankovního checklistu; ověřují naši aplikaci jako
 celek.
@@ -167,7 +187,11 @@ celek.
 - [ ] Return UX: bez 404; bez ručního F5 pro běžný happy/cancel/expired tok.
 - [ ] Mobile + desktop smoke hlavního payment flow.
 
-## E. Staging release/deploy gate pro každý další ČSOB patch
+## E. Historický přechodný staging release/deploy gate
+
+Následující checklist zachovává pravidla a evidence již existujícího
+přechodného demo/staging runtime. Není návrhem permanentního druhého prostředí.
+Budoucí integrační okna používají výše popsaný dočasný izolovaný runtime.
 
 - [ ] clean `main` / přesný merge commit;
 - [ ] canonical `scripts/verify.ps1` PASS;
@@ -195,18 +219,18 @@ timeoutu. Stejný timeout po rollbacku na `768aec26...` a současné signed echo
 timeouty neprokázaly kódovou regresi a vedly ke code-only rollbacku.
 
 Tento blocker byl následně uzavřen čerstvou expiry acceptance 2026-09-14 po
-obnovení merchant eAPI. Aktuální staging runtime je od 2026-09-15
-`9ecee2d9c57d88a2969d42094e49597b41f1642c` se schema na 21 migracích a zdravým
+obnovení merchant eAPI. Historický staging runtime od 2026-09-15 běžel na revision
+`9ecee2d9c57d88a2969d42094e49597b41f1642c` se schématem 21 migrací a zdravým
 post-activation gate. Historická diagnostika z 2026-09-13 zůstává zachována jako
 evidence, nikoli jako aktuální runtime stav.
 
-## F. Production cutover až po bankovním schválení
+## F. Pozdější aktivace produkčního ČSOB až po bankovním schválení
 
-- [ ] Připravit production PostgreSQL workload a jasnou data-transition policy;
-      demo/seed data se nesmí omylem propagovat.
-- [ ] Připravit production secret/config store: DB, Data Protection keyring,
-      Entra config/secrets a ČSOB production signing/verification material podle
-      aktivace ČSOB.
+- [ ] Potvrdit, že produkční FUA Pay běží nad čistou produkční databází a že
+      aktivace ČSOB nevyžaduje schema redesign ani přenos demo/seed dat.
+- [ ] Doplnit do production secret/config store ČSOB production
+      signing/verification material podle aktivace ČSOB; existující DB, Data
+      Protection a Entra hranice zůstávají oddělené.
 - [ ] Přepnout API pouze na `https://api.platebnibrana.csob.cz/`.
 - [ ] Ověřit production merchant private key a production gateway public key;
       žádné fixed IP assumptions.

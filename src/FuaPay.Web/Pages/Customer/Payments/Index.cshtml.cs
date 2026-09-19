@@ -11,12 +11,19 @@ public sealed class IndexModel : PageModel
 {
     private const int PageSize = 30;
     private readonly IPaymentQueries _queries;
+    private readonly PaymentCreationAvailability _paymentAvailability;
 
-    public IndexModel(IPaymentQueries queries)
+    public IndexModel(
+        IPaymentQueries queries,
+        PaymentCreationAvailability paymentAvailability)
     {
         ArgumentNullException.ThrowIfNull(queries);
+        ArgumentNullException.ThrowIfNull(paymentAvailability);
         _queries = queries;
+        _paymentAvailability = paymentAvailability;
     }
+
+    public bool CanCreatePayment => _paymentAvailability.IsEnabled;
 
     public PaymentPage Payments { get; private set; } =
         new([], 0, PageSize, 0);
