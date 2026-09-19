@@ -236,10 +236,13 @@ Dne 2026-09-18 byl v současném prostředí poprvé reálně pozorován dokonč
 s Capture a správným odečtením 18 Kč z kreditu. Jde o důležitý integrační důkaz,
 ale ne o náhradu finálního produkčního gate.
 
-Před produkcí se také odstraní z Customer UI technický text typu
-`Capture print reservation <GUID>`. Zákazník má vidět lidský popis typu
-`Úhrada tisku`; interní reservation/job/operation identifikátory zůstávají
-pro audit a diagnostiku.
+Customer UI nyní zobrazuje zachycený tiskový debit lidským popisem
+`Úhrada tisku` místo technického textu typu
+`Capture print reservation <GUID>`. Rozpoznání je úmyslně omezené na Debit,
+přesný existující prefix a platný reservation GUID; uložený ledger description
+se nemění a interní reservation/job/operation identifikátory zůstávají pro
+audit a diagnostiku. Ověření je zdokumentováno v
+[print-credit movement verification](../testing/print-credit-movement-description-verification-2026-09-19.md).
 
 ## 10. Produkční runtime a secrets
 
@@ -416,7 +419,7 @@ Bez nového explicitního rozhodnutí nejsou součástí prvního cutoveru:
 
 Před skutečným produkčním cutoverem zůstává explicitně:
 
-- [ ] opravit zákaznický popis tiskového debit pohybu na lidský text;
+- [x] opravit zákaznický popis tiskového debit pohybu na lidský text — ověřeno 2026-09-19; merge této změny a následný deployment/smoke jsou stále součástí release procesu;
 - [ ] dokončit FUA Print ↔ FUA Pay cross-repo audit;
 - [ ] dokončit finální FUA Print E2E acceptance;
 - [ ] definovat a ověřit bootstrap prvního produkčního Administratora;

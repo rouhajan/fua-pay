@@ -27,5 +27,6 @@ Aktuální dokumentace je záměrně malá:
 - [ověření persistentního FUA Print credentialu 2026-09-15](testing/print-credential-verification-2026-09-15.md);
 - [staging acceptance ručního dobití kreditu 2026-09-15](testing/manual-credit-topup-acceptance-2026-09-15.md);
 - [FinancialDocuments v2 Stage D staging acceptance 2026-09-18](testing/financial-documents-v2-stage-d-staging-acceptance-2026-09-18.md);
+- [ověření zákaznického popisu tiskového debit pohybu 2026-09-19](testing/print-credit-movement-description-verification-2026-09-19.md);
 - [bezpečnost](../SECURITY.md);
 - [vendored frontendové závislosti](development/third-party-frontend-inventory.md).

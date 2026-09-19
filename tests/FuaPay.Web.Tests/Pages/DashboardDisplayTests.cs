@@ -53,6 +53,88 @@ public sealed class DashboardDisplayTests
     }
 
     [Fact]
+    public void MovementTitle_PrintCaptureUsesPrintLabel()
+    {
+        var reservationId = Guid.Parse(
+            "11111111-2222-3333-4444-555555555555");
+        var movement = CreateMovement(
+            CreditMovementType.Debit,
+            1_800,
+            $"Capture print reservation {reservationId}");
+
+        Assert.Equal(
+            "Úhrada tisku",
+            DashboardDisplay.MovementTitle(movement));
+    }
+
+    [Fact]
+    public void MovementDescription_PrintCaptureUsesPrintLabel()
+    {
+        var reservationId = Guid.Parse(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var movement = CreateMovement(
+            CreditMovementType.Debit,
+            1_800,
+            $"Capture print reservation {reservationId}");
+
+        Assert.Equal(
+            "Úhrada tisku",
+            DashboardDisplay.MovementDescription(movement));
+    }
+
+    [Fact]
+    public void MovementDescription_NonPrintMovementPreservesStoredDescription()
+    {
+        const string description = "Ruční dobití kreditu";
+        var movement = CreateMovement(
+            CreditMovementType.Credit,
+            5_000,
+            description);
+
+        Assert.Equal(
+            description,
+            DashboardDisplay.MovementDescription(movement));
+    }
+
+    [Fact]
+    public void MalformedPrintReference_IsNotRelabeledAsPrint()
+    {
+        const string description =
+            "Capture print reservation not-a-guid";
+        var movement = CreateMovement(
+            CreditMovementType.Debit,
+            1_800,
+            description);
+
+        Assert.Equal(
+            "Úhrada zakázky",
+            DashboardDisplay.MovementTitle(movement));
+        Assert.Equal(
+            description,
+            DashboardDisplay.MovementDescription(movement));
+    }
+
+    [Fact]
+    public void CreditWithPrintLikeDescription_IsNotRelabeledAsPrint()
+    {
+        var reservationId = Guid.Parse(
+            "11111111-2222-3333-4444-555555555555");
+        var description =
+            $"Capture print reservation {reservationId}";
+        var movement = CreateMovement(
+            CreditMovementType.Credit,
+            1_800,
+            description);
+
+        Assert.Equal(
+            description,
+            DashboardDisplay.MovementTitle(movement));
+        Assert.Equal(
+            description,
+            DashboardDisplay.MovementDescription(movement));
+    }
+
+    [Fact]
     public void JobLabels_AreUserFacing()
     {
         Assert.Equal(
@@ -168,14 +250,15 @@ public sealed class DashboardDisplayTests
 
     private static CreditMovementListItem CreateMovement(
         CreditMovementType type,
-        long amountMinorUnits)
+        long amountMinorUnits,
+        string description = "Technický popis s ID operace")
     {
         return new CreditMovementListItem(
             Guid.NewGuid(),
             type,
             amountMinorUnits,
             0,
-            "Technický popis s ID operace",
+            description,
             DateTimeOffset.UtcNow,
             1);
     }

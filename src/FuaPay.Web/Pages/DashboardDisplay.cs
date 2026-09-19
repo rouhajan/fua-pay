@@ -9,6 +9,10 @@ namespace FuaPay.Web.Pages;
 
 public static class DashboardDisplay
 {
+    private const string PrintCaptureDescriptionPrefix =
+        "Capture print reservation ";
+    private const string PrintPaymentLabel = "Úhrada tisku";
+
     private static readonly CultureInfo CzechCulture =
         CreateCzechCulture();
 
@@ -42,8 +46,23 @@ public static class DashboardDisplay
     {
         ArgumentNullException.ThrowIfNull(movement);
 
+        if (IsPrintCaptureMovement(movement))
+        {
+            return PrintPaymentLabel;
+        }
+
         return movement.Type == CreditMovementType.Debit
             ? "Úhrada zakázky"
+            : movement.Description;
+    }
+
+    public static string MovementDescription(
+        CreditMovementListItem movement)
+    {
+        ArgumentNullException.ThrowIfNull(movement);
+
+        return IsPrintCaptureMovement(movement)
+            ? PrintPaymentLabel
             : movement.Description;
     }
 
@@ -188,6 +207,30 @@ public static class DashboardDisplay
         }
 
         return JobStatusCssClass(productionStatus);
+    }
+
+    private static bool IsPrintCaptureMovement(
+        CreditMovementListItem movement)
+    {
+        if (movement.Type != CreditMovementType.Debit)
+        {
+            return false;
+        }
+
+        if (!movement.Description.StartsWith(
+                PrintCaptureDescriptionPrefix,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var reservationIdText =
+            movement.Description[PrintCaptureDescriptionPrefix.Length..];
+
+        return Guid.TryParseExact(
+            reservationIdText,
+            "D",
+            out _);
     }
 
     private static CultureInfo CreateCzechCulture()
