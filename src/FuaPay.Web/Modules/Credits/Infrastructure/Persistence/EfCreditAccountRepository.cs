@@ -178,6 +178,31 @@ internal sealed class EfCreditAccountRepository :
         catch (DbUpdateException exception)
             when (IsUniqueViolation(
                 exception,
+                LegacySafeQCreditTransferConfiguration
+                    .PrimaryKeyConstraint))
+        {
+            _dbContext.ChangeTracker.Clear();
+
+            throw new LegacySafeQCreditTransferCommandAlreadyExistsException(
+                operationId ?? Guid.Empty,
+                exception);
+        }
+        catch (DbUpdateException exception)
+            when (IsUniqueViolation(
+                exception,
+                LegacySafeQCreditTransferConfiguration
+                    .SafeQUserIdUniqueConstraint))
+        {
+            var safeQUserId = FindStagedSafeQUserId();
+            _dbContext.ChangeTracker.Clear();
+
+            throw new LegacySafeQCreditAlreadyTransferredException(
+                safeQUserId,
+                exception);
+        }
+        catch (DbUpdateException exception)
+            when (IsUniqueViolation(
+                exception,
                 CreditAccountConfiguration.OwnerUniqueConstraint))
         {
             _dbContext.ChangeTracker.Clear();
@@ -314,6 +339,33 @@ internal sealed class EfCreditAccountRepository :
                 newMovements.Length == 1
                     ? newMovements[0].OperationId
                     : Guid.Empty,
+                exception);
+        }
+        catch (DbUpdateException exception)
+            when (IsUniqueViolation(
+                exception,
+                LegacySafeQCreditTransferConfiguration
+                    .PrimaryKeyConstraint))
+        {
+            _dbContext.ChangeTracker.Clear();
+
+            throw new LegacySafeQCreditTransferCommandAlreadyExistsException(
+                newMovements.Length == 1
+                    ? newMovements[0].OperationId
+                    : Guid.Empty,
+                exception);
+        }
+        catch (DbUpdateException exception)
+            when (IsUniqueViolation(
+                exception,
+                LegacySafeQCreditTransferConfiguration
+                    .SafeQUserIdUniqueConstraint))
+        {
+            var safeQUserId = FindStagedSafeQUserId();
+            _dbContext.ChangeTracker.Clear();
+
+            throw new LegacySafeQCreditAlreadyTransferredException(
+                safeQUserId,
                 exception);
         }
         catch (DbUpdateException exception)
@@ -470,6 +522,16 @@ internal sealed class EfCreditAccountRepository :
             RecordedAt = movement.RecordedAt,
             Description = movement.Description
         };
+    }
+
+    private string FindStagedSafeQUserId()
+    {
+        return _dbContext.ChangeTracker
+            .Entries<LegacySafeQCreditTransferEntity>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => entry.Entity.SafeQUserId)
+            .FirstOrDefault()
+            ?? string.Empty;
     }
 
     private static bool IsUniqueViolation(

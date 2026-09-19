@@ -123,6 +123,91 @@ public sealed class ManualCreditTopUpNoteNotAllowedException :
     }
 }
 
+public sealed class LegacySafeQCreditTransferCommandAlreadyExistsException :
+    InvalidOperationException
+{
+    public LegacySafeQCreditTransferCommandAlreadyExistsException(
+        Guid commandId,
+        Exception? innerException = null)
+        : base(
+            $"Příkaz převodu SafeQ kreditu '{commandId}' již existuje.",
+            innerException)
+    {
+        CommandId = commandId;
+    }
+
+    public Guid CommandId { get; }
+}
+
+public sealed class LegacySafeQCreditTransferCommandConflictException :
+    InvalidOperationException
+{
+    public LegacySafeQCreditTransferCommandConflictException(Guid commandId)
+        : base(
+            $"Příkaz převodu SafeQ kreditu '{commandId}' byl již použit s jinými daty.")
+    {
+        CommandId = commandId;
+    }
+
+    public Guid CommandId { get; }
+}
+
+public sealed class LegacySafeQCreditAlreadyTransferredException :
+    InvalidOperationException
+{
+    public LegacySafeQCreditAlreadyTransferredException(
+        string safeQUserId,
+        Exception? innerException = null)
+        : base(
+            $"SafeQ účet '{safeQUserId}' již byl finančně převeden.",
+            innerException)
+    {
+        SafeQUserId = safeQUserId;
+    }
+
+    public string SafeQUserId { get; }
+}
+
+public sealed class LegacySafeQCreditTransferAmountNotAllowedException :
+    InvalidOperationException
+{
+    public LegacySafeQCreditTransferAmountNotAllowedException()
+        : base("Částka převodu SafeQ kreditu je mimo povolený rozsah.")
+    {
+    }
+}
+
+public sealed class LegacySafeQUserIdNotAllowedException :
+    InvalidOperationException
+{
+    public LegacySafeQUserIdNotAllowedException()
+        : base("SafeQ user ID není platné.")
+    {
+    }
+}
+
+public sealed class LegacySafeQSnapshotHashNotAllowedException :
+    InvalidOperationException
+{
+    public LegacySafeQSnapshotHashNotAllowedException()
+        : base("SHA-256 SafeQ balance snapshotu není platný.")
+    {
+    }
+}
+
+public sealed class LegacySafeQCreditTransferOwnerNotEligibleException :
+    InvalidOperationException
+{
+    public LegacySafeQCreditTransferOwnerNotEligibleException(Guid ownerId)
+        : base(
+            $"Uživatel '{ownerId}' není aktivní Customer a nemůže přijmout SafeQ převod.")
+    {
+        OwnerId = ownerId;
+    }
+
+    public Guid OwnerId { get; }
+}
+
 public sealed class InsufficientAvailablePrintCreditException :
     InvalidOperationException
 {
