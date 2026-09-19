@@ -329,6 +329,92 @@ public sealed class CustomerPaymentStage2Tests
     }
 
     [Fact]
+    public async Task Details_DisabledModeKeepsHistoryReadableWithoutProviderContinuation()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, PaymentStatus.Pending);
+        var provider = new RecordingProviderInitiator
+        {
+            ResolvedUri = ProcessUri
+        };
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            provider,
+            customerUserId,
+            paymentCreationEnabled: false);
+
+        var result = await model.OnGetAsync(payment.Id);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Equal(payment, model.Payment);
+        Assert.False(model.CanCreatePayment);
+        Assert.Null(model.TrustedProcessUri);
+        Assert.Equal(0, provider.ResolveCalls);
+    }
+
+    [Fact]
+    public async Task Details_DisabledModeRejectsCraftedDirectPaymentRetry()
+    {
+        var customerUserId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var payment = CreateDetail(
+            customerUserId,
+            PaymentStatus.Failed,
+            PaymentPurposeType.Job,
+            jobId);
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            jobQueries: new RecordingJobQueries(
+                CreatePublishedUnpaidJob(customerUserId, jobId)),
+            paymentCreationEnabled: false);
+
+        var getResult = await model.OnGetAsync(payment.Id);
+        var postResult = await model.OnPostRetryJobPaymentAsync(payment.Id);
+
+        Assert.IsType<PageResult>(getResult);
+        Assert.False(model.CanRetryJobPayment);
+        Assert.IsType<NotFoundResult>(postResult);
+    }
+
+    [Fact]
+    public async Task Details_DisabledModeDoesNotOfferNewCardTopUp()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateDetail(customerUserId, PaymentStatus.Failed);
+        var model = CreateDetailsModel(
+            new RecordingPaymentQueries(payment),
+            new RecordingProviderInitiator(),
+            customerUserId,
+            paymentCreationEnabled: false);
+
+        var result = await model.OnGetAsync(payment.Id);
+
+        Assert.IsType<PageResult>(result);
+        Assert.False(model.CanCreatePayment);
+
+        var source = File.ReadAllText(
+            Path.Combine(
+                FindRepositoryRoot(),
+                "src",
+                "FuaPay.Web",
+                "Pages",
+                "Customer",
+                "Payments",
+                "Details.cshtml"),
+            Encoding.UTF8);
+        Assert.Contains(
+            "Model.CanCreatePayment",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "asp-page=\"/Customer/Payments/CreateTopUp\"",
+            source,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Details_PendingBeforeGatewayReturnDoesNotPoll()
     {
         var customerUserId = Guid.NewGuid();
@@ -730,7 +816,8 @@ public sealed class CustomerPaymentStage2Tests
         CreditAvailabilityService? creditAvailabilityService = null,
         IFinancialDocumentQueries? financialDocumentQueries = null,
         IJobQueries? jobQueries = null,
-        ReceiptConfiguration? receiptConfiguration = null)
+        ReceiptConfiguration? receiptConfiguration = null,
+        bool paymentCreationEnabled = true)
     {
         return new PaymentDetailsModel(
             queries,
@@ -743,6 +830,7 @@ public sealed class CustomerPaymentStage2Tests
             jobQueries ?? new UnusedJobQueries(),
             UnusedDependency<PaymentCreationService>(),
             new DevelopmentPaymentAvailability(false),
+            new PaymentCreationAvailability(paymentCreationEnabled),
             provider,
             receiptConfiguration ?? ReceiptConfiguration(enabled: false))
         {
@@ -775,6 +863,32 @@ public sealed class CustomerPaymentStage2Tests
             null,
             null,
             null,
+            Version: 1);
+
+    private static JobDetail CreatePublishedUnpaidJob(
+        Guid customerUserId,
+        Guid jobId) =>
+        new(
+            jobId,
+            "3D-2026-000002",
+            Guid.NewGuid(),
+            customerUserId,
+            customerUserId,
+            ServiceType.ThreeDPrint,
+            "Model",
+            "Description",
+            25_000,
+            JobProductionStatus.Published,
+            JobPaymentStatus.Unpaid,
+            SettlementType: null,
+            SettlementReferenceId: null,
+            TestTime.AddDays(-1),
+            TestTime.AddHours(-1),
+            SettledAt: null,
+            ProductionStartedAt: null,
+            ReadyForPickupAt: null,
+            CompletedAt: null,
+            CancelledAt: null,
             Version: 1);
 
     private static ReceiptConfiguration ReceiptConfiguration(bool enabled) =>

@@ -12,6 +12,15 @@ Detailní evidence incidentu 2026-09-13 je v
 a následná úspěšná expiry acceptance v
 [`../testing/csob-expiry-acceptance-2026-09-14.md`](../testing/csob-expiry-acceptance-2026-09-14.md).
 
+Tento runtime je přechodné pre-production/demo prostředí a níže uvedené záznamy
+jsou historická deployment/acceptance evidence. Není to cílový permanentní druhý
+FUA Pay server. Po prvním produkčním go-live se případné další plné ČSOB
+browser/return testy provádějí jen v omezeném testovacím okně nad dočasným
+non-production runtime a čerstvou izolovanou dočasnou PostgreSQL databází a rolí;
+nikdy nad produkční DB ani jejím restore. Dočasný runtime se po testu zastaví a
+odstraní. Konkrétní endpoint, port, proxy route a veřejná return URL se musí pro
+dané okno teprve provozně ověřit.
+
 ## Aktuální runtime
 
 Ověřeno přímo na staging VM 2026-09-19 po deploymentu
@@ -214,7 +223,7 @@ Print feature zůstávají po deploymentu vypnuté. Zapnutí `PrintPayments` /
 jsou samostatný následný provozní krok a nejsou součástí tohoto deployment
 closeoutu.
 
-## Canonical staging post-activation health rule
+## Historické pravidlo staging post-activation health
 
 Direct Kestrel requests must include both:
 

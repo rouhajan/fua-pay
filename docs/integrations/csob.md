@@ -1,18 +1,27 @@
 # ČSOB Payment Gateway eAPI 1.9
 
-Status: 2026-09-12
+Status: 2026-09-19
 
-FUA Pay používá ČSOB jako provider adaptér nad interním provider-neutral modelem
-platby. Browserový návrat nikdy není finanční autorita; autoritativní stav se
-vždy ověřuje serverovým `payment/status` a teprve ověřený stav může změnit
-lokální platbu, kredit nebo zakázku.
+Pokud je ČSOB aktivní, FUA Pay jej používá jako provider adaptér nad interním
+provider-neutral modelem platby. Browserový návrat nikdy není finanční autorita;
+autoritativní stav se vždy ověřuje serverovým `payment/status` a teprve ověřený
+stav může změnit lokální platbu, kredit nebo zakázku.
+
+Produkční spuštění aplikace a aktivace produkčního ČSOB jsou dva nezávislé
+milníky. První FUA Pay production go-live je podporovaný s
+`Payments__Provider=None` a `Csob__Enabled=false`; nevytváří nové karetní platby
+a není blokován bankovním activation checklistem. Tento checklist zůstává plně
+závazný pro pozdější přepnutí na skutečný produkční ČSOB provoz.
 
 Podrobný aktuální checklist od integračního prostředí až po produkci je v
 [`csob-production-readiness.md`](csob-production-readiness.md). Tento dokument
 popisuje stabilní integrační kontrakt a aktuální implementační stav, aby se
 stejné provozní TODO neduplikovalo na více místech.
 
-## Aktuální integrační prostředí
+## Historicky ověřené integrační prostředí
+
+Následující body jsou historická evidence přechodného demo/staging runtime,
+nikoli cílový trvale běžící druhý FUA Pay server:
 
 - Merchant ID: `M1EPAY2213`.
 - ČSOB integration API: `https://iapi.iplatebnibrana.csob.cz/`.
@@ -202,6 +211,17 @@ operátorský postup mimo aplikaci.
 
 ## Konfigurace
 
+První produkční profil bez karetních plateb:
+
+```text
+Payments__Provider=None
+Csob__Enabled=false
+```
+
+V tomto profilu nejsou vyžadovány ČSOB merchant ID, klíče, API ani return URL.
+ČSOB klient, return processing a reconciliation worker nejsou aktivní a CSP
+zůstává na `form-action 'self'`.
+
 Integration:
 
 ```text
@@ -214,16 +234,28 @@ Csob__GatewayPublicKeyPath=<absolutní cesta k integration public key brány>
 Csob__ReturnUrl=https://fuapay.tul.cz/payments/csob/return
 ```
 
-Production smí použít pouze:
+Budoucí plný browser/return test integration prostředí se provádí jen v časově
+omezeném okně nad dočasným non-production FUA Pay runtime na serveru. Musí použít
+čerstvou izolovanou dočasnou PostgreSQL databázi a roli, pouze integration ČSOB
+credentials/API a podle potřeby oddělený endpoint, port nebo proxy route. Nesmí
+použít produkční databázi ani její restore. Po testovacím okně se runtime zastaví
+a odstraní; nevzniká permanentní druhý staging FUA Pay.
+
+Konkrétní veřejná return URL pro takový dočasný runtime zůstává provozním a
+bankovním omezením, dokud nebude ověřena. Tento dokument proto neschvaluje žádný
+konkrétní hostname, `PathBase`, port, proxy konfiguraci ani systemd uspořádání.
+
+Pozdější aktivní produkční ČSOB profil používá
+`Payments__Provider=Csob`, `Csob__Enabled=true` a pouze:
 
 ```text
 Csob__ApiBaseUrl=https://api.platebnibrana.csob.cz/
 ```
 
-Při production cutoveru se musí použít produkční konfigurace/klíče schválené
-ČSOB a produkční veřejný klíč brány. Žádný privátní klíč ani secret nesmí být v
-Git/release. Neúplná nebo konfliktní ČSOB konfigurace musí zastavit startup;
-`Development` provider není fallback.
+Při aktivaci produkčního ČSOB se musí použít produkční konfigurace/klíče
+schválené ČSOB a produkční veřejný klíč brány. Žádný privátní klíč ani secret
+nesmí být v Git/release. Neúplná nebo konfliktní ČSOB konfigurace musí zastavit
+startup; `Development` provider není fallback.
 
 Reconciliation konfigurace musí mít dost pokusů, aby se její retry horizont
 nevyčerpal před `Csob:PaymentTtlSeconds`, třicetisekundovou provider rezervou a
@@ -245,7 +277,9 @@ integration prostředí:
 - následné potvrzení všech scénářů v POS Merchant a review ČSOB.
 
 Po schválení se přepíná na production API, ověří se produkční signing/verification
-klíče a před otevřením uživatelům se provede kontrolovaný produkční test.
+klíče a před otevřením karetního toku uživatelům se provede kontrolovaný
+produkční test. To je pozdější ČSOB activation gate, nikoli podmínka prvního FUA
+Pay go-live bez karet.
 
 Oficiální zdroj:
 https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environment

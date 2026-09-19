@@ -9,7 +9,10 @@
 <section class="functional-page">
     <header class="functional-header split-header">
         <div><p class="panel-kicker">Zákazník</p><h1>Moje platby</h1><p>Platební záznamy jsou oddělené od pohybů kreditu a lze je bezpečně zpracovat opakovaně.</p></div>
-        <a asp-page="./CreateTopUp" asp-route-view="customer" class="primary-action-button">Dobít kredit</a>
+        @if (Model.CanCreatePayment)
+        {
+            <a asp-page="./CreateTopUp" asp-route-view="customer" class="primary-action-button">Dobít kredit</a>
+        }
     </header>
 
     @if (TempData["StatusMessage"] is string message)

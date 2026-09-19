@@ -1,4 +1,5 @@
 using FuaPay.Web.BuildingBlocks.Auditing;
+using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.BuildingBlocks.Notifications;
 using FuaPay.Web.Development;
 using FuaPay.Web.Modules.Access;
@@ -541,6 +542,74 @@ public sealed class ModuleRegistrationTests
             descriptor =>
                 descriptor.ServiceType ==
                 typeof(IPaymentProviderInitiator));
+    }
+
+    [Fact]
+    public void PaymentProviderSelection_NoneResolvesExactlyOneUnavailableInitiator()
+    {
+        var services = new ServiceCollection();
+        services.AddPaymentsModule(activeProvider: null);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var initiator = scope.ServiceProvider
+            .GetRequiredService<IPaymentProviderInitiator>();
+
+        Assert.Throws<PaymentProviderUnavailableException>(
+            initiator.EnsureAvailable);
+        Assert.False(
+            scope.ServiceProvider
+                .GetRequiredService<PaymentCreationAvailability>()
+                .IsEnabled);
+        Assert.False(
+            scope.ServiceProvider
+                .GetRequiredService<DevelopmentPaymentAvailability>()
+                .IsEnabled);
+        Assert.IsNotType<DevelopmentPaymentProviderInitiator>(initiator);
+        Assert.Single(
+            services,
+            descriptor =>
+                descriptor.ServiceType ==
+                typeof(IPaymentProviderInitiator));
+    }
+
+    [Fact]
+    public async Task UnavailablePaymentProviderInitiator_AllOperationsFailClosedWithoutExposingProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddPaymentsModule(activeProvider: null);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var initiator = Assert.IsType<UnavailablePaymentProviderInitiator>(
+            scope.ServiceProvider
+                .GetRequiredService<IPaymentProviderInitiator>());
+        var request = new PaymentProviderInitializationRequest(
+            Guid.NewGuid(),
+            PaymentProvider.Csob,
+            1,
+            Guid.NewGuid(),
+            PaymentPurposeType.CreditTopUp,
+            jobId: null,
+            new Money(50_000));
+        var candidate = new PaymentProviderInitializationResult(
+            PaymentProvider.Csob,
+            "pay1234567890",
+            new Uri("https://gateway.example/pay/process"));
+
+        Assert.Throws<PaymentProviderUnavailableException>(
+            () => _ = initiator.Provider);
+        Assert.Throws<PaymentProviderUnavailableException>(
+            initiator.EnsureAvailable);
+        await Assert.ThrowsAsync<PaymentProviderUnavailableException>(
+            () => initiator.InitializeAsync(request));
+        await Assert.ThrowsAsync<PaymentProviderUnavailableException>(
+            () => initiator.VerifyAsync(candidate));
+        Assert.Null(
+            initiator.ResolveTrustedProcessUri(
+                PaymentProvider.Csob,
+                candidate.ProviderReference,
+                candidate.ProcessUri?.AbsoluteUri));
     }
 
     [Fact]

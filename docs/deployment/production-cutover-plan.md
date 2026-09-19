@@ -10,7 +10,7 @@ cutover plánu.
 
 Cíl je jednoduchý: na `https://fuapay.tul.cz` poběží jedna čistá produkční
 instance FUA Pay bez demo/test dat, bez vývojových funkcí a pouze s
-produkčními integračními credentials.
+produkčními credentials pro skutečně aktivované integrace.
 
 ## 1. Základní rozhodnutí
 
@@ -40,14 +40,19 @@ První produkční FUA Pay má obsahovat současný ověřený produktový rozsa
 - kreditní účet a neměnnou historii pohybů;
 - administrátorské ruční dobití kreditu;
 - oddělené administrativní korekce kreditu;
-- ČSOB karetní dobití kreditu;
-- ČSOB přímou karetní úhradu zakázky;
-- reconciliation/recovery plateb;
-- plnou CardJob reverse cestu, která je již implementovaná;
 - kanonické `FinancialDocuments v2` a PDF `Doklad o úhradě`;
-- FUA Print service API pro Reserve / ResolutionRequired / Capture / Release;
-- zákaznický e-mail + šestiznakový tiskový PIN;
+- úhradu publikovaných zakázek z existujícího FUA Pay kreditu;
+- FUA Print service API pro Reserve / ResolutionRequired / Capture / Release a
+  zákaznický e-mail + šestiznakový tiskový PIN až po jeho samostatném produkčním
+  acceptance/configuration gate;
+- dedikovaný `LegacySafeQCreditTransfer`, jakmile bude připraven jeho samostatný
+  operátorský acceptance;
 - audit, health endpointy a provozní recovery hranice.
+
+První go-live je výslovně zamýšlen s
+`ASPNETCORE_ENVIRONMENT=Production`, `Payments__Provider=None` a
+`Csob__Enabled=false`. Produkce tedy může být otevřena bez vytváření nových
+karetních plateb. ČSOB není blocker tohoto prvního milníku.
 
 Legacy `Receipts` není finanční source of truth. V produkci může zůstat
 vypnutý; nové formální doklady vlastní výhradně `FinancialDocuments`.
@@ -93,11 +98,19 @@ vhodný jako párovací podklad, ale neobsahuje autoritativní aktuální zůsta
 Finální částky proto musí přijít z nového SafeQ balance snapshotu po freeze
 starého systému. Raw exporty s osobními údaji zůstávají mimo veřejný Git.
 
-Legacy převod se bude evidovat jako existující **Administrativní korekce** s
-jasným důvodem `Převod zůstatku ze SafeQ`. Nejde o nové ruční dobití ani nový
-externí příjem, proto při této operaci nevzniká nový `FinancialDocument`.
-Párování identity zůstává read-only a každý konkrétní SafeQ -> FUA Pay pár musí
-před finančním zápisem potvrdit administrátor.
+Legacy převod používá dedikovanou operaci `LegacySafeQCreditTransfer`, nikoli
+ruční dobití ani obecnou administrativní korekci. Vytvoří canonical credit
+movement, durable transfer record s unikátním SafeQ user ID a audit, ale žádný
+`Payment` ani `FinancialDocument`. Zákaznický popis je přesně
+`Převod kreditu ze SafeQ`.
+
+Čistou produkci lze otevřít dříve, než budou vytvořeny účty všech studentů.
+Interní Customer identity vzniká legitimním Entra JIT loginem. Před finálním
+SafeQ freeze smí matching probíhat jen read-only; po vytvoření jediného finálního
+immutable snapshotu a zaznamenání jeho SHA-256 lze lidsky potvrzené kladné
+převody provádět postupně během více dnů. Všechny převody tohoto cutoveru používají
+tentýž snapshot a každý SafeQ user ID lze finančně převést jen jednou za celý
+život. Nulové a záporné zůstatky se řeší podle samostatné migrační politiky.
 
 ## 5. Microsoft Entra ID
 
@@ -128,7 +141,17 @@ Před otevřením čisté produkce se znovu ověří:
 - ruční přiřazení Requester/Administrator role;
 - zablokování/odebrání role bez čekání na starou session autorizaci.
 
-## 6. ČSOB: z integration do production
+## 6. ČSOB: samostatný pozdější produkční milník
+
+Je nutné rozlišovat dva nezávislé milníky:
+
+1. FUA Pay production go-live s vypnutým vytvářením karetních plateb
+   (`Payments__Provider=None`, `Csob__Enabled=false`).
+2. Pozdější aktivaci produkčního ČSOB provozu po jeho vlastním bankovním,
+   konfiguračním, bezpečnostním, payment a reconciliation acceptance gate.
+
+První milník na dokončení druhého nečeká. Přepnutí na ČSOB je runtime/configuration
+změna nad existujícím finančním schématem, nikoli databázová migrace.
 
 Současný ověřený ČSOB provoz používá integration prostředí. Produkce nesmí
 použít integration merchant, integration signing klíče ani
@@ -148,7 +171,7 @@ Zbývající povinné kroky zahrnují zejména:
 - ověřit produkční signing/verification hranici;
 - provést řízený produkční payment smoke.
 
-FUA Pay vlastní acceptance před cutoverem musí navíc uzavřít dosud otevřené
+FUA Pay vlastní acceptance před aktivací produkčního ČSOB musí navíc uzavřít dosud otevřené
 scénáře z aktuálního checklistu, zejména decline/failed, duplicate browser
 return, lost browser return, restart během pending platby, opakovaný status,
 opuštěnou pending platbu a desktop/mobile smoke.
@@ -254,22 +277,28 @@ AllowedHosts=fuapay.tul.cz
 Database__ApplyMigrationsOnStart=false
 DevelopmentSignIn__Enabled=false
 DevelopmentData__Enabled=false
+DevelopmentData__ResetOnStart=false
 StagingTestMode__Enabled=false
 Entra__Enabled=true
-Payments__Provider=Csob
-Csob__Enabled=true
+Payments__Provider=None
+Csob__Enabled=false
 ```
+
+V tomto prvním produkčním profilu nejsou potřeba ČSOB merchant ID, klíče, API
+ani return URL; ČSOB return processing a reconciliation worker neběží a CSP
+nepovoluje externí payment `form-action` origin.
 
 Mimo release musí zůstat minimálně:
 
 - PostgreSQL connection string / hesla;
 - Entra Client Secret;
-- ČSOB merchant private key;
-- ČSOB gateway public key;
 - FUA Print service credential/hash konfigurace;
 - PrintCredentials pepper;
 - Data Protection key ring;
 - PDF fonty.
+
+ČSOB merchant private key a gateway public key se do produkčního secret store
+doplní až pro samostatnou pozdější aktivaci ČSOB.
 
 Data Protection key ring musí být po produkčním go-live persistentní přes
 všechny další release. Jeho ztráta nebo nahrazení zneplatní sessions a
@@ -335,25 +364,27 @@ retenci, šifrování a přístupová oprávnění.
 Doporučený finální sled je:
 
 1. dokončit drobné UX nálezy a cross-repo FUA Print audit;
-2. uzavřít zbývající ČSOB integration acceptance;
-3. vybrat přesný release candidate SHA;
-4. full repository/DB/security gate;
-5. vytvořit release a migration artefakty;
-6. archivovat současnou demo DB;
-7. založit čistou produkční DB a aplikovat celý migration chain;
-8. provést bezpečný bootstrap prvního Administratora a reálných ServiceUnits;
-9. zmrazit starý SafeQ provoz a vytvořit finální autoritativní balance snapshot;
-10. připravit první adminem potvrzené SafeQ -> FUA Pay páry pro legacy převod;
-11. nainstalovat produkční secrets a production environment konfiguraci;
-12. aktivovat Entra a ověřit login/logout/role;
-13. po schválení ČSOB nainstalovat production merchant konfiguraci a provést
-    production payment smoke;
-14. po finálním FUA Print gate aktivovat PrintPayments + PrintCredentials;
-15. atomicky aktivovat release;
-16. ověřit `/health/live`, `/health/ready`, worker health a veřejné HTTPS;
-17. provést pouze řízené produkční smoke scénáře;
-18. otevřít systém uživatelům;
-19. ponechat bezprostředně předchozí kompatibilní release jako code rollback.
+2. vybrat přesný release candidate SHA;
+3. provést full repository/DB/security gate;
+4. vytvořit release a migration artefakty;
+5. archivovat současnou demo DB;
+6. založit čistou produkční DB a aplikovat celý migration chain;
+7. provést bezpečný bootstrap prvního Administratora a reálných ServiceUnits;
+8. nainstalovat produkční secrets a profil `Payments__Provider=None`,
+   `Csob__Enabled=false`;
+9. aktivovat Entra a ověřit login/logout/role;
+10. po finálním FUA Print gate aktivovat PrintPayments +
+    PrintCredentials;
+11. atomicky aktivovat release;
+12. ověřit `/health/live`, `/health/ready` a veřejné HTTPS;
+13. provést pouze řízené produkční smoke scénáře;
+14. otevřít systém uživatelům a umožnit Entra JIT vznik Customer identit;
+15. ponechat bezprostředně předchozí kompatibilní release jako code rollback;
+16. před finálním SafeQ freeze připravovat pouze read-only matching;
+17. zmrazit SafeQ, vytvořit finální immutable balance snapshot, zaznamenat jeho
+    SHA-256 a postupně provádět lidsky potvrzené `LegacySafeQCreditTransfer`;
+18. nezávisle dokončit ČSOB acceptance; teprve potom nainstalovat produkční
+    merchant konfiguraci, přepnout provider a provést production payment smoke.
 
 Žádná demo data se při tomto pořadí „nečistí“ in-place a žádný finanční ledger
 se ručně neresetuje.
@@ -371,9 +402,10 @@ Před označením systému jako Production musí být prokázáno minimálně:
 - ruční dobití a korekce mají správně odlišnou finanční semantiku;
 - FinancialDocument vzniká pouze tam, kde má;
 - PDF doklad se opakovaným stažením nemění a nevytváří nový dokument;
-- ČSOB production signing/echo PASS;
-- řízená production platba PASS;
-- reconciliation worker Healthy;
+- `Payments__Provider=None` a `Csob__Enabled=false` startují fail-closed bez
+  zákaznických karetních entry pointů, ČSOB runtime a externích CSP originů;
+- ruční top-up, úhrada zakázky kreditem a případně samostatně přijatý FUA Print
+  zůstávají na dostupnosti karet nezávislé;
 - FUA Print Reserve/Capture/Release E2E PASS;
 - tisk neodečte kredit dvakrát;
 - neprovedený tisk kredit nestrhne;
@@ -387,13 +419,14 @@ Před označením systému jako Production musí být prokázáno minimálně:
 Po spuštění se průběžně sleduje:
 
 - `/health/live` a `/health/ready`;
-- ČSOB reconciliation worker;
 - opakované 503;
-- payment `RequiresAttention`;
 - auditní události;
 - stav záloh;
-- expirace/rotace Entra secretu a ČSOB klíčů;
+- expirace/rotace Entra secretu;
 - HARICA certifikát a renewal.
+
+Po pozdější aktivaci ČSOB se navíc sleduje reconciliation worker, payment
+`RequiresAttention` a expirace/rotace ČSOB klíčů.
 
 Další release se nasazují stejným side-by-side modelem. Pro běžný vývoj se
 nezakládá permanentní staging server; CI, izolované PostgreSQL testy a
@@ -417,25 +450,37 @@ Bez nového explicitního rozhodnutí nejsou součástí prvního cutoveru:
 
 ## 18. Konkrétní otevřené položky k uzavření
 
-Před skutečným produkčním cutoverem zůstává explicitně:
+Před prvním produkčním go-live zůstává explicitně:
 
 - [x] opravit zákaznický popis tiskového debit pohybu na lidský text — merge, staging deployment i Customer smoke ověřeny 2026-09-19; budoucí čistý production cutover zůstává samostatným gate;
 - [ ] dokončit FUA Print ↔ FUA Pay cross-repo audit;
 - [ ] dokončit finální FUA Print E2E acceptance;
 - [ ] definovat a ověřit bootstrap prvního produkčního Administratora;
-- [ ] připravit finální SafeQ balance export po freeze starého systému;
-- [ ] dokončit read-only SafeQ -> FUA Pay matching/report nástroj a provozní postup ručně potvrzených administrativních korekcí;
 - [ ] definovat počáteční produkční ServiceUnits/role assignment;
-- [ ] uzavřít otevřené vlastní ČSOB acceptance scénáře;
-- [ ] fresh ČSOB GET/POST echo těsně před activation;
-- [ ] potvrdit activation scénáře v POS Merchant a získat schválení ČSOB;
-- [ ] nainstalovat production ČSOB merchant/key konfiguraci;
 - [ ] potvrdit produkční FinancialDocument číselnou řadu nad čistou DB;
 - [ ] připravit a ověřit čistou produkční PostgreSQL DB + backup/restore;
 - [ ] ověřit finální production environment/secrets a filesystem permissions;
 - [ ] ověřit Nginx/TLS/HARICA stav;
 - [ ] final release candidate full gate;
 - [ ] kontrolovaný go-live smoke a provozní monitoring.
+
+Samostatně před prvním skutečným SafeQ převodem zůstává:
+
+- [ ] provést finální SafeQ freeze a připravit immutable balance snapshot včetně
+  SHA-256;
+- [ ] definovat operátorský postup pro explicitně potvrzené
+  `LegacySafeQCreditTransfer`; případný CLI nástroj musí volat aplikační službu a
+  není dosud implementovaný;
+- [ ] potvrdit, že matching sám nevytváří finanční efekt a každý skutečný pár
+  schvaluje člověk.
+
+Samostatně před pozdější aktivací produkčního ČSOB zůstává:
+
+- [ ] uzavřít otevřené vlastní ČSOB acceptance scénáře;
+- [ ] fresh ČSOB GET/POST echo těsně před activation;
+- [ ] potvrdit activation scénáře v POS Merchant a získat schválení ČSOB;
+- [ ] nainstalovat production ČSOB merchant/key konfiguraci;
+- [ ] ověřit produkční signing/verification, payment smoke a reconciliation.
 
 Tento seznam se má zkracovat pouze na základě konkrétního ověření/evidence,
 nikoli odhadem.

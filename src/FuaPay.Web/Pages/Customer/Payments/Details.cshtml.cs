@@ -26,6 +26,7 @@ public sealed class DetailsModel : PageModel
     private readonly IJobQueries _jobQueries;
     private readonly PaymentCreationService _paymentCreationService;
     private readonly DevelopmentPaymentAvailability _developmentAvailability;
+    private readonly PaymentCreationAvailability _paymentAvailability;
     private readonly IPaymentProviderInitiator _providerInitiator;
     private readonly ReceiptConfiguration _receiptConfiguration;
 
@@ -38,6 +39,7 @@ public sealed class DetailsModel : PageModel
         IJobQueries jobQueries,
         PaymentCreationService paymentCreationService,
         DevelopmentPaymentAvailability developmentAvailability,
+        PaymentCreationAvailability paymentAvailability,
         IPaymentProviderInitiator providerInitiator,
         ReceiptConfiguration receiptConfiguration)
     {
@@ -49,6 +51,7 @@ public sealed class DetailsModel : PageModel
         ArgumentNullException.ThrowIfNull(jobQueries);
         ArgumentNullException.ThrowIfNull(paymentCreationService);
         ArgumentNullException.ThrowIfNull(developmentAvailability);
+        ArgumentNullException.ThrowIfNull(paymentAvailability);
         ArgumentNullException.ThrowIfNull(providerInitiator);
         ArgumentNullException.ThrowIfNull(receiptConfiguration);
 
@@ -60,6 +63,7 @@ public sealed class DetailsModel : PageModel
         _jobQueries = jobQueries;
         _paymentCreationService = paymentCreationService;
         _developmentAvailability = developmentAvailability;
+        _paymentAvailability = paymentAvailability;
         _providerInitiator = providerInitiator;
         _receiptConfiguration = receiptConfiguration;
     }
@@ -74,11 +78,14 @@ public sealed class DetailsModel : PageModel
 
     public bool HasLegacyJobReceiptFallback { get; private set; }
 
+    public bool CanCreatePayment => _paymentAvailability.IsEnabled;
+
     public Uri? TrustedProcessUri { get; private set; }
 
     public bool ShouldPoll { get; private set; }
 
     public bool CanRetryJobPayment =>
+        CanCreatePayment &&
         Payment.PurposeType == PaymentPurposeType.Job &&
         PaymentDisplay.IsUnsuccessfulTerminalStatus(Payment.Status) &&
         Payment.JobId.HasValue &&
@@ -198,6 +205,11 @@ public sealed class DetailsModel : PageModel
         Guid id,
         CancellationToken cancellationToken = default)
     {
+        if (!CanCreatePayment)
+        {
+            return NotFound();
+        }
+
         if (!await LoadAsync(id, cancellationToken))
         {
             return NotFound();
@@ -306,7 +318,9 @@ public sealed class DetailsModel : PageModel
             }
         }
 
-        TrustedProcessUri = Payment.Status == PaymentStatus.Pending
+        TrustedProcessUri =
+            CanCreatePayment &&
+            Payment.Status == PaymentStatus.Pending
             ? _providerInitiator.ResolveTrustedProcessUri(
                 Payment.Provider,
                 Payment.ProviderReference,

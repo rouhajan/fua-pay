@@ -189,23 +189,45 @@ Pracovní tabulka s osobními údaji zůstává mimo veřejný Git.
 
 ## Produkční workflow
 
-Doporučený jednorázový proces:
+Doporučený proces nevyžaduje produkční administrační UI. Případný malý
+terminálový/CLI nástroj pro operátora musí volat existující aplikační hranici
+`LegacySafeQCreditTransferService`; nesmí zapisovat přímo do credit ledgeru,
+tabulky transferů, auditu ani jiných finančních tabulek. Takový nástroj v
+repozitáři zatím implementován není.
+
+Nástroj může operátorovi navrhnout kandidáty podle read-only podkladů, ale nesmí
+autonomně rozhodnout identitu. Každý skutečný pár
+`SafeQ user ID -> FUA Pay UserId` vyžaduje explicitní lidské potvrzení před
+finančním převodem.
+
+Doporučený postup:
 
 1. připravit čistou produkční FUA Pay databázi;
-2. nechat uživatele legitimně vytvořit své účty přihlášením přes Entra;
-3. provést SafeQ freeze;
-4. vytvořit a zahashovat finální balance snapshot;
-5. pracovat pouze s tímto snapshotem;
-6. administrátor provede explicitní párování;
-7. nulové a záporné zůstatky se oddělí od automatického převodu;
-8. každý schválený kladný pár se provede přes
+2. otevřít produkci a nechat studenty legitimně vytvářet interní FUA Pay
+   Customer identity prvním přihlášením přes Entra;
+3. před finálním SafeQ freeze provádět nanejvýš read-only přípravu kandidátů a
+   párování, bez finančního efektu;
+4. provést finální SafeQ freeze;
+5. vytvořit jediný finální immutable balance snapshot a zaznamenat jeho SHA-256;
+6. pro všechny skutečné převody tohoto cutoveru používat výhradně tento stejný
+   finální snapshot;
+7. administrátor každý konkrétní pár explicitně potvrdí;
+8. nulové a záporné zůstatky se zpracují podle výše uvedené migrační politiky a
+   nevstoupí do automatického transferu;
+9. každý schválený kladný pár se provede přes
    `LegacySafeQCreditTransfer`;
-9. po každém úspěšném převodu existuje durable SafeQ transfer record,
+10. po každém úspěšném převodu existuje durable SafeQ transfer record,
    canonical credit movement a audit;
-10. provedené převody se reconciliují proti schválené pracovní evidenci a
+11. provedené převody se reconciliují proti schválené pracovní evidenci a
     finálnímu snapshotu.
 
-Uživatel, který se ještě nepřihlásil do FUA Pay, se finančně nepřevádí.
+Uživatel, který se ještě nepřihlásil do čisté produkční FUA Pay, se finančně
+nepřevádí. Přihlášení do přechodného demo/staging runtime se pro tento účel
+nepočítá: interní UserId z demo databáze se do čisté produkční databáze
+nepřenáší a nesmí se použít pro finální SafeQ pairing. Po
+finálním snapshotu lze potvrzené kladné převody provádět postupně během více dnů;
+unikátní SafeQ user ID přitom dovolí právě jeden finanční převod za celý život a
+všechny převody tohoto cutoveru musí dál odkazovat na stejný finální snapshot.
 
 ## Implementační stav
 
@@ -226,9 +248,10 @@ Implementované finanční jádro obsahuje:
 - explicitní zákaz `FinancialDocument` efektu.
 
 Produkční párovací/importní operátorský workflow není tímto dokumentem
-prohlášen za live ani za dokončený. Před produkčním cutoverem musí být explicitně
-ověřen způsob, kterým schválené položky administrátor skutečně předá finančnímu
-jádru.
+prohlášen za live ani za dokončený. Před prvním skutečným SafeQ převodem musí být
+explicitně ověřen způsob, kterým schválené položky administrátor skutečně předá
+finančnímu jádru; první FUA Pay go-live bez provádění těchto transferů tím není
+blokován.
 
 ## Lokální acceptance 2026-09-19
 
@@ -252,7 +275,8 @@ Cílené PostgreSQL testy SafeQ persistence ověřují mimo jiné:
 - právě jeden audit;
 - žádný `FinancialDocument`.
 
-SafeQ PostgreSQL persistence obsahuje 4 testy; všechny prošly jako součást kanonického DB gate.
+SafeQ PostgreSQL persistence obsahuje 5 testů; všechny prošly jako součást
+kanonického DB gate.
 
 Kanonický lokální gate:
 
@@ -264,7 +288,7 @@ Výsledek:
 - formatting PASS;
 - web/application tests PASS;
 - EF pending-model check PASS;
-- PostgreSQL integrační testy 286/286 PASS;
+- PostgreSQL integrační testy 287/287 PASS;
 - finální výsledek `Ověření FUA Pay prošlo.`
 
 ## Acceptance před produkčním použitím
@@ -278,10 +302,14 @@ Před prvním skutečným SafeQ převodem musí být ještě prokázáno:
 - review nulových, záporných a nestandardních položek;
 - explicitní lidské párování SafeQ ID na existující FUA Pay `UserId`;
 - schválený operátorský způsob spuštění transferu;
-- součet provedených převodů odpovídá schváleným kladným položkám;
+- před prvním převodem je připraven postup závěrečné reconciliation;
 - zákaznické UI zobrazuje `Převod kreditu ze SafeQ`;
 - žádný převod nevytvoří `Payment` ani `FinancialDocument`;
 - audit a durable transfer evidence umožní dohledat administrátora, účet,
   snapshot, částku, čas a command ID.
+
+Po dokončení plánovaných převodů musí závěrečná reconciliation ověřit, že
+součet provedených převodů odpovídá schváleným kladným položkám finálního
+snapshotu.
 
 Teprve po tomto acceptance lze skutečný SafeQ cutover označit za dokončený.

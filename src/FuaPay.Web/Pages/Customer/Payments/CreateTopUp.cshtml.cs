@@ -15,12 +15,16 @@ namespace FuaPay.Web.Pages.Customer.Payments;
 public sealed class CreateTopUpModel : PageModel
 {
     private readonly PaymentCreationService _paymentCreationService;
+    private readonly PaymentCreationAvailability _paymentAvailability;
 
     public CreateTopUpModel(
-        PaymentCreationService paymentCreationService)
+        PaymentCreationService paymentCreationService,
+        PaymentCreationAvailability paymentAvailability)
     {
         ArgumentNullException.ThrowIfNull(paymentCreationService);
+        ArgumentNullException.ThrowIfNull(paymentAvailability);
         _paymentCreationService = paymentCreationService;
+        _paymentAvailability = paymentAvailability;
     }
 
     [BindProperty]
@@ -32,14 +36,25 @@ public sealed class CreateTopUpModel : PageModel
     [BindProperty]
     public Guid CreationRequestId { get; set; }
 
-    public void OnGet()
+    public IActionResult OnGet()
     {
+        if (!_paymentAvailability.IsEnabled)
+        {
+            return NotFound();
+        }
+
         CreationRequestId = Guid.NewGuid();
+        return Page();
     }
 
     public async Task<IActionResult> OnPostAsync(
         CancellationToken cancellationToken = default)
     {
+        if (!_paymentAvailability.IsEnabled)
+        {
+            return NotFound();
+        }
+
         if (CreationRequestId == Guid.Empty)
         {
             ModelState.AddModelError(

@@ -6,6 +6,7 @@ using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
+using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
 using FuaPay.Web.Tests.Testing;
 
 using Microsoft.AspNetCore.Antiforgery;
@@ -644,6 +645,62 @@ public sealed class SecurityPerimeterTests :
                 "form-action"));
     }
 
+    [Fact]
+    public async Task Production_NoneAndCsobDisabled_StartsWithSelfOnlyCspAndNoCsobRuntime()
+    {
+        using var keyRing =
+            new TemporaryDirectory("fua-pay-production-none");
+        using var factory =
+            new ConfiguredWebApplicationFactory(
+                Environments.Production,
+                CreateProductionNoneSettings(keyRing.Path));
+        using var client = CreateClient(
+            factory,
+            new Uri("https://fuapay.example.test"));
+
+        using var response = await client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(
+            "form-action 'self'",
+            GetContentSecurityPolicyDirective(
+                response,
+                "form-action"));
+
+        using var csobReturnResponse =
+            await client.GetAsync("/payments/csob/return");
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            csobReturnResponse.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var scopedServices = scope.ServiceProvider;
+        Assert.Null(scopedServices.GetService<ICsobGatewayClient>());
+        Assert.Null(
+            scopedServices.GetService<
+                ICsobPaymentReconciliationService>());
+        Assert.Null(
+            scopedServices.GetService<
+                ICsobPaymentRecoveryScheduler>());
+        Assert.Null(
+            scopedServices.GetService<CsobPaymentReturnVerifier>());
+        Assert.Null(
+            scopedServices.GetService<ICsobGatewaySignature>());
+        Assert.Null(
+            scopedServices.GetService<CsobPaymentProviderInitiator>());
+        Assert.Null(
+            scopedServices.GetService<CsobPaymentRecoveryProcessor>());
+
+        var hostedServices =
+            factory.Services.GetServices<IHostedService>();
+        Assert.DoesNotContain(
+            hostedServices,
+            service => service is CsobPaymentReconciliationWorker);
+        Assert.DoesNotContain(
+            hostedServices,
+            service =>
+                service is CsobCryptographicMaterialStartupValidator);
+    }
+
     [Theory]
     [InlineData(
         "Staging",
@@ -797,6 +854,29 @@ public sealed class SecurityPerimeterTests :
                 "Database=unused;" +
                 "Username=unused;" +
                 "Password=unused"
+        };
+    }
+
+    private static IReadOnlyDictionary<string, string?>
+        CreateProductionNoneSettings(string keyRingPath)
+    {
+        return new Dictionary<string, string?>
+        {
+            ["AllowedHosts"] = "fuapay.example.test",
+            ["DataProtection:KeyRingPath"] = keyRingPath,
+            ["ConnectionStrings:FuaPay"] =
+                "Host=localhost;Database=unused;" +
+                "Username=unused;Password=unused",
+            ["Entra:Enabled"] = "true",
+            ["Entra:TenantId"] =
+                "11111111-1111-1111-1111-111111111111",
+            ["Entra:ClientId"] =
+                "22222222-2222-2222-2222-222222222222",
+            ["Entra:ClientSecret"] = "test-only-secret",
+            ["Payments:Provider"] = "None",
+            ["Csob:Enabled"] = "false",
+            ["StagingTestMode:Enabled"] = "false",
+            ["StagingTestMode:SimulatedPaymentsEnabled"] = "false"
         };
     }
 
