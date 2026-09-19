@@ -108,14 +108,21 @@ Lokální gate záměrně neběžel s `-RunDatabaseTests` ani
 `-RunCsobSandboxTests`, protože tato změna nemění databázi ani ČSOB integraci.
 GitHub CI nad pull requestem musí ještě projít svým standardním plným gatem.
 
-## Acceptance po merge/deploymentu
+## Staging deployment a Customer smoke
 
-Po nasazení je vhodný krátký Customer smoke nad skutečným již existujícím
-print-capture pohybem:
+Změna byla 2026-09-19 nasazena na staging v release
+`cc142e23a200e72831284605d8553962b160a984`.
 
-- dashboard ukáže `Úhrada tisku`;
-- `/Customer/Credit` ukáže `Úhrada tisku`;
-- částka a zůstatek zůstanou beze změny;
-- technický `Capture print reservation <GUID>` se v Customer UI nezobrazí.
+Po aktivaci prošly readiness, ČSOB reconciliation worker, kontrola skutečně
+běžícího executable, migration count a veřejný HTTPS/canonical smoke.
 
-Tento dokument neprokazuje deployment ani produkční smoke.
+Následný Customer smoke nad skutečným již existujícím placeným print-capture
+pohybem za 18 Kč potvrdil:
+
+- dashboard zobrazuje `Úhrada tisku`;
+- `/Customer/Credit` zobrazuje `Úhrada tisku`;
+- technický `Capture print reservation <GUID>` se v Customer UI nezobrazuje;
+- částka zůstala -18 Kč a zůstatek se touto prezentační změnou nezměnil.
+
+Tím je staging acceptance této změny PASS. Tento dokument stále neprokazuje
+budoucí čistý production cutover.
