@@ -82,10 +82,11 @@ Receipts__BoldFontPath=/var/lib/fuapay/fonts/<bold-font>.ttf
 
 Tento profil je podporovaný základ pro přípravu prvního produkčního go-live.
 Hodnoty `PrintPayments__Enabled=false` a `PrintCredentials__Enabled=false` v
-tomto bloku jsou záměrný bezpečný pre-activation baseline. Před otevřením
-systému uživatelům se po PASS samostatného FUA Print production gate oba
-přepnou společně na `true` a doplní se níže uvedená produkční print
-konfigurace.
+tomto bloku jsou záměrný bezpečný baseline pro první produkční go-live. Při
+prvním produkčním cutoveru zůstávají oba přepínače `false`; FUA Pay se nasazuje
+a otevírá uživatelům bez závislosti na FUA Print. Na `true` se přepnou společně
+až při samostatné pozdější aktivaci FUA Print po jeho vlastním production gate
+a po doplnění níže uvedené produkční print konfigurace.
 
 Karetní část tohoto profilu nevyžaduje
 ČSOB merchant ID, privátní ani gateway public key, API URL ani return URL.
