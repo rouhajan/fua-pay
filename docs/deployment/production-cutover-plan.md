@@ -1,6 +1,6 @@
 # Čistý produkční cutover FUA Pay
 
-Status: 2026-09-18
+Status: 2026-09-19
 
 Tento dokument je souhrnný plán přechodu z dnešního vývojového/demo provozu na
 čistý produkční FUA Pay. Ne nahrazuje technickou
@@ -419,7 +419,7 @@ Bez nového explicitního rozhodnutí nejsou součástí prvního cutoveru:
 
 Před skutečným produkčním cutoverem zůstává explicitně:
 
-- [x] opravit zákaznický popis tiskového debit pohybu na lidský text — ověřeno 2026-09-19; merge této změny a následný deployment/smoke jsou stále součástí release procesu;
+- [x] opravit zákaznický popis tiskového debit pohybu na lidský text — merge, staging deployment i Customer smoke ověřeny 2026-09-19; budoucí čistý production cutover zůstává samostatným gate;
 - [ ] dokončit FUA Print ↔ FUA Pay cross-repo audit;
 - [ ] dokončit finální FUA Print E2E acceptance;
 - [ ] definovat a ověřit bootstrap prvního produkčního Administratora;
