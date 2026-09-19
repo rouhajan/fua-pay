@@ -42,7 +42,7 @@
                         <tr>
                             <td class="credit-history-date">@DashboardDisplay.FormatDate(movement.RecordedAt)</td>
                             <td class="credit-history-description">
-                                @movement.Description
+                                @DashboardDisplay.MovementDescription(movement)
                                 @if (hasFinancialDocument)
                                 {
                                     <br />
