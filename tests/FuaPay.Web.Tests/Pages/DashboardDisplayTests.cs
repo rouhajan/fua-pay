@@ -53,6 +53,21 @@ public sealed class DashboardDisplayTests
     }
 
     [Fact]
+    public void MovementTitle_PrintCaptureUsesPrintLabel()
+    {
+        var reservationId = Guid.Parse(
+            "11111111-2222-3333-4444-555555555555");
+        var movement = CreateMovement(
+            CreditMovementType.Debit,
+            1_800,
+            $"Capture print reservation {reservationId}");
+
+        Assert.Equal(
+            "Úhrada tisku",
+            DashboardDisplay.MovementTitle(movement));
+    }
+
+    [Fact]
     public void JobLabels_AreUserFacing()
     {
         Assert.Equal(
@@ -168,14 +183,15 @@ public sealed class DashboardDisplayTests
 
     private static CreditMovementListItem CreateMovement(
         CreditMovementType type,
-        long amountMinorUnits)
+        long amountMinorUnits,
+        string description = "Technický popis s ID operace")
     {
         return new CreditMovementListItem(
             Guid.NewGuid(),
             type,
             amountMinorUnits,
             0,
-            "Technický popis s ID operace",
+            description,
             DateTimeOffset.UtcNow,
             1);
     }
