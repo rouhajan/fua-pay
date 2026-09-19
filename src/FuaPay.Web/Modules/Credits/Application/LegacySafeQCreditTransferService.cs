@@ -7,7 +7,7 @@ namespace FuaPay.Web.Modules.Credits.Application;
 
 public sealed class LegacySafeQCreditTransferService
 {
-    public const string CustomerDescription = "Převod zůstatku ze SafeQ";
+    public const string CustomerDescription = "Převod kreditu ze SafeQ";
 
     private readonly CreditService _creditService;
     private readonly ILegacySafeQCreditTransferRepository _repository;

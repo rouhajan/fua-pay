@@ -48,7 +48,7 @@ public sealed record LegacySafeQCreditTransferCommand
         }
 
         var maximum =
-            FinancialAmountPolicy.CreditAdjustmentAbsolute.MaximumMinorUnits;
+            FinancialAmountPolicy.LegacySafeQCreditTransfer.MaximumMinorUnits;
 
         if (
             amount.MinorUnits <= 0 ||

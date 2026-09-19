@@ -21,7 +21,7 @@ internal sealed class LegacySafeQCreditTransferConfiguration :
         ArgumentNullException.ThrowIfNull(builder);
 
         var maximum =
-            FinancialAmountPolicy.CreditAdjustmentAbsolute.MaximumMinorUnits;
+            FinancialAmountPolicy.LegacySafeQCreditTransfer.MaximumMinorUnits;
 
         builder.ToTable(
             "legacy_safeq_credit_transfers",

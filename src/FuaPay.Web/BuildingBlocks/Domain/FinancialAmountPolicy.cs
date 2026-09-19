@@ -7,7 +7,8 @@ public enum FinancialAmountKind
     JobPrice = 1,
     CreditTopUp = 2,
     CreditAdjustmentAbsolute = 3,
-    ManualCreditTopUp = 4
+    ManualCreditTopUp = 4,
+    LegacySafeQCreditTransfer = 5
 }
 
 public readonly record struct FinancialAmountRange(
@@ -45,6 +46,9 @@ public static class FinancialAmountPolicy
     public static FinancialAmountRange ManualCreditTopUp { get; } =
         new(1, 10_000_000);
 
+    public static FinancialAmountRange LegacySafeQCreditTransfer { get; } =
+        new(1, 10_000_000);
+
     public static FinancialAmountRange GetRange(FinancialAmountKind kind)
     {
         return kind switch
@@ -54,6 +58,8 @@ public static class FinancialAmountPolicy
             FinancialAmountKind.CreditAdjustmentAbsolute =>
                 CreditAdjustmentAbsolute,
             FinancialAmountKind.ManualCreditTopUp => ManualCreditTopUp,
+            FinancialAmountKind.LegacySafeQCreditTransfer =>
+                LegacySafeQCreditTransfer,
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
     }

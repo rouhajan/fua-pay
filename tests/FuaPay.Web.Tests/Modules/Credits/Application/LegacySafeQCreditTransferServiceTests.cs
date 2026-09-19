@@ -32,6 +32,7 @@ public sealed class LegacySafeQCreditTransferServiceTests
         Assert.Equal(
             LegacySafeQCreditTransferService.CustomerDescription,
             movement.Description);
+        Assert.Equal("Převod kreditu ze SafeQ", movement.Description);
 
         Assert.Equal(command.CommandId, result.CommandId);
         Assert.Equal(CreditMovementType.Credit, result.MovementType);
