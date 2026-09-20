@@ -3,37 +3,47 @@
 Repozitář připravuje aplikaci k řízenému nasazení, ale neobsahuje ani nemění
 živý server `fuapay.tul.cz`. Production startuje fail-closed.
 
-## Cílový provozní model: jeden server
+## Cílový provozní model: jeden VM, izolovaná Production a staging
 
-FUA Pay nemá mít samostatný dlouhodobě provozovaný staging server ani druhou
-trvale běžící aplikační instanci. Cílový model je jeden produkční VM/server a
-jedna aktivní `fuapay.service`.
+Od 2026-09-20 je cílový provozní model jeden FUA Pay VM se dvěma oddělenými
+runtime hranicemi:
 
-Bezpečnost nasazení se neopírá o druhý server, ale o vrstvené ověření před
-aktivací a o rychlý code rollback na stejném hostiteli:
+- Production běží dlouhodobě jako `fuapay.service`;
+- staging je dlouhodobě připravený jako `fuapay-staging.service`, ale standardně
+  zůstává `disabled` a `inactive` a spouští se jen pro acceptance/integration
+  testy.
+
+Nejde o dvě sdílené konfigurace jedné služby. Production a staging mají
+samostatný OS účet, release root, environment file, PostgreSQL databázi,
+PostgreSQL runtime/migrator role, Data Protection keyring a integration secret
+root. Přímý přístup production identity ke staging secretům/DB a opačným směrem
+byl negativně ověřen.
+
+Bezpečný release model je:
 
 - CI, CodeQL, repository verification a PostgreSQL integration testy proběhnou
-  před nasazením nad izolovanými testovacími databázemi;
+  před nasazením;
 - release se jednou sestaví, zabalí a kryptograficky ověří;
-- na serveru se nový release instaluje side-by-side do
-  `/opt/fuapay/releases/<SHA>`, zatímco aktivní release zůstává beze změny;
-- před aktivací se ověří artefakt, konfigurace, migrace, backup a oprávnění;
-- `/opt/fuapay/current` se přepne atomicky na nový release a restartuje se
-  jediná `fuapay.service`;
-- po aktivaci musí projít bounded health a smoke gate; při chybě se vrátí
-  `/opt/fuapay/current` na předchozí ověřený release;
+- stejný binární release lze nasadit do izolovaného stagingu;
+- po staging acceptance se promuje přesně tentýž release artefakt do Production,
+  bez rebuildování;
+- Production používá side-by-side release adresáře a atomický
+  `/opt/fuapay/current` switch;
+- staging používá vlastní
+  `/opt/fuapay-staging/releases/<SHA>` a
+  `/opt/fuapay-staging/current`;
 - databázové migrace jsou forward-only a code rollback je nesmí automaticky
   vracet.
 
-Současné staging/demo prostředí je přechodný stav během vývoje, nikoli cílová
-druhá infrastruktura. Pro první produkční spuštění je rozhodnutý čistý cutover:
-současná demo databáze se archivuje a produkce začne nad novou PostgreSQL
-databází vytvořenou z aktuálního migration chainu. Demo kredit, zakázky,
-platby, tiskové credentialy, auditní acceptance historie ani demo finanční
-doklady se automaticky nepřenášejí do produkce.
+První produkční cutover zůstal čistý: historická demo data nebyla přenesena do
+Production. Historický demo dataset byl naopak 2026-09-20 kontrolovaně importován
+do nové izolované databáze `fuapay_staging`, aby staging zachoval dosavadní
+acceptance/test data bez kontaminace Production.
 
-Úplný postup a zbývající gate jsou v
-[plánu čistého produkčního cutoveru](production-cutover-plan.md).
+Aktuální přímo ověřený runtime, izolace, staging auth profil, dataset import a
+otevřené public-edge kroky jsou v
+[runtime checkpointu 2026-09-20](runtime-state-2026-09-20.md). Historická staging
+deployment evidence zůstává v [demo/staging dokumentu](demo-staging.md).
 
 ## První produkční profil bez karetních plateb
 
