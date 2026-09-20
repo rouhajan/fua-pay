@@ -54,6 +54,12 @@ Existující Production chování na portu 443 se tím nemění:
 obecně z internetu. Production Nginx site byl při zavedení staging edge ověřen
 byte-identicky před/po změně.
 
+Protože browser cookies nejsou oddělené portem, `fuapay.fa.tul.cz:443` musí
+zůstat čistý Nginx redirect a nesmí se bez nové revize hostname/cookie izolace
+změnit na aplikační proxy. Tím staging cookie na hostu `fuapay.fa.tul.cz`
+nikdy nevstupuje do Production aplikace; canonical Production aplikace používá
+host `fuapay.tul.cz`.
+
 ## První produkční profil bez karetních plateb
 
 Hodnoty níže mají přijít ze service environment/secret store. Skutečná hesla,
