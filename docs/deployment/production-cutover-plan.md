@@ -1,34 +1,41 @@
 # Čistý produkční cutover FUA Pay
 
-Status: 2026-09-19
+Status: 2026-09-20
 
-Tento dokument je souhrnný plán přechodu z dnešního vývojového/demo provozu na
-čistý produkční FUA Pay. Ne nahrazuje technickou
+Tento dokument je souhrnný cutover plán a následný closeout prvního čistého
+produkčního nasazení FUA Pay. Ne nahrazuje technickou
 [`production-configuration.md`](production-configuration.md), ČSOB checklist
 ani integrační dokumentaci; spojuje jejich aktuální rozhodnutí do jednoho
 cutover plánu.
 
-Cíl je jednoduchý: na `https://fuapay.tul.cz` poběží jedna čistá produkční
-instance FUA Pay bez demo/test dat, bez vývojových funkcí a pouze s
-produkčními credentials pro skutečně aktivované integrace.
+Produkční baseline byl 2026-09-20 přímo ověřen na
+`https://fuapay.tul.cz` nad přesným release
+`774b324c48d8f874db21f115479f3b317c2a73d0`. Production používá čistou
+databázi bez demo/test finančních dat, bez staging funkcí a pouze s credentials
+pro skutečně aktivované integrace. Aktuální runtime evidence je v
+[`runtime-state-2026-09-20.md`](runtime-state-2026-09-20.md).
 
 ## 1. Základní rozhodnutí
 
-- Produkce bude mít jeden VM/server a jednu aktivní `fuapay.service`.
-- Nebude existovat druhý trvale běžící staging server ani paralelní produkční
-  instance.
-- Současné demo/staging prostředí je přechodné vývojové prostředí. Jeho
-  databáze, uživatelé, kredit, zakázky, platební pokusy, auditní historie,
-  tiskové rezervace, tiskové PINy a demo finanční doklady nejsou automaticky
-  produkční data.
-- Před otevřením produkce se současná demo databáze archivuje a produkce začne
-  nad novou čistou PostgreSQL databází vytvořenou z kanonického migration chainu.
-- Demo/test data se do čisté produkce nekopírují, pokud pro konkrétní záznam
+- Production běží na jednom VM/serveru jako aktivní `fuapay.service`.
+- Na stejném VM je od 2026-09-20 trvale připravený, ale standardně zastavený
+  a disabled izolovaný `fuapay-staging.service`.
+- Staging není paralelní Production: má samostatný OS účet, release root,
+  environment file, PostgreSQL databázi a role, Data Protection keyring i
+  staging integration secrets.
+- Historická demo databáze není produkční data. Kredit, zakázky, platební
+  pokusy, auditní historie, tiskové rezervace, tiskové PINy a demo finanční
+  doklady nebyly přeneseny do Production.
+- Historický demo dataset byl po backupu kontrolovaně importován pouze do
+  izolované `fuapay_staging` jako acceptance/test dataset.
+- Demo/test data se do čisté Production nekopírují, pokud pro konkrétní záznam
   nebude předem schválen samostatný migrační postup.
 - Zdrojový kód může zůstat veřejný. Bezpečnost nesmí záviset na utajení repa;
   hesla, klíče, tokeny a pepper zůstávají výhradně mimo Git a release artefakt.
 - Produkční databáze je finanční a auditní autorita. Žádná integrační služba
   nesmí zapisovat přímo do jejích tabulek.
+- Release workflow cílí na build once -> staging acceptance -> promotion
+  stejného binárního artefaktu do Production bez rebuildování.
 
 ## 2. Rozsah první čisté produkční verze
 
@@ -431,15 +438,17 @@ Po spuštění se průběžně sleduje:
 Po pozdější aktivaci ČSOB se navíc sleduje reconciliation worker, payment
 `RequiresAttention` a expirace/rotace ČSOB klíčů.
 
-Další release se nasazují stejným side-by-side modelem. Pro běžný vývoj se
-nezakládá permanentní staging server; CI, izolované PostgreSQL testy a
-kontrolované integrační acceptance slouží jako předprodukční gate.
+Další release se nasazují stejným side-by-side modelem. Vedle CI a izolovaných
+PostgreSQL testů je od 2026-09-20 připravený oddělený staging runtime na stejném
+VM. Staging je standardně zastavený a spouští se jen pro acceptance/integration
+okna; nesdílí Production databázi, OS identitu, Data Protection ani integration
+secrets. Aktuální hranice jsou v
+[`runtime-state-2026-09-20.md`](runtime-state-2026-09-20.md).
 
 ## 17. Věci, které první produkční cutover záměrně neřeší
 
 Bez nového explicitního rozhodnutí nejsou součástí prvního cutoveru:
 
-- druhý permanentní staging server;
 - kopie demo/test finanční historie do produkce;
 - automatický reverse DB rollback;
 - ukládání PDF dokladů na disk jako source of truth;
@@ -453,17 +462,25 @@ Bez nového explicitního rozhodnutí nejsou součástí prvního cutoveru:
 
 ## 18. Konkrétní otevřené položky k uzavření
 
-Před prvním produkčním go-live zůstává explicitně:
+Po vytvoření prvního production baseline zůstává explicitně:
 
-- [x] opravit zákaznický popis tiskového debit pohybu na lidský text — merge, staging deployment i Customer smoke ověřeny 2026-09-19; budoucí čistý production cutover zůstává samostatným gate;
-- [ ] definovat a ověřit bootstrap prvního produkčního Administratora;
-- [ ] definovat počáteční produkční ServiceUnits/role assignment;
+- [x] opravit zákaznický popis tiskového debit pohybu na lidský text — merge,
+      staging deployment i Customer smoke ověřeny 2026-09-19;
+- [x] připravit čistou produkční PostgreSQL DB a aplikovat aktuální migration
+      chain; Production má 25 migrací a demo finanční data nebyla přenesena;
+- [x] definovat a ověřit bootstrap prvního produkčního Administratora;
+- [x] ověřit production environment/secrets a filesystem permissions;
+- [x] ověřit Production Nginx/TLS/HARICA stav včetně ACME webroot a renewal
+      modelu;
+- [x] připravit izolovaný staging runtime a lokální acceptance nad stejným
+      release SHA;
+- [ ] založit počáteční reálné produkční ServiceUnits a dokončit požadované
+      Requester assignmenty;
 - [ ] potvrdit produkční FinancialDocument číselnou řadu nad čistou DB;
-- [ ] připravit a ověřit čistou produkční PostgreSQL DB + backup/restore;
-- [ ] ověřit finální production environment/secrets a filesystem permissions;
-- [ ] ověřit Nginx/TLS/HARICA stav;
-- [ ] final release candidate full gate;
-- [ ] kontrolovaný go-live smoke a provozní monitoring.
+- [ ] dokončit a doložit production backup/restore acceptance;
+- [ ] dokončit veřejný staging DNS/TLS/Nginx edge a browser acceptance;
+- [ ] final release/business-flow full gate včetně odloženého mobile smoke;
+- [ ] dokončit kontrolovaný go-live smoke a provozní monitoring.
 
 Samostatně před pozdější aktivací FUA Print zůstává:
 
