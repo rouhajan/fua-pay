@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-19
+Status: 2026-09-20
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu až k bezpečné aktivaci produkčního ČSOB provozu. Není checklistem prvního
@@ -24,15 +24,19 @@ https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environ
    bodů tohoto checklistu a přepnutí na `Payments__Provider=Csob` a
    `Csob__Enabled=true` s produkčními credentials.
 
-Pokud pozdější integration acceptance vyžaduje plný browser/return tok, použije
-se pouze časově omezený non-production FUA Pay runtime na serveru s čerstvou
-izolovanou dočasnou PostgreSQL databází a rolí, integration ČSOB credentials/API
-a odděleným endpointem, portem nebo proxy route podle ověřených provozních
-možností. Nikdy nesmí použít produkční DB ani její restore. Po testovacím okně se
-runtime zastaví a odstraní; permanentní druhý staging FUA Pay se nezakládá.
-Přesná veřejná return URL zůstává provozním/bankovním omezením do jejího
-ověření; žádný konkrétní hostname, `PathBase` ani systemd model zde není
-prohlášen za schválený.
+Pozdější integration acceptance s plným browser/return tokem používá od
+2026-09-20 samostatně připravený izolovaný staging runtime na stejném VM.
+Staging má vlastní OS účet, release root, PostgreSQL databázi a role, Data
+Protection keyring i integration secret root a standardně zůstává
+`disabled`/`inactive`. Nikdy nesmí použít produkční DB ani její restore.
+
+Aktuální staging je před veřejným edge fail-closed:
+`Payments__Provider=None`, `Csob__Enabled=false` a simulated payments jsou
+vypnuté. Integration key files jsou izolovaně připravené, ale ČSOB provider se
+zapne až po přidělení skutečného staging DNS jména, samostatném TLS/Nginx edge
+a nastavení přesné HTTPS return URL. Production hostname, certifikát ani DB se
+pro integrační testy nerecyklují. Aktuální stav je v
+[`../deployment/runtime-state-2026-09-20.md`](../deployment/runtime-state-2026-09-20.md).
 
 ## A. Aktuálně prokázaný stav
 
@@ -42,8 +46,13 @@ prohlášen za schválený.
       mimo Git/release.
 - [x] GET `echo`: historicky ověřeno HTTP 200, validní podpis, `resultCode=0`.
 - [x] POST `echo`: historicky ověřeno HTTP 200, validní podpis, `resultCode=0`.
-- [x] Staging používá živý ČSOB integration provider; simulované platby jsou
-      vypnuté.
+- [x] Historický pre-production staging používal živý ČSOB integration provider
+      se simulovanými platbami vypnutými a provedl níže uvedené live acceptance
+      scénáře.
+- [ ] Nový izolovaný staging z 2026-09-20 má před veřejným edge záměrně
+      `Payments__Provider=None` a `Csob__Enabled=false`; integration provider
+      se znovu zapne až po DNS/TLS/Nginx acceptance a nastavení přesné staging
+      return URL.
 - [x] Úspěšné dobití kreditu 100 Kč ověřeno 2026-09-07.
 - [x] PR #35 nasazen 2026-09-08; return vede na routed payment detail bez 404.
 - [x] Druhé úspěšné dobití kreditu 100 Kč ověřeno 2026-09-08.
@@ -123,8 +132,10 @@ Stage 2 používá owner-scoped read-only status handler a bounded polling
 post-return stavu (2 sekundy, nejvýše 30 pokusů). Happy-path byl živě ověřen na
 revision `768aec26c72bc77ca43d554c8e8bab20f60678b6` bez ručního F5. Expiry
 hardening z PR #44 byl po předchozím incidentu samostatně live-accepted
-2026-09-14 na `bc868276...`; současný `main` `9ecee2d...` tyto změny obsahuje a
-je od 2026-09-15 zdravě nasazený na stagingu.
+2026-09-14 na `bc868276...`. Aktuální `main` a současný Production i připravený
+staging release jsou
+`774b324c48d8f874db21f115479f3b317c2a73d0`; nový staging zatím ČSOB
+integration provider záměrně neaktivuje.
 
 Stage 3 ukládá `SettlementReturn` i Reverse attempt jako `InProgress` před
 externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy PUT
@@ -189,9 +200,10 @@ celek.
 
 ## E. Historický přechodný staging release/deploy gate
 
-Následující checklist zachovává pravidla a evidence již existujícího
-přechodného demo/staging runtime. Není návrhem permanentního druhého prostředí.
-Budoucí integrační okna používají výše popsaný dočasný izolovaný runtime.
+Následující checklist zachovává pravidla a evidence historického
+pre-production demo/staging runtime. Od 2026-09-20 už není návrhem budoucího
+runtime modelu: další integrační okna používají výše popsaný trvale připravený,
+ale standardně zastavený izolovaný staging.
 
 - [ ] clean `main` / přesný merge commit;
 - [ ] canonical `scripts/verify.ps1` PASS;
