@@ -54,7 +54,7 @@ client secret a privátní klíč nesmějí být v Git repozitáři.
 ASPNETCORE_ENVIRONMENT=Production
 AllowedHosts=fuapay.tul.cz
 ConnectionStrings__FuaPay=<produkční PostgreSQL connection string>
-DataProtection__KeyRingPath=/var/lib/fuapay/data-protection
+DataProtection__KeyRingPath=/var/lib/fuapay/data-protection-production
 Database__ApplyMigrationsOnStart=false
 
 DevelopmentSignIn__Enabled=false
