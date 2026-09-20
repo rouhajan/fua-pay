@@ -347,3 +347,80 @@ Otevřené staging kroky:
 
 Žádný z těchto kroků nevyžaduje změnu Production URL, Production DB, Production
 Entra konfigurace ani Production ČSOB provideru.
+
+## 10. Kanonický provozní režim staging testovacího okna
+
+Staging interactive signin používá záměrně bezheslové statické testovací identity
+včetně profilu Administrator. Tyto identity nejsou samy o sobě přístupovou
+ochranou. Bezpečnostní hranice je proto před aplikací:
+
+1. `fuapay-staging.service` je mimo testovací okno vždy `inactive` a
+   `disabled`;
+2. UFW mimo testovací okno nemá žádné `ALLOW` pravidlo pro `8443/tcp`;
+3. Kestrel staging backend `127.0.0.1:5081` mimo testovací okno neposlouchá;
+4. Nginx listener `0.0.0.0:8443` může zůstat trvale připravený, ale bez UFW
+   allow pravidla není zvenku dostupný;
+5. při testu se `8443/tcp` povolí pouze z konkrétní aktuální klientské IPv4,
+   ze které probíhá browser/SSH acceptance;
+6. teprve potom se ručně spustí `fuapay-staging.service`;
+7. po testu se staging služba zastaví a dočasné UFW pravidlo se odstraní;
+8. po každém otevření i zavření testovacího okna se znovu ověří Production
+   `/health/ready` a nezměněný 301 alias
+   `https://fuapay.fa.tul.cz:443 -> https://fuapay.tul.cz/`.
+
+Basic Auth ani další aplikační heslo se do tohoto modelu nyní nepřidává.
+Testovací identity nejsou veřejně dostupné, protože staging runtime i firewall
+jsou mimo testovací okno zavřené. Toto je záměrné také kvůli ČSOB browser return:
+během integračního testu se browser vrací na staging z téže povolené klientské
+cesty, zatímco serverová ČSOB volání `echo`, `payment/init`,
+`payment/status` a `payment/reverse` jsou odchozí ze staging runtime.
+
+Production se při staging testovacím okně nesmí měnit. Zejména se nesmí měnit:
+
+- `/etc/fuapay/production.env`;
+- `fuapay.service`;
+- Production release/current symlink;
+- Production DB `fuapay` ani role `fuapay_app` / `fuapay_migrator`;
+- Production Entra konfigurace;
+- Production `Payments__Provider` / `Csob__Enabled`;
+- Production ČSOB klíče ani return URL;
+- Production Nginx site `/etc/nginx/sites-available/fuapay`;
+- chování portů 80/443.
+
+Při ČSOB integration acceptance se mění pouze staging konfigurace. Staging
+return URL je:
+
+```text
+https://fuapay.fa.tul.cz:8443/payments/csob/return
+```
+
+Budoucí Production return URL je oddělená:
+
+```text
+https://fuapay.tul.cz/payments/csob/return
+```
+
+Staging nesmí při integration testu použít Production return URL. První
+kontrolovaný `payment/init` musí ještě potvrdit, že ČSOB integration gateway
+akceptuje explicitní port `:8443`; do té doby se tato vlastnost nepovažuje za
+ověřenou.
+
+### Ověřený uzavřený stav po browser acceptance 2026-09-20
+
+Po úspěšném Admin browser acceptance byl staging znovu bezpečně uzavřen:
+
+- `fuapay-staging.service = inactive`;
+- `fuapay-staging.service = disabled`;
+- UFW: žádné `ALLOW` pro `8443/tcp`;
+- `127.0.0.1:5081`: neposlouchá;
+- Nginx `0.0.0.0:8443`: připravený;
+- Production `https://fuapay.tul.cz/health/ready`: `Healthy`;
+- Production alias `https://fuapay.fa.tul.cz:443`: stále HTTP 301 na
+  `https://fuapay.tul.cz/`.
+
+Výsledek:
+
+`STAGING CLOSED / PRODUCTION UNCHANGED: PASS`.
+
+Tento uzavřený stav je výchozí stav, ze kterého se má zahajovat každé další
+staging testovací okno.
