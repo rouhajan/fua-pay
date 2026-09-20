@@ -257,6 +257,15 @@ UFW nepovoluje `8443/tcp` obecně. Přístup byl pro browser acceptance povolen
 jen z konkrétní IPv4 aktuálního SSH/browser klienta. Tím staging s bezheslovými
 testovacími identitami není otevřený celému internetu.
 
+Dlouhodobý hostname/cookie invariant: HTTP cookies nejsou oddělené portem.
+Staging session/antiforgery cookies pro host `fuapay.fa.tul.cz` se proto mohou
+odeslat i na stejný host na portu 443. Současné uspořádání je bezpečné právě
+proto, že `fuapay.fa.tul.cz:443` pouze provede Nginx 301 na
+`fuapay.tul.cz` a request nikdy neproxyuje do Production aplikace. Tento
+alias na 443 se nesmí později změnit na aplikační proxy bez nové revize
+hostname/cookie izolace. Canonical Production session zůstává host-only pro
+`fuapay.tul.cz`.
+
 Lokální HTTPS edge acceptance ověřila:
 
 - `/health/ready` přes Nginx na `:8443`: Healthy;
