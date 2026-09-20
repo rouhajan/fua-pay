@@ -41,9 +41,18 @@ do nové izolované databáze `fuapay_staging`, aby staging zachoval dosavadní
 acceptance/test data bez kontaminace Production.
 
 Aktuální přímo ověřený runtime, izolace, staging auth profil, dataset import a
-otevřené public-edge kroky jsou v
+HTTPS/browser acceptance jsou v
 [runtime checkpointu 2026-09-20](runtime-state-2026-09-20.md). Historická staging
 deployment evidence zůstává v [demo/staging dokumentu](demo-staging.md).
+
+Aktuální staging edge používá
+`https://fuapay.fa.tul.cz:8443` -> Nginx -> `127.0.0.1:5081`.
+Existující Production chování na portu 443 se tím nemění:
+`fuapay.tul.cz:443` zůstává Production a
+`fuapay.fa.tul.cz:443` zůstává pouze 301 aliasem na Production. Staging
+`:8443` je v UFW povolen pouze z explicitně schválené klientské IPv4, nikoli
+obecně z internetu. Production Nginx site byl při zavedení staging edge ověřen
+byte-identicky před/po změně.
 
 ## První produkční profil bez karetních plateb
 
