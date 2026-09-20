@@ -30,12 +30,23 @@ Staging má vlastní OS účet, release root, PostgreSQL databázi a role, Data
 Protection keyring i integration secret root a standardně zůstává
 `disabled`/`inactive`. Nikdy nesmí použít produkční DB ani její restore.
 
-Aktuální staging je před veřejným edge fail-closed:
+Aktuální staging je fail-closed:
 `Payments__Provider=None`, `Csob__Enabled=false` a simulated payments jsou
-vypnuté. Integration key files jsou izolovaně připravené, ale ČSOB provider se
-zapne až po přidělení skutečného staging DNS jména, samostatném TLS/Nginx edge
-a nastavení přesné HTTPS return URL. Production hostname, certifikát ani DB se
-pro integrační testy nerecyklují. Aktuální stav je v
+vypnuté. Integration key files jsou izolovaně připravené.
+
+HTTPS/browser edge je už ověřený jako
+`https://fuapay.fa.tul.cz:8443` -> Nginx -> `127.0.0.1:5081`.
+Nebyla potřeba DNS změna ani nový certifikát; existující HARICA certifikát už
+obsahoval SAN `fuapay.fa.tul.cz`. Production `fuapay.tul.cz:443` ani
+production alias `fuapay.fa.tul.cz:443` se nezměnily. UFW povoluje staging
+`:8443` pouze z explicitní klientské IPv4.
+
+Při aktivaci integration provideru musí staging používat přesně
+`https://fuapay.fa.tul.cz:8443/payments/csob/return`. Tato return URL je
+součástí podepsaného `payment/init`; nesmí se použít production
+`https://fuapay.tul.cz/payments/csob/return`. Akceptaci explicitního portu
+`:8443` ze strany integration gateway je ještě nutné potvrdit prvním
+kontrolovaným `payment/init`. Aktuální runtime evidence je v
 [`../deployment/runtime-state-2026-09-20.md`](../deployment/runtime-state-2026-09-20.md).
 
 ## A. Aktuálně prokázaný stav
@@ -49,10 +60,13 @@ pro integrační testy nerecyklují. Aktuální stav je v
 - [x] Historický pre-production staging používal živý ČSOB integration provider
       se simulovanými platbami vypnutými a provedl níže uvedené live acceptance
       scénáře.
-- [ ] Nový izolovaný staging z 2026-09-20 má před veřejným edge záměrně
-      `Payments__Provider=None` a `Csob__Enabled=false`; integration provider
-      se znovu zapne až po DNS/TLS/Nginx acceptance a nastavení přesné staging
-      return URL.
+- [x] Nový izolovaný staging má ověřený HTTPS/browser edge
+      `https://fuapay.fa.tul.cz:8443`, statické testovací identity a současně
+      zůstává `Payments__Provider=None`, `Csob__Enabled=false`.
+- [ ] Zapnout integration provider pouze ve stagingu s return URL
+      `https://fuapay.fa.tul.cz:8443/payments/csob/return` a prvním
+      kontrolovaným `payment/init` potvrdit, že integration gateway akceptuje
+      explicitní port `:8443`.
 - [x] Úspěšné dobití kreditu 100 Kč ověřeno 2026-09-07.
 - [x] PR #35 nasazen 2026-09-08; return vede na routed payment detail bez 404.
 - [x] Druhé úspěšné dobití kreditu 100 Kč ověřeno 2026-09-08.
