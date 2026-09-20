@@ -1,27 +1,79 @@
 # Demo / staging deployment
 
-Status: 2026-09-19
+Status: 2026-09-20
 
-Tento soubor popisuje aktuální staging runtime a staging deployment evidence.
-Kanonické vytváření/installace release artefaktu je v
+Tento soubor zachovává historickou staging deployment/acceptance evidenci a
+současně odkazuje na nový izolovaný staging runtime připravený po produkčním
+cutoveru. Kanonické vytváření/installace release artefaktu je v
 [`release-artifacts.md`](release-artifacts.md). Aktuální ČSOB postup až do
 production readiness je v
 [`../integrations/csob-production-readiness.md`](../integrations/csob-production-readiness.md).
-Detailní evidence incidentu 2026-09-13 je v
+
+Přímo ověřený současný Production + staging stav je v
+[`runtime-state-2026-09-20.md`](runtime-state-2026-09-20.md). Detailní evidence
+incidentu 2026-09-13 je v
 [`../integrations/csob-incident-2026-09-13.md`](../integrations/csob-incident-2026-09-13.md)
 a následná úspěšná expiry acceptance v
 [`../testing/csob-expiry-acceptance-2026-09-14.md`](../testing/csob-expiry-acceptance-2026-09-14.md).
 
-Tento runtime je přechodné pre-production/demo prostředí a níže uvedené záznamy
-jsou historická deployment/acceptance evidence. Není to cílový permanentní druhý
-FUA Pay server. Po prvním produkčním go-live se případné další plné ČSOB
-browser/return testy provádějí jen v omezeném testovacím okně nad dočasným
-non-production runtime a čerstvou izolovanou dočasnou PostgreSQL databází a rolí;
-nikdy nad produkční DB ani jejím restore. Dočasný runtime se po testu zastaví a
-odstraní. Konkrétní endpoint, port, proxy route a veřejná return URL se musí pro
-dané okno teprve provozně ověřit.
+## Aktuální izolovaný staging runtime
 
-## Aktuální runtime
+Od 2026-09-20 už staging není dočasná sdílená konfigurace `fuapay.service`.
+Na stejném VM je připravená druhá, explicitně izolovaná runtime hranice:
+
+- systemd `fuapay-staging.service`;
+- OS účet `fuapay-staging:fuapay-staging`;
+- release root `/opt/fuapay-staging/releases/<SHA>`;
+- current symlink `/opt/fuapay-staging/current`;
+- Kestrel pouze `127.0.0.1:5081`;
+- environment file `/etc/fuapay-staging/staging.env`;
+- databáze `fuapay_staging`;
+- runtime role `fuapay_staging_app`;
+- owner/migrator `fuapay_staging_migrator`;
+- vlastní Data Protection keyring a staging secret root;
+- služba je standardně `disabled` a `inactive`.
+
+Připravený staging release je přesně
+`774b324c48d8f874db21f115479f3b317c2a73d0`, tedy stejný binární release jako
+aktuální Production. Lokální acceptance nad `127.0.0.1:5081` prošla:
+live/ready Healthy, ČSOB worker Disabled, všech 9 statických signin profilů
+vykresleno, runtime role čte importovaný dataset, startup ani anonymní signin
+GET dataset nezměnily a Production zůstala během souběžného běhu Healthy.
+
+Staging autentizace je nyní záměrně oddělená od Entra:
+
+```text
+StagingTestMode__Enabled=true
+StagingTestMode__InteractiveSignInEnabled=true
+StagingTestMode__SeedDataEnabled=false
+StagingTestMode__ResetDataOnStart=false
+StagingTestMode__SimulatedPaymentsEnabled=false
+Entra__Enabled=false
+```
+
+Nový staging proto nevyžaduje Entra redirect URI ani tenant-admin změnu.
+Historické Entra-linked staging user records zůstaly v importovaném datasetu
+jako data/evidence, ale aktuální interactive signin používá pouze pevné
+development identity.
+
+Historická `fuapay_demo` zůstává zachovaná. Její aplikační data byla po
+root-only backupu a SHA-256 ověření atomicky importována do 25-migračního
+`fuapay_staging` bez migration history, ownerů a ACL. Jediná záměrná
+normalizace odstranila legacy vazbu statického development Administratora na
+historický Entra-linked user record; budoucí statický Administrator proto
+vznikne jako samostatný testovací účet.
+
+Aktuální staging baseline má `Payments__Provider=None`, `Csob__Enabled=false`,
+simulated payments vypnuté a Print vypnutý. Integration klíče jsou izolovaně
+připravené, ale ČSOB se zapne až po veřejném staging edge a přesné return URL.
+
+K 2026-09-20 staging ještě nemá veřejný hostname, vlastní TLS certifikát ani
+Nginx vhost. Port 5081 je pouze loopback. Po přidělení DNS se má použít
+samostatný HARICA/Certbot lineage; Production certifikát ani
+`fuapay.fa.tul.cz` se pro staging nerecyklují.
+
+## Historický pre-production runtime do 2026-09-19
+
 
 Ověřeno přímo na staging VM 2026-09-19 po deploymentu
 `cc142e23a200e72831284605d8553962b160a984`:
