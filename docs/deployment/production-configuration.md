@@ -3,11 +3,16 @@
 Repozitář připravuje aplikaci k řízenému nasazení, ale neobsahuje ani nemění
 živý server `fuapay.tul.cz`. Production startuje fail-closed.
 
-## Cílový provozní model: jeden server
+## Cílový provozní model: produkční VM je pouze Production
 
-FUA Pay nemá mít samostatný dlouhodobě provozovaný staging server ani druhou
-trvale běžící aplikační instanci. Cílový model je jeden produkční VM/server a
-jedna aktivní `fuapay.service`.
+Na produkčním VM/serveru poběží jedna produkční `fuapay.service` a
+`https://fuapay.tul.cz` bude výhradně Production. Na stejném VM nebude po
+cutoveru běžet staging runtime ani druhá stagingová aplikační instance.
+
+Dlouhodobý staging je samostatné off-host prostředí, zpočátku na vývojovém PC.
+Jeho databáze, konfigurace, secrets a testovací historie se zachovávají, ale
+runtime nemusí běžet nepřetržitě. Cílový model je popsán v
+[`staging-environment.md`](staging-environment.md).
 
 Bezpečnost nasazení se neopírá o druhý server, ale o vrstvené ověření před
 aktivací a o rychlý code rollback na stejném hostiteli:
@@ -25,12 +30,18 @@ aktivací a o rychlý code rollback na stejném hostiteli:
 - databázové migrace jsou forward-only a code rollback je nesmí automaticky
   vracet.
 
-Současné staging/demo prostředí je přechodný stav během vývoje, nikoli cílová
-druhá infrastruktura. Pro první produkční spuštění je rozhodnutý čistý cutover:
-současná demo databáze se archivuje a produkce začne nad novou PostgreSQL
-databází vytvořenou z aktuálního migration chainu. Demo kredit, zakázky,
-platby, tiskové credentialy, auditní acceptance historie ani demo finanční
-doklady se automaticky nepřenášejí do produkce.
+Současné staging/demo prostředí na produkčním VM je přechodný stav. Pro první
+produkční spuštění je rozhodnutý čistý cutover: současná demo databáze se
+archivuje a produkce začne nad novou PostgreSQL databází vytvořenou z aktuálního
+migration chainu. Demo kredit, zakázky, platby, tiskové credentialy, auditní
+acceptance historie ani demo finanční doklady se automaticky nepřenášejí do
+produkce.
+
+Ověřený staging snapshot se naopak zachová pro off-host staging restore.
+Po production cutoveru už staging runtime ani staging integration secrets
+nepatří na produkční VM. Budoucí integrační acceptance používá off-host staging;
+veřejný callback/return ingress se zapíná pouze pro staging a nikdy nepoužívá
+`fuapay.tul.cz`.
 
 Úplný postup a zbývající gate jsou v
 [plánu čistého produkčního cutoveru](production-cutover-plan.md).
