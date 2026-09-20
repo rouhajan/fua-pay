@@ -65,12 +65,21 @@ vznikne jako samostatný testovací účet.
 
 Aktuální staging baseline má `Payments__Provider=None`, `Csob__Enabled=false`,
 simulated payments vypnuté a Print vypnutý. Integration klíče jsou izolovaně
-připravené, ale ČSOB se zapne až po veřejném staging edge a přesné return URL.
+připravené; ČSOB se zapne až v samostatném integračním kroku.
 
-K 2026-09-20 staging ještě nemá veřejný hostname, vlastní TLS certifikát ani
-Nginx vhost. Port 5081 je pouze loopback. Po přidělení DNS se má použít
-samostatný HARICA/Certbot lineage; Production certifikát ani
-`fuapay.fa.tul.cz` se pro staging nerecyklují.
+Staging HTTPS edge je od 2026-09-20 přímo ověřený jako
+`https://fuapay.fa.tul.cz:8443` -> Nginx -> `127.0.0.1:5081`. Nebyla potřeba
+žádná DNS změna ani nový certifikát: existující HARICA certifikát už obsahoval
+SAN `fuapay.tul.cz` i `fuapay.fa.tul.cz`. Production port 443 se nezměnil:
+`fuapay.tul.cz:443` zůstává Production a `fuapay.fa.tul.cz:443` zůstává 301
+aliasem na Production. Production Nginx site byl před/po staging edge změně
+ověřen byte-identicky.
+
+UFW povoluje `8443/tcp` pouze z explicitně povolené klientské IPv4, ne obecně
+z internetu. Browser acceptance přes tuto cestu prošla; statický
+`administrator` vytvořil samostatného testovacího uživatele s Customer+Admin,
+přesným očekávaným DB/audit deltou a bez změny finančních, job nebo payment dat.
+Production byla při acceptance současně Healthy.
 
 ## Historický pre-production runtime do 2026-09-19
 
