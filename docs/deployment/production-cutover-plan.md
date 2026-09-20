@@ -478,7 +478,9 @@ Po vytvoření prvního production baseline zůstává explicitně:
       Requester assignmenty;
 - [ ] potvrdit produkční FinancialDocument číselnou řadu nad čistou DB;
 - [ ] dokončit a doložit production backup/restore acceptance;
-- [ ] dokončit veřejný staging DNS/TLS/Nginx edge a browser acceptance;
+- [x] dokončit izolovaný staging HTTPS/Nginx edge a browser acceptance:
+      `https://fuapay.fa.tul.cz:8443`, bez DNS změny, s existujícím SAN
+      certifikátem a UFW přístupem omezeným na explicitní klientskou IPv4;
 - [ ] final release/business-flow full gate včetně odloženého mobile smoke;
 - [ ] dokončit kontrolovaný go-live smoke a provozní monitoring.
 
