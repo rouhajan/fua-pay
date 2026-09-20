@@ -217,40 +217,124 @@ Výsledek:
 
 `IMPORTED STAGING LOCAL ACCEPTANCE: PASS`.
 
-## 8. Veřejný staging edge není ještě hotový
+## 8. Ověřený staging HTTPS edge
 
-K 2026-09-20 nový staging nemá veřejný hostname, TLS certifikát ani Nginx
-server block. Port 5081 není veřejně vystaven.
+K 2026-09-20 je staging dostupný na odděleném HTTPS portu:
 
-Production Nginx/ACME model byl read-only ověřen:
+```text
+https://fuapay.fa.tul.cz:8443
+        -> Nginx
+        -> http://127.0.0.1:5081
+        -> fuapay-staging.service
+```
 
-- HTTP ACME challenge používá webroot `/var/www/fuapay`;
-- `/.well-known/acme-challenge/` neexistující token vrací 404 bez redirectu;
-- Certbot renewal lineage `fuapay.tul.cz` používá stejný webroot;
-- Production HARICA certifikát a jeho renewal model se kvůli stagingu nemají
-  měnit.
+Toto uspořádání záměrně nemění existující Production chování:
 
-Pro staging se má po přidělení skutečného DNS jména použít samostatný HTTPS
-vhost a samostatný HARICA/Certbot certificate lineage. Konkrétní hostname se
-nesmí z dokumentace odhadovat před přidělením DNS.
+- `https://fuapay.tul.cz:443` zůstává canonical Production;
+- `https://fuapay.fa.tul.cz:443` zůstává beze změny HTTP 301 ->
+  `https://fuapay.tul.cz/`;
+- Production Nginx site `/etc/nginx/sites-available/fuapay` měl před i po
+  staging edge změně přesně SHA-256
+  `491a7228c460ce5c8674a98e6c4c0d0433e0b4fd990360f29cf2d9c9280a91d9`;
+- staging používá nový samostatný Nginx site
+  `/etc/nginx/sites-available/fuapay-staging`;
+- port `5081` zůstává pouze loopback a po zastavení staging služby neposlouchá;
+- staging Nginx listener je pouze IPv4 `0.0.0.0:8443`;
+- unknown Host/SNI cesta na `:8443` fail-closed končí prázdnou odpovědí
+  přes default server `444`.
 
-## 9. Otevřené staging kroky
+Staging používá existující HARICA certifikát lineage `fuapay.tul.cz`, protože
+jeho SAN už před staging změnou obsahoval oba názvy:
 
-Před veřejným integračním použitím stagingu zbývá:
+- `DNS:fuapay.tul.cz`;
+- `DNS:fuapay.fa.tul.cz`.
 
-1. získat schválený staging DNS hostname;
-2. ověřit jeho DNS;
-3. připravit HTTP ACME challenge route bez otevření aplikace;
-4. vydat samostatný HARICA certifikát;
-5. nastavit staging `AllowedHosts` na skutečný hostname;
-6. přidat samostatný HTTPS Nginx vhost -> `127.0.0.1:5081`;
-7. provést veřejný health a browser acceptance statických identit;
-8. teprve potom podle potřeby zapnout ČSOB integration provider a nastavit
-   přesnou veřejnou staging return URL;
-9. dokončit ČSOB integration acceptance;
-10. po ověření odstranit/archivovat starý staging env a staré staging secret
-    kopie pod production účtem a omezit přístup production DB role k
-    historické `fuapay_demo`.
+Nebyla provedena žádná změna DNS, žádné vydání nového certifikátu ani změna
+Production ACME/renewal modelu. `fuapay.fa.tul.cz` i `fuapay.tul.cz` již
+předem resolvovaly na stejný VM.
 
-Production `fuapay.tul.cz` a alias `fuapay.fa.tul.cz` se pro staging
-nepoužívají a jejich současný TLS/redirect model zůstává nedotčený.
+UFW nepovoluje `8443/tcp` obecně. Přístup byl pro browser acceptance povolen
+jen z konkrétní IPv4 aktuálního SSH/browser klienta. Tím staging s bezheslovými
+testovacími identitami není otevřený celému internetu.
+
+Lokální HTTPS edge acceptance ověřila:
+
+- `/health/ready` přes Nginx na `:8443`: Healthy;
+- `/Development/SignIn`: HTTP 200;
+- staging zůstal systemd `disabled`;
+- Production zůstala současně Healthy;
+- Production alias na `:443` zůstal HTTP 301;
+- Production Nginx konfigurace byla byte-identická.
+
+Následná browser acceptance z povolené klientské IP prošla bez Entra loginu.
+Statický profil `administrator` vytvořil samostatného testovacího
+Administratora. Přesně ověřený DB delta byl:
+
+- `access.users`: 11 -> 12;
+- `access.external_identities`: 11 -> 12;
+- `access.role_assignments`: 20 -> 22;
+- `audit.events`: 256 -> 257;
+- credit accounts/movements, jobs, payments, FinancialDocuments, notification
+  outbox, ServiceUnits, migration history a SafeQ transfer data beze změny.
+
+Nová identita je přesně
+`development | fua-pay-local | administrator`, má pouze aktivní role Customer
+a Admin, grant procesy `first-login` a `development-sign-in` a právě jeden
+`access.user-provisioned` audit event. Historické tři
+`microsoft-entra` identity z importovaného datasetu zůstaly beze změny a nejsou
+aktuálním staging login mechanismem.
+
+Výsledek:
+
+`STAGING ADMIN BROWSER LOGIN ACCEPTANCE: PASS`.
+
+## 9. ČSOB staging hranice a otevřené kroky
+
+Aktuální staging stále bezpečně používá:
+
+```text
+Payments__Provider=None
+Csob__Enabled=false
+```
+
+Při budoucím integračním testu se má výhradně ve staging env nastavit:
+
+```text
+Payments__Provider=Csob
+Csob__Enabled=true
+Csob__ApiBaseUrl=https://iapi.iplatebnibrana.csob.cz/
+Csob__ReturnUrl=https://fuapay.fa.tul.cz:8443/payments/csob/return
+```
+
+FUA Pay v eAPI `payment/init` posílá `Csob__ReturnUrl` jako součást
+podepsaného požadavku. Browserový návrat na uvedenou adresu proto cílí na
+staging `:8443`, nikoli na Production `:443`.
+
+Před prvním skutečným payment testem je však ještě nutné empiricky ověřit, že
+ČSOB integration prostředí akceptuje HTTPS `returnUrl` s explicitním portem
+`:8443`. Ve veřejných eAPI 1.9 příkladech je `returnUrl` normální parametr
+`payment/init` s maximální délkou 300 znaků; tento checkpoint ale neoznačuje
+nestandardní port za bankou potvrzený, dokud neprojde skutečný integration
+`payment/init`.
+
+Browser return není finanční autorita. Autoritativní stav dál potvrzuje
+podepsaný serverový `payment/status` a reconciliation. Production ČSOB zůstává
+`Payments__Provider=None`, `Csob__Enabled=false` a její return URL ani
+payment runtime se tím nemění.
+
+Otevřené staging kroky:
+
+1. připravit přesnou staging ČSOB integration konfiguraci včetně
+   `:8443` return URL;
+2. před změnou znovu ověřit Production health/config guard;
+3. zapnout ČSOB pouze ve stagingu a ověřit startup + GET/POST echo;
+4. provést první kontrolovaný `payment/init` a tím ověřit akceptaci
+   `:8443` return URL;
+5. následně dokončit vlastní integration acceptance scénáře;
+6. po integračním okně staging opět zastavit; systemd zůstává `disabled`;
+7. po ověření odstranit/archivovat starý staging env a staré staging secret
+   kopie pod production účtem a omezit přístup production DB role k
+   historické `fuapay_demo`.
+
+Žádný z těchto kroků nevyžaduje změnu Production URL, Production DB, Production
+Entra konfigurace ani Production ČSOB provideru.
