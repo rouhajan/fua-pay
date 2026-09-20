@@ -10,19 +10,24 @@ cutover plánu.
 
 Cíl je jednoduchý: na `https://fuapay.tul.cz` poběží jedna čistá produkční
 instance FUA Pay bez demo/test dat, bez vývojových funkcí a pouze s
-produkčními credentials pro skutečně aktivované integrace.
+produkčními credentials pro skutečně aktivované integrace. Produkční VM je
+vyhrazený pouze pro Production. Dlouhodobý staging se zachová mimo produkční VM
+podle [off-host staging modelu](staging-environment.md).
 
 ## 1. Základní rozhodnutí
 
 - Produkce bude mít jeden VM/server a jednu aktivní `fuapay.service`.
-- Nebude existovat druhý trvale běžící staging server ani paralelní produkční
-  instance.
-- Současné demo/staging prostředí je přechodné vývojové prostředí. Jeho
+- Na produkčním VM nebude po cutoveru běžet druhý staging runtime ani druhá
+  stagingová služba. Dlouhodobý staging je samostatné off-host prostředí,
+  zpočátku na vývojovém PC, a nemusí běžet nepřetržitě.
+- Současné demo/staging prostředí na produkčním VM je přechodné. Jeho
   databáze, uživatelé, kredit, zakázky, platební pokusy, auditní historie,
   tiskové rezervace, tiskové PINy a demo finanční doklady nejsou automaticky
   produkční data.
 - Před otevřením produkce se současná demo databáze archivuje a produkce začne
   nad novou čistou PostgreSQL databází vytvořenou z kanonického migration chainu.
+  Ověřený staging snapshot se zachová jako zdroj pro off-host staging restore;
+  stagingová databáze se nikdy nepoužije jako základ Production.
 - Demo/test data se do čisté produkce nekopírují, pokud pro konkrétní záznam
   nebude předem schválen samostatný migrační postup.
 - Zdrojový kód může zůstat veřejný. Bezpečnost nesmí záviset na utajení repa;
@@ -431,15 +436,17 @@ Po spuštění se průběžně sleduje:
 Po pozdější aktivaci ČSOB se navíc sleduje reconciliation worker, payment
 `RequiresAttention` a expirace/rotace ČSOB klíčů.
 
-Další release se nasazují stejným side-by-side modelem. Pro běžný vývoj se
-nezakládá permanentní staging server; CI, izolované PostgreSQL testy a
-kontrolované integrační acceptance slouží jako předprodukční gate.
+Další production release se nasazují stejným side-by-side modelem. Pro běžný
+vývoj a integrační acceptance se používá oddělený off-host staging popsaný v
+[`staging-environment.md`](staging-environment.md). Staging je persistentní
+prostředím a historií, nikoli druhý permanentně běžící VM; může být spuštěn jen
+po dobu vývoje nebo acceptance.
 
 ## 17. Věci, které první produkční cutover záměrně neřeší
 
 Bez nového explicitního rozhodnutí nejsou součástí prvního cutoveru:
 
-- druhý permanentní staging server;
+- druhý staging VM nebo staging runtime hostovaný souběžně na produkčním VM;
 - kopie demo/test finanční historie do produkce;
 - automatický reverse DB rollback;
 - ukládání PDF dokladů na disk jako source of truth;
