@@ -1,6 +1,6 @@
 # ČSOB Payment Gateway eAPI 1.9
 
-Status: 2026-09-19
+Status: 2026-09-20
 
 Pokud je ČSOB aktivní, FUA Pay jej používá jako provider adaptér nad interním
 provider-neutral modelem platby. Browserový návrat nikdy není finanční autorita;
@@ -20,8 +20,10 @@ stejné provozní TODO neduplikovalo na více místech.
 
 ## Historicky ověřené integrační prostředí
 
-Následující body jsou historická evidence přechodného demo/staging runtime,
-nikoli cílový trvale běžící druhý FUA Pay server:
+Následující body jsou historická evidence původního demo/staging runtime do
+2026-09-19. Od 2026-09-20 existuje samostatně izolovaný staging runtime na
+stejném VM, standardně disabled/inactive, popsaný v
+[`../deployment/runtime-state-2026-09-20.md`](../deployment/runtime-state-2026-09-20.md):
 
 - Merchant ID: `M1EPAY2213`.
 - ČSOB integration API: `https://iapi.iplatebnibrana.csob.cz/`.
@@ -222,28 +224,34 @@ V tomto profilu nejsou vyžadovány ČSOB merchant ID, klíče, API ani return U
 ČSOB klient, return processing a reconciliation worker nejsou aktivní a CSP
 zůstává na `form-action 'self'`.
 
-Integration:
+Integration na aktuálním izolovaném stagingu:
 
 ```text
 Csob__ApiBaseUrl=https://iapi.iplatebnibrana.csob.cz/
 Payments__Provider=Csob
 Csob__Enabled=true
 Csob__MerchantId=M1EPAY2213
-Csob__PrivateKeyPath=<absolutní cesta k privátnímu PEM klíči obchodníka>
-Csob__GatewayPublicKeyPath=<absolutní cesta k integration public key brány>
-Csob__ReturnUrl=https://fuapay.tul.cz/payments/csob/return
+Csob__PrivateKeyPath=/var/lib/fuapay-staging/secrets/csob-integration-private.pem
+Csob__GatewayPublicKeyPath=/var/lib/fuapay-staging/secrets/csob-integration-gateway-public.pem
+Csob__ReturnUrl=https://fuapay.fa.tul.cz:8443/payments/csob/return
 ```
 
-Budoucí plný browser/return test integration prostředí se provádí jen v časově
-omezeném okně nad dočasným non-production FUA Pay runtime na serveru. Musí použít
-čerstvou izolovanou dočasnou PostgreSQL databázi a roli, pouze integration ČSOB
-credentials/API a podle potřeby oddělený endpoint, port nebo proxy route. Nesmí
-použít produkční databázi ani její restore. Po testovacím okně se runtime zastaví
-a odstraní; nevzniká permanentní druhý staging FUA Pay.
+Tato konfigurace patří pouze do `/etc/fuapay-staging/staging.env`. Production
+zůstává nezávisle na `Payments__Provider=None` a `Csob__Enabled=false`,
+dokud nenastane samostatný production activation milník.
 
-Konkrétní veřejná return URL pro takový dočasný runtime zůstává provozním a
-bankovním omezením, dokud nebude ověřena. Tento dokument proto neschvaluje žádný
-konkrétní hostname, `PathBase`, port, proxy konfiguraci ani systemd uspořádání.
+Staging browser edge je ověřený jako
+`https://fuapay.fa.tul.cz:8443` -> Nginx -> `127.0.0.1:5081`. Port 8443 je
+v UFW povolen jen z explicitně schválené klientské IPv4. `payment/init` posílá
+`returnUrl` přímo jako součást podepsaného requestu; browser návrat proto při
+výše uvedené konfiguraci cílí na staging `:8443`, nikoli na Production
+`:443`.
+
+Veřejné eAPI 1.9 příklady ČSOB používají `returnUrl` jako běžný parametr
+`payment/init` a referenční model uvádí maximální délku 300 znaků. Zveřejněná
+dokumentace zde není interpretována jako důkaz podpory libovolného explicitního
+HTTPS portu. Akceptace `:8443` musí proto před označením tohoto flow za PASS
+projít prvním kontrolovaným integration `payment/init`.
 
 Pozdější aktivní produkční ČSOB profil používá
 `Payments__Provider=Csob`, `Csob__Enabled=true` a pouze:
