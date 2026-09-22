@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-20
+Status: 2026-09-22
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu až k bezpečné aktivaci produkčního ČSOB provozu. Není checklistem prvního
@@ -30,23 +30,32 @@ Staging má vlastní OS účet, release root, PostgreSQL databázi a role, Data
 Protection keyring i integration secret root a standardně zůstává
 `disabled`/`inactive`. Nikdy nesmí použít produkční DB ani její restore.
 
-Aktuální staging je fail-closed:
-`Payments__Provider=None`, `Csob__Enabled=false` a simulated payments jsou
-vypnuté. Integration key files jsou izolovaně připravené.
+Mimo integrační okno zůstává staging fail-closed a standardně zastavený. Během
+řízeného acceptance okna 2026-09-22 byl integration provider aktivován pouze ve
+stagingu (`Payments__Provider=Csob`, `Csob__Enabled=true`), simulated payments
+zůstaly vypnuté a Production zůstala na `Payments__Provider=None`,
+`Csob__Enabled=false`. Po dokončení acceptance byl staging znovu uzavřen:
+`fuapay-staging.service = inactive/disabled`, aktivní `staging.env` byl bitově
+vrácen na původní fail-closed SHA-256
+`3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4`, UFW
+nemá žádné `8443` allow a backend `127.0.0.1:5081` neposlouchá. Integration key
+files zůstávají izolované mimo Git/release.
 
 HTTPS/browser edge je už ověřený jako
 `https://fuapay.fa.tul.cz:8443` -> Nginx -> `127.0.0.1:5081`.
 Nebyla potřeba DNS změna ani nový certifikát; existující HARICA certifikát už
 obsahoval SAN `fuapay.fa.tul.cz`. Production `fuapay.tul.cz:443` ani
-production alias `fuapay.fa.tul.cz:443` se nezměnily. UFW povoluje staging
-`:8443` pouze z explicitní klientské IPv4.
+production alias `fuapay.fa.tul.cz:443` se nezměnily. Mimo testovací okno UFW
+nemá žádné `8443` allow; během otevřeného staging okna se `:8443` povoluje pouze
+z explicitní klientské IPv4.
 
 Při aktivaci integration provideru musí staging používat přesně
 `https://fuapay.fa.tul.cz:8443/payments/csob/return`. Tato return URL je
 součástí podepsaného `payment/init`; nesmí se použít production
-`https://fuapay.tul.cz/payments/csob/return`. Akceptaci explicitního portu
-`:8443` ze strany integration gateway je ještě nutné potvrdit prvním
-kontrolovaným `payment/init`. Aktuální runtime evidence je v
+`https://fuapay.tul.cz/payments/csob/return`. Akceptace explicitního portu `:8443` byla živě potvrzena 2026-09-22: první
+kontrolovaný `payment/init` byl přijat, browser byl přesměrován na integrační
+platební stránku a následné cancel/success/expiry návraty skutečně prošly přes
+`https://fuapay.fa.tul.cz:8443/payments/csob/return`. Aktuální runtime evidence je v
 [`../deployment/runtime-state-2026-09-20.md`](../deployment/runtime-state-2026-09-20.md).
 
 ## A. Aktuálně prokázaný stav
@@ -61,12 +70,14 @@ kontrolovaným `payment/init`. Aktuální runtime evidence je v
       se simulovanými platbami vypnutými a provedl níže uvedené live acceptance
       scénáře.
 - [x] Nový izolovaný staging má ověřený HTTPS/browser edge
-      `https://fuapay.fa.tul.cz:8443`, statické testovací identity a současně
-      zůstává `Payments__Provider=None`, `Csob__Enabled=false`.
-- [ ] Zapnout integration provider pouze ve stagingu s return URL
-      `https://fuapay.fa.tul.cz:8443/payments/csob/return` a prvním
-      kontrolovaným `payment/init` potvrdit, že integration gateway akceptuje
-      explicitní port `:8443`.
+      `https://fuapay.fa.tul.cz:8443`, statické testovací identity a mimo
+      acceptance okno zůstává standardně zastavený.
+- [x] Integration provider byl 2026-09-22 aktivován pouze ve stagingu s return
+      URL `https://fuapay.fa.tul.cz:8443/payments/csob/return`; kontrolovaný
+      `payment/init` i skutečné browser návraty potvrdily, že integration gateway
+      explicitní port `:8443` akceptuje.
+- [x] Fresh GET i POST `echo` 2026-09-22: `resultCode=0`, `resultMessage=OK` a
+      podpis obou odpovědí kryptograficky ověřen integration gateway public key.
 - [x] Úspěšné dobití kreditu 100 Kč ověřeno 2026-09-07.
 - [x] PR #35 nasazen 2026-09-08; return vede na routed payment detail bez 404.
 - [x] Druhé úspěšné dobití kreditu 100 Kč ověřeno 2026-09-08.
@@ -139,17 +150,18 @@ ani neotvírat uzavřené M0/M1/M2/C-01/C-02 oblasti bez konkrétního defektu.
       Stage 3 reverse protokol/orchestrace; PostgreSQL testy pokrývají souběh a
       restart z durabilního `InProgress` bez druhého PUT.
 - [ ] Samostatný fresh GET/POST echo gate bezprostředně před production activation
-      zopakovat; historické i implementační testy jsou PASS, ale production
-      activation musí ověřit aktuální merchant availability v daném okamžiku.
+      zopakovat. Fresh staging gate 2026-09-22 je PASS, ale pozdější production
+      activation musí znovu ověřit merchant availability v daném okamžiku.
 
 Stage 2 používá owner-scoped read-only status handler a bounded polling
 post-return stavu (2 sekundy, nejvýše 30 pokusů). Happy-path byl živě ověřen na
 revision `768aec26c72bc77ca43d554c8e8bab20f60678b6` bez ručního F5. Expiry
 hardening z PR #44 byl po předchozím incidentu samostatně live-accepted
-2026-09-14 na `bc868276...`. Aktuální `main` a současný Production i připravený
-staging release jsou
-`774b324c48d8f874db21f115479f3b317c2a73d0`; nový staging zatím ČSOB
-integration provider záměrně neaktivuje.
+2026-09-14 na `bc868276...`. Nasazený aplikační release Production i izolovaného stagingu je
+`774b324c48d8f874db21f115479f3b317c2a73d0`. Staging integration provider byl
+2026-09-22 dočasně aktivován pouze pro řízené acceptance okno a po jeho
+uzavření byl aktivní `staging.env` vrácen na `Payments__Provider=None` a
+`Csob__Enabled=false`.
 
 Stage 3 ukládá `SettlementReturn` i Reverse attempt jako `InProgress` před
 externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy PUT
@@ -173,18 +185,22 @@ je samostatná autoritativní hranice. Živý reverse scénář byl na stagingu 
 
 Podle oficiální wiki upravené 2026-06-30:
 
-- [x] GET echo: HTTP 200, validní podpis, `resultCode=0`; historicky live PASS.
-- [x] POST echo: HTTP 200, validní podpis, `resultCode=0`; živě ověřeno na
-      staging release `b057ecf84f33908bb5c6a20d5389c025a4e712ca`.
-- [x] Successful authorised payment: integrační testovací karta
-      `4000007000010006`, budoucí expirace, CVC `100`; návrat na požadovanou
-      stránku ověřen.
-- [x] Payment cancelled by customer: `resultCode=0`, `paymentStatus=3` a
-      odpovídající lokální `Cancelled` ověřen uživatelským testem 2026-09-08.
-- [x] Expired payment: fresh scénář 2026-09-14 prošel po `1806.001 s`; browser
-      return nesl `resultCode=130`, `paymentStatus=6`, následný podepsaný
-      serverový status vrátil `0/6`, interní stav byl `Expired` a nevznikl žádný
-      kreditní pohyb ani settlement efekt. Jde o náhradu neúplného historického
+- [x] GET echo: fresh live PASS 2026-09-22, HTTP 200, `resultCode=0`,
+      `resultMessage=OK`, validní gateway podpis.
+- [x] POST echo: fresh live PASS 2026-09-22, HTTP 200, `resultCode=0`,
+      `resultMessage=OK`, validní gateway podpis.
+- [x] Successful authorised payment: 2026-09-22 na izolovaném stagingu 10 Kč,
+      testovací karta `4000007000010006`, CVC `100`; lokálně právě jedna
+      `Succeeded` platba, právě jeden kreditní pohyb +10 Kč a právě jeden
+      `CardWalletTopUp` finanční dokument.
+- [x] Payment cancelled by customer: fresh 2026-09-22 přes skutečný
+      `:8443` browser return; gateway `resultCode=0`, `paymentStatus=3`, lokálně
+      `Cancelled`, reconciliation `Completed`, bez finančního efektu.
+- [x] Expired payment: fresh scénář 2026-09-22 na platbě
+      `8b48a88a-7c30-4c9c-9df0-8f0914e12ab9`; browser return nesl ověřenou
+      evidenci `resultCode=130`, `paymentStatus=6`, následný serverový status
+      potvrdil `0/6`, interní stav `Expired`, reconciliation `Completed`, bez
+      kreditního pohybu a bez finančního dokumentu. Jde o náhradu neúplného historického
       pokusu z 2026-09-12, který neuměl zachytit celý podepsaný browser payload.
 - [x] Payment reversal: po úspěšné autorizaci zavolat `payment/reverse`, ověřit
       HTTP 200, podpis, `resultCode=0`, `paymentStatus=5` a odpovídající lokální
@@ -200,17 +216,103 @@ celek.
 
 - [x] Přímá platba zakázky kartou: CardJob `PLT-2026-000006` -> `Succeeded`,
       zakázka uhrazena přesně jednou; ověřeno 2026-09-12.
-- [ ] Decline/failed scénář: bez kreditu/settlement efektu, srozumitelný stav.
-- [ ] Duplicate browser return: žádný druhý finanční efekt.
-- [ ] Lost browser return: zavřít/odpojit browser; worker z autoritativního
-      `payment/status` stav později bezpečně dokončí.
-- [ ] Restart během otevřené/pending platby: po startu se recovery obnoví a
-      vznikne nejvýše jeden finanční efekt.
-- [ ] Opakovaný `payment/status` nad již úspěšnou platbou: idempotentní.
-- [ ] Opuštěná `Pending` platba bez vstupu karty: po TTL přejde do očekávaného
-      terminálního stavu a UI nezůstane věčně „čeká“.
-- [ ] Return UX: bez 404; bez ručního F5 pro běžný happy/cancel/expired tok.
-- [ ] Mobile + desktop smoke hlavního payment flow.
+- [x] Declined authorization attempt: 2026-09-22 karta
+      `4000007000010006` s CVC `200` zobrazila na ČSOB srozumitelné zamítnutí
+      vydavatelem, ale autoritativní `payment/status` zůstal `0/2`; FUA Pay
+      správně ponechal platbu `58b18f4e-ed26-4972-aca2-9f2e15880c33` jako
+      `Pending`, bez kreditního pohybu a bez dokladu. ČSOB session dál nabízela
+      jinou kartu. Následné explicitní `Zrušit platbu a vrátit se do obchodu`
+      skončilo `0/3`, lokálně `Cancelled`, reconciliation `Completed`, stále bez
+      finančního efektu.
+- [ ] Terminální `Failed` (`resultCode=0`, `paymentStatus=6`) nemá fresh live
+      browser PASS. Implementační větev je přítomná a fail-closed, ale standardní
+      decline testovací kartou session neukončuje stavem 6; tento bod se proto
+      nesmí zaměnit s výše ověřeným declined authorization attempt.
+- [x] Duplicate browser return: 2026-09-22 byl čerstvý autentický podepsaný
+      `application/x-www-form-urlencoded` POST z ČSOB pro platbu
+      `d707aa08-681f-4557-8298-f46e5ee6cbd9` / `106199d5aa1e@LI` zopakován beze
+      změny payloadu v rámci freshness okna. Původní browser POST v `14:21:21Z`
+      i duplicate replay v `14:22:07Z` vrátily HTTP 303 na tentýž payment detail;
+      platba i reconciliation už před prvním returnem byly terminální a replay
+      nezměnil jejich timestamps/version ani nevytvořil druhý settlement efekt.
+      Po replayi existoval právě jeden kreditní pohyb +10 Kč a právě jeden
+      finanční dokument.
+- [x] Lost browser return: 2026-09-22 byl inbound `8443` pro testovací klientskou
+      cestu záměrně uzavřen a browser return skončil `ERR_CONNECTION_TIMED_OUT`.
+      Platba `559d5f36-9e20-4a6e-8f03-b09baeaba069` / `d69b8ceb13ce@LI` přesto
+      workerem přešla z autoritativního `payment/status` `0/7` do `Succeeded`;
+      `last_browser_return_at` zůstal `NULL`, vznikl právě jeden kreditní pohyb
+      +10 Kč a právě jeden dokument `FUA-2026-000006`.
+- [x] Restart během otevřené/pending platby: 2026-09-22 staging proces skutečně
+      změnil PID `328579 -> 331018`; stejná platba
+      `7f6a771a-ce4b-4337-825e-685f7bbbdfdc` / `41d4289c6538@LI` přežila restart
+      jako `Pending`, worker znovu naběhl `Healthy` a následné dokončení stejné
+      platby vytvořilo právě jeden kreditní pohyb +10 Kč a právě jeden dokument
+      `FUA-2026-000005`.
+- [ ] Opakovaný provider `payment/status` nad již úspěšnou platbou: live scénář
+      nebyl uměle vyvolán. Nasazená reconciliation cesta přijímá i již
+      `Succeeded` platbu a settlement je navržen idempotentně; konkrétně
+      `PaymentSettlementService.CompleteAsync()` nad již `Succeeded` platbou
+      vrací `false` před novým finančním efektem. PostgreSQL persistence testy
+      opakují settlement dvakrát a samostatné concurrent ČSOB testy ověřují, že
+      vznikne právě jeden pohyb/dokument/job settlement. Přesto aplikace nemá
+      veřejný/operator endpoint, který by nad terminální platbou bezpečně vynutil
+      nový skutečný provider status call, takže provider replay není fresh live
+      PASS. UI odkaz `Obnovit stav ručně` pouze znovu načte lokální detail a
+      provider `payment/status` nevolá; kvůli jedné acceptance fajfce se
+      neprováděl ruční DB zápis ani pomocný bypass.
+      Minor UX rest: tento odkaz je aktuálně viditelný i na terminální
+      `Cancelled` platbě, kde je funkčně neškodný, ale zbytečný/matoucí.
+- [x] Opuštěná `Pending` platba bez vstupu karty: fresh 2026-09-22 platba
+      `8b48a88a-7c30-4c9c-9df0-8f0914e12ab9` po TTL skončila `Expired`; ověřená
+      browser evidence `130/6` + následný serverový `0/6`, reconciliation
+      `Completed`, bez finančního efektu.
+- [x] Return UX: fresh 2026-09-22 happy, cancel i expired tok skončil na routed
+      payment detailu bez 404 a bez ručního F5; explicitní `:8443` return funguje.
+- [x] Mobile + desktop smoke hlavního payment flow: desktop happy path byl
+      živě ověřen 2026-09-22; následně skutečný telefonní browser přes povolenou
+      klientskou IPv4 `147.230.72.120` dokončil nový 10 Kč top-up
+      `ef92e52d-dffc-465b-a2c8-c97dadacb8f4` / `398b8c18f4ce@LI` jako
+      `Succeeded`. Reconciliation skončila `Completed` s `paymentStatus=7`,
+      `resultCode=0`; vznikl právě jeden kreditní pohyb +10 Kč a právě jeden
+      finanční dokument, kredit Testovacího zákazníka Beta přešel 230 -> 240 Kč.
+      Mobilní UI bylo při průchodu použitelné bez odlišné funkční chyby proti
+      desktopu.
+- [x] Multi-user CardJob playtest po prvním closeoutu: staging byl znovu otevřen
+      pouze pro stejnou povolenou klientskou IPv4 a dva lidé přes oddělené
+      testovací identity provedli dvě přímé karetní platby zakázek z různých
+      pracovišť. `3D-2026-000004` (`3D tisk - Pardubice`, 120 Kč) skončila přes
+      payment `5b3faa6e-292b-47ee-91b5-d7417eb192aa` / `095401bf4bf9@LI` jako
+      `Succeeded`, reconciliation `Completed`, zakázka `Paid` a dokument
+      `FUA-2026-000010`. `PLT-2026-000002` (`Tisk závěrečné prezentace`, 520 Kč)
+      skončila přes payment `0f00a7b4-e746-4800-be30-415c7666b2ff` /
+      `0d973b5d9984@LI` stejně jako `Succeeded` / `Completed`, zakázka `Paid` a
+      dokument `FUA-2026-000011`. U každé zakázky existovala právě jedna payment,
+      právě jedna `Succeeded`, žádná `Pending`; `settlement_reference_id`,
+      document `source_id`, částka i provider reference se přesně shodovaly.
+      Nginx zaznamenal oba browser returny jako HTTP 303 a staging journal od
+      začátku playtestu neměl warning/error.
+- [ ] Live access-isolation browser probe napříč zákazníky a requester
+      pracovišti nebyl v tomto okně dokončen. Kód používá owner-scoped
+      `FindForCustomerAsync` a management scope přes `FindForManagementAsync`,
+      ale tento konkrétní ruční URL negativní test zůstává vhodný jako další
+      hardening evidence.
+- [ ] Live souběžné/double-click vytvoření dvou CardJob payment pokusů pro jednu
+      nezaplacenou zakázku nebylo v tomto okně provedeno. Databázový model má
+      unikátní blocking-job hranici a oblast je vhodná pro cílený Codex review a
+      případný pozdější staging concurrency probe; není tím označen bankovní
+      activation blocker.
+
+Fresh acceptance okno 2026-09-22 bylo po testech bezpečně uzavřeno a staging
+byl následně ještě jednou krátce otevřen pro multi-user CardJob playtest. Také
+před druhým/final stopem bylo v `fuapay_staging` ověřeno `Pending=0` a due
+reconciliation `=0`. Finální stav dne je znovu `inactive/disabled`, aktivní env
+je bitově zpět na fail-closed baseline SHA-256
+`3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4`, UFW nemá
+žádné `8443`, `127.0.0.1:5081` neposlouchá a dočasný playtest backup byl po
+ověření odstraněn. Production zůstala `Healthy` se stejným Nginx site SHA-256
+`491a7228c460ce5c8674a98e6c4c0d0433e0b4fd990360f29cf2d9c9280a91d9` a alias
+na 443 dál vrací HTTP 301 na `https://fuapay.tul.cz/`.
 
 ## E. Historický přechodný staging release/deploy gate
 
