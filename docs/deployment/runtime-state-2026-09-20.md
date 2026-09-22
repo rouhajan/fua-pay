@@ -1,5 +1,7 @@
 # Runtime checkpoint 2026-09-20
 
+Acceptance update: 2026-09-22
+
 Tento dokument zachycuje přímo ověřený stav Production a nového izolovaného
 staging runtime po prvním produkčním nasazení FUA Pay. Je to provozní checkpoint,
 nikoli náhrada release-artifact, cutover ani integračních runbooků.
@@ -297,16 +299,16 @@ Výsledek:
 
 `STAGING ADMIN BROWSER LOGIN ACCEPTANCE: PASS`.
 
-## 9. ČSOB staging hranice a otevřené kroky
+## 9. ČSOB staging hranice po acceptance 2026-09-22
 
-Aktuální staging stále bezpečně používá:
+Mimo řízené testovací okno staging bezpečně používá:
 
 ```text
 Payments__Provider=None
 Csob__Enabled=false
 ```
 
-Při budoucím integračním testu se má výhradně ve staging env nastavit:
+Při řízeném integračním testu se výhradně ve staging env dočasně nastavuje:
 
 ```text
 Payments__Provider=Csob
@@ -319,34 +321,31 @@ FUA Pay v eAPI `payment/init` posílá `Csob__ReturnUrl` jako součást
 podepsaného požadavku. Browserový návrat na uvedenou adresu proto cílí na
 staging `:8443`, nikoli na Production `:443`.
 
-Před prvním skutečným payment testem je však ještě nutné empiricky ověřit, že
-ČSOB integration prostředí akceptuje HTTPS `returnUrl` s explicitním portem
-`:8443`. Ve veřejných eAPI 1.9 příkladech je `returnUrl` normální parametr
-`payment/init` s maximální délkou 300 znaků; tento checkpoint ale neoznačuje
-nestandardní port za bankou potvrzený, dokud neprojde skutečný integration
-`payment/init`.
-
-Browser return není finanční autorita. Autoritativní stav dál potvrzuje
-podepsaný serverový `payment/status` a reconciliation. Production ČSOB zůstává
+Akceptace explicitního HTTPS portu `:8443` už není otevřená otázka:
+2026-09-22 ji přímo potvrdil skutečný integration `payment/init` a následné
+browser returny success/cancel/expiry. Browser return přitom není finanční
+autorita; autoritativní stav dál potvrzuje podepsaný serverový
+`payment/status` a reconciliation. Production ČSOB zůstává
 `Payments__Provider=None`, `Csob__Enabled=false` a její return URL ani
 payment runtime se tím nemění.
 
-Otevřené staging kroky:
+Postup, který byl 2026-09-22 skutečně proveden a zůstává kanonickým vzorem pro
+další staging okna:
 
-1. připravit přesnou staging ČSOB integration konfiguraci včetně
-   `:8443` return URL;
-2. před změnou znovu ověřit Production health/config guard;
-3. zapnout ČSOB pouze ve stagingu a ověřit startup + GET/POST echo;
-4. provést první kontrolovaný `payment/init` a tím ověřit akceptaci
-   `:8443` return URL;
-5. následně dokončit vlastní integration acceptance scénáře;
-6. po integračním okně staging opět zastavit; systemd zůstává `disabled`;
-7. po ověření odstranit/archivovat starý staging env a staré staging secret
-   kopie pod production účtem a omezit přístup production DB role k
-   historické `fuapay_demo`.
+1. ověřit fail-closed staging baseline a Production health/config guard;
+2. vytvořit hash-ověřený staging env backup;
+3. zapnout ČSOB pouze ve stagingu, ponechat službu systemd `disabled`;
+4. ověřit startup, readiness/worker a fresh GET/POST echo;
+5. povolit `8443/tcp` pouze z konkrétní klientské IPv4;
+6. provést požadované integration/browser scénáře;
+7. před stopem ověřit, že nezůstaly `Pending` ani due reconciliation položky;
+8. zastavit staging, obnovit přesný fail-closed env baseline, odstranit dočasné
+   UFW allow a ověřit, že `127.0.0.1:5081` neposlouchá;
+9. znovu ověřit Production health, nezměněný Production Nginx hash a 301 alias;
+10. odstranit pouze přesně identifikované dočasné staging artefakty.
 
-Žádný z těchto kroků nevyžaduje změnu Production URL, Production DB, Production
-Entra konfigurace ani Production ČSOB provideru.
+Starší housekeeping bod ohledně historických staging kopií/rolí se nemá míchat
+s payment acceptance a řeší se samostatně podle aktuálního runtime auditu.
 
 ## 10. Kanonický provozní režim staging testovacího okna
 
@@ -400,10 +399,10 @@ Budoucí Production return URL je oddělená:
 https://fuapay.tul.cz/payments/csob/return
 ```
 
-Staging nesmí při integration testu použít Production return URL. První
-kontrolovaný `payment/init` musí ještě potvrdit, že ČSOB integration gateway
-akceptuje explicitní port `:8443`; do té doby se tato vlastnost nepovažuje za
-ověřenou.
+Staging nesmí při integration testu použít Production return URL. Akceptaci
+explicitního portu `:8443` již 2026-09-22 potvrdil skutečný kontrolovaný
+integration `payment/init` a následné browser returny; tato vlastnost je proto
+pro současný staging model ověřená.
 
 ### Ověřený uzavřený stav po browser acceptance 2026-09-20
 
@@ -424,3 +423,176 @@ Výsledek:
 
 Tento uzavřený stav je výchozí stav, ze kterého se má zahajovat každé další
 staging testovací okno.
+
+
+## 11. Fresh ČSOB acceptance checkpoint 2026-09-22
+
+Tento oddíl doplňuje přímo ověřené skutečnosti z řízeného ČSOB integration
+okna 2026-09-22. Nemění kanonické pravidlo, že staging je mimo testovací okno
+`inactive` / `disabled` a bez veřejného UFW allow pro `:8443`.
+
+Před aktivací integration provideru bylo znovu ověřeno:
+
+- Production `fuapay.service = active/enabled`, staging
+  `fuapay-staging.service = inactive/disabled`;
+- Production i staging symlink ukazovaly na release
+  `774b324c48d8f874db21f115479f3b317c2a73d0`;
+- obě nasazené `FuaPay.Web` binárky měly shodný SHA-256
+  `98b26fac12a0ba68ade76297307890a902efad9e50ba4af0fa2aac6752086fb9`;
+- systemd staging čte přesně `/etc/fuapay-staging/staging.env`;
+- staging env je `root:fuapay-staging` mode `0640`;
+- integration private key i gateway public key jsou
+  `fuapay-staging:fuapay-staging` mode `0600` a oba se parsují jako validní;
+- staging `AllowedHosts=fuapay.fa.tul.cz`,
+  `Hosting__UseForwardedHeaders=true` a
+  `Hosting__KnownProxies__0=127.0.0.1`;
+- HARICA certifikát pro `fuapay.tul.cz` obsahuje SAN
+  `fuapay.tul.cz` i `fuapay.fa.tul.cz` a byl v době testu platný do
+  2027-02-28;
+- Production Nginx site SHA-256 zůstal
+  `491a7228c460ce5c8674a98e6c4c0d0433e0b4fd990360f29cf2d9c9280a91d9`;
+- staging Nginx site SHA-256 byl
+  `848900183f3ce0b5651530ea023f1135e40b0f462dc95ca97aa06551910b9c37`.
+
+Pro acceptance okno byl pouze staging přepnut na:
+
+```text
+Payments__Provider=Csob
+Csob__Enabled=true
+Csob__ApiBaseUrl=https://iapi.iplatebnibrana.csob.cz/
+Csob__MerchantId=M1EPAY2213
+Csob__ReturnUrl=https://fuapay.fa.tul.cz:8443/payments/csob/return
+```
+
+Production po celou dobu zůstala na `Payments__Provider=None` a
+`Csob__Enabled=false`; její health byl před/po jednotlivých testech
+`Healthy` a Production Nginx hash se nezměnil.
+
+Fresh GET i POST `echo` vrátily `resultCode=0`, `resultMessage=OK` a podpis
+obou odpovědí byl ověřen integration gateway public key. První kontrolovaný
+`payment/init` potvrdil, že integration gateway přijímá explicitní
+`:8443` v `returnUrl`; skutečné browser návraty cancel/success/expiry následně
+prošly přes tuto staging URL.
+
+Live acceptance dále ověřila:
+
+- cancel bez finančního efektu;
+- úspěšný 10 Kč top-up s právě jedním kreditním pohybem a jedním finančním
+  dokumentem;
+- expiry po TTL s ověřenou browser evidencí `130/6` a následným serverovým
+  `0/6`, bez finančního efektu;
+- restart staging procesu během `Pending` platby (PID
+  `328579 -> 331018`) s durabilní recovery a právě jedním finančním efektem po
+  následném úspěšném dokončení stejné platby;
+- ztracený browser return: po dočasném odstranění pouze stagingového inbound
+  UFW allow pro `:8443` browser skončil `ERR_CONNECTION_TIMED_OUT`, zatímco
+  worker bez browser returnu dokončil platbu z autoritativního
+  `payment/status 0/7` právě jednou. UFW allow byl po důkazu vrácen pouze pro
+  aktuální testovací klientskou IPv4;
+- mobile smoke na skutečném telefonním browseru přes stejnou povolenou klientskou
+  IPv4: nový 10 Kč top-up `ef92e52d-dffc-465b-a2c8-c97dadacb8f4` /
+  `398b8c18f4ce@LI` skončil `Succeeded`, reconciliation `Completed` s `0/7`,
+  právě jeden kreditní pohyb +10 Kč, právě jeden finanční dokument a kredit Beta
+  230 -> 240 Kč. Uživatelský průchod potvrdil použitelné mobilní UI;
+- duplicate browser return: nový successful top-up
+  `d707aa08-681f-4557-8298-f46e5ee6cbd9` / `106199d5aa1e@LI` měl originální
+  browser POST na `/payments/csob/return` v `14:21:21Z`; tentýž čerstvý,
+  autentický podepsaný form payload byl bez cookies replayován v `14:22:07Z` a
+  znovu vrátil HTTP 303 na stejný payment detail. Platba/reconciliation už byly
+  dokončené před prvním returnem a duplicate replay nezměnil jejich stav,
+  timestamps ani version; zůstal právě jeden kreditní pohyb +10 Kč a právě jeden
+  dokument;
+- declined authorization attempt: karta `4000007000010006` s CVC `200` byla na
+  platební stránce zamítnuta vydavatelem, ale autoritativní status zůstal `0/2`.
+  Platba `58b18f4e-ed26-4972-aca2-9f2e15880c33` zůstala `Pending` bez pohybu a
+  dokladu, dokud uživatel explicitně nezvolil `Zrušit platbu a vrátit se do
+  obchodu`; potom skončila `Cancelled`, reconciliation `Completed`, gateway
+  `0/3`, stále bez finančního efektu. Tím se potvrdilo, že odmítnutí jedné
+  autorizace není totéž co terminální `Failed` celé payment session.
+
+Terminální `Failed` (`0/6`) nebyl fresh live browser scénářem vyvolán. Také nebyl
+uměle vyvolán opakovaný provider `payment/status` nad již `Succeeded` platbou;
+UI odkaz `Obnovit stav ručně` provider nevolá. Na terminální `Cancelled` platbě
+je tento odkaz aktuálně stále zobrazen; jde o neblokující UX rest, nikoli o
+security/financial problém.
+
+### Finální closeout acceptance okna 2026-09-22
+
+Před zastavením stagingu bylo read-only ověřeno `Pending=0` a due reconciliation
+`=0`. Poté byl proveden pouze staging closeout:
+
+- `fuapay-staging.service = inactive` a `disabled`;
+- aktivní `/etc/fuapay-staging/staging.env` byl vrácen přesně na původní
+  fail-closed obsah, SHA-256
+  `3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4`,
+  `root:fuapay-staging`, mode `0640`;
+- aktivní hodnoty jsou znovu `StagingTestMode__Enabled=true`,
+  `Entra__Enabled=false`, `Payments__Provider=None`, `Csob__Enabled=false`;
+- jediné dočasné UFW allow `147.230.72.120 -> 8443/tcp` bylo odstraněno a žádné
+  další `8443` UFW pravidlo nezůstalo;
+- `127.0.0.1:5081` už neposlouchá; Nginx listener `0.0.0.0:8443` zůstává podle
+  kanonického modelu připravený, ale bez UFW allow není zvenku dostupný;
+- dnešní dočasné soubory
+  `staging.env.before-csob-20260922` a
+  `staging.env.csob-candidate-20260922` byly po hash guardu odstraněny;
+- zůstaly tři historické root-only backupy z 2026-09-20:
+  `staging.env.before-test-signin-20260920T114003Z` a dvě
+  `staging.env.before-8443-*` kopie; nejsou aktivní konfigurací a dnešní cleanup
+  jejich scope záměrně nerozšiřoval;
+- Production `/health/ready` zůstala `Healthy`, Production Nginx site SHA-256
+  zůstal
+  `491a7228c460ce5c8674a98e6c4c0d0433e0b4fd990360f29cf2d9c9280a91d9` a
+  `https://fuapay.fa.tul.cz:443` dál vrací HTTP 301 na
+  `https://fuapay.tul.cz/`.
+
+Výsledek: `STAGING CLOSED / PRODUCTION UNCHANGED: PASS`.
+
+### Multi-user CardJob playtest a druhý finální closeout 2026-09-22
+
+Po prvním bezpečném closeoutu byl staging ještě jednou krátce otevřen stejným
+kanonickým postupem: z přesně ověřeného fail-closed env baseline vznikl dočasný
+backup, ČSOB byl aktivován pouze ve stagingu, `fuapay-staging.service` zůstala
+systemd `disabled`, UFW otevřel `8443/tcp` pouze pro klientskou IPv4
+`147.230.72.120`, staging readiness i reconciliation worker byly `Healthy` a
+Production guard před/po otevření prošel s nezměněným Nginx hashem.
+
+Dva lidé pak přes oddělené statické testovací identity provedli dvě běžné
+přímé karetní platby zakázek:
+
+- `3D-2026-000004` / `3D tisk - Pardubice`, 120 Kč:
+  payment `5b3faa6e-292b-47ee-91b5-d7417eb192aa`, ČSOB payId
+  `095401bf4bf9@LI`, lokálně `Succeeded`, reconciliation `Completed`, poslední
+  gateway stav `0/7`, zakázka `Paid`, settlement type `DirectPayment`, document
+  `FUA-2026-000010`;
+- `PLT-2026-000002` / `Tisk závěrečné prezentace`, 520 Kč:
+  payment `0f00a7b4-e746-4800-be30-415c7666b2ff`, ČSOB payId
+  `0d973b5d9984@LI`, lokálně `Succeeded`, reconciliation `Completed`, poslední
+  gateway stav `0/7`, zakázka `Paid`, settlement type `DirectPayment`, document
+  `FUA-2026-000011`.
+
+Read-only consistency kontrola pro obě zakázky prokázala právě jednu payment,
+právě jednu `Succeeded` a žádnou `Pending` na každou zakázku. U obou se přesně
+shodoval payment ID se `jobs.settlement_reference_id` i
+`financial_documents.documents.source_id`; částka a provider reference se
+shodovaly mezi payment a dokumentem. Nginx zaznamenal oba čerstvé browser
+returny jako HTTP 303. Staging journal od začátku playtestu neobsahoval žádný
+warning/error a před finálním stopem bylo znovu `Pending=0`, due reconciliation
+`=0`.
+
+Druhý finální closeout pak znovu prokázal:
+
+- `fuapay-staging.service = inactive/disabled`;
+- aktivní staging env přesně SHA-256
+  `3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4` a
+  `Payments__Provider=None`, `Csob__Enabled=false`;
+- žádné UFW `8443` pravidlo a žádný listener na `127.0.0.1:5081`;
+- dočasný `staging.env.before-playtest-20260922` byl po hash guardu odstraněn;
+- Production `/health/ready = Healthy`, Production Nginx site SHA-256 stále
+  `491a7228c460ce5c8674a98e6c4c0d0433e0b4fd990360f29cf2d9c9280a91d9` a
+  production alias dál HTTP 301 na `https://fuapay.tul.cz/`.
+
+Výsledek: `MULTI-USER CARDJOB PLAYTEST PASS / STAGING CLOSED / PRODUCTION UNCHANGED`.
+
+Live negativní access-isolation browser probe a live double-click/concurrent
+CardJob creation probe nebyly před druhým closeoutem provedeny; zůstávají
+explicitními hardening follow-up body, nikoli implicitně splněnou evidencí.
