@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-22
+Status: 2026-09-23
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu až k bezpečné aktivaci produkčního ČSOB provozu. Není checklistem prvního
@@ -173,12 +173,30 @@ fail-closed kombinace; úspěšné statusové recovery `0/8`, `0/9` nebo `0/10`
 je samostatná autoritativní hranice. Živý reverse scénář byl na stagingu ověřen
 2026-09-12 výsledkem `0/5`.
 
-### Rozhodnutí, která nejsou automaticky součástí tohoto passu
+### Rozhodnutí po production-hardening auditu 2026-09-23
 
-- Refund není povinný ČSOB activation scénář. In-app card refund se implementuje
-  jen pokud bude schválen pro pozdější produkční karetní provoz; jinak se
-  výslovně zdokumentuje operátorský postup.
-- Nezavádět websocket/SSE jen kvůli jednomu stavu platby. Pro současný rozsah je
+Read-only Codex audit nad clean `main` `9897ef58bcc4caf90d148fe5d4f0bf32864a3a25`
+nenašel žádný BLOCKER ani HIGH v payment/settlement/authorization cestě.
+Release build a 1076 aplikačních/webových testů prošly; PostgreSQL testy audit
+pouze inspektoval, protože pro jejich lokální spuštění nebyl udělen explicitní
+DB opt-in.
+
+Jediný potvrzený implementační nález je MEDIUM fail-closed mezera: ČSOB API base
+je svázaná s Production/non-Production prostředím, ale `Csob__ReturnUrl` zatím
+není svázaná s přesným očekávaným hostem, portem a cestou. Před produkční
+aktivací se musí opravit a unit-testovat tak, aby Production přijala pouze
+`https://fuapay.tul.cz/payments/csob/return` a současný Staging pouze
+`https://fuapay.fa.tul.cz:8443/payments/csob/return`.
+
+Produktové rozhodnutí 2026-09-23:
+
+- bezpečné ČSOB `payment/refund` je součást cílového rozsahu před otevřením
+  produkčních karetních plateb; podrobnosti a invarianty jsou v
+  [payment-returns.md](../features/payment-returns.md);
+- FUA Pay má od začátku podporovat běžné CardJob reverse/refund scénáře a
+  bezpečný návrat nevyčerpaného karetně dobitého kreditu na původní kartu;
+- nejasný externí výsledek se nikdy nesmí řešit slepým druhým PUT;
+- nezavádět websocket/SSE jen kvůli jednomu stavu platby. Pro současný rozsah je
   preferovaný jednoduchý bounded polling malého status endpointu.
 
 ## C. Povinné ČSOB integration activation scénáře
@@ -205,8 +223,10 @@ Podle oficiální wiki upravené 2026-06-30:
 - [x] Payment reversal: po úspěšné autorizaci zavolat `payment/reverse`, ověřit
       HTTP 200, podpis, `resultCode=0`, `paymentStatus=5` a odpovídající lokální
       stav/return evidence; ověřeno 2026-09-12 nad CardJob `PLT-2026-000006`.
-- [ ] V POS Merchant potvrdit provedení všech povinných scénářů a odeslat je ke
-      kontrole ČSOB.
+- [ ] Po finálním fresh acceptance runu předat internímu centrálnímu správci TUL
+      jasné GO se souhrnem testů. POS Merchant ani bankovní výpisy nejsou
+      provozní odpovědností FUA Pay; centrální správce provede potřebný bankovní
+      krok za univerzitu.
 - [ ] Počkat na potvrzení ČSOB, že production environment je aktivovaný.
 
 ## D. FUA Pay vlastní integrační acceptance před aktivací produkčního ČSOB
@@ -224,10 +244,15 @@ celek.
       jinou kartu. Následné explicitní `Zrušit platbu a vrátit se do obchodu`
       skončilo `0/3`, lokálně `Cancelled`, reconciliation `Completed`, stále bez
       finančního efektu.
-- [ ] Terminální `Failed` (`resultCode=0`, `paymentStatus=6`) nemá fresh live
-      browser PASS. Implementační větev je přítomná a fail-closed, ale standardní
-      decline testovací kartou session neukončuje stavem 6; tento bod se proto
-      nesmí zaměnit s výše ověřeným declined authorization attempt.
+- [x] Terminální `Failed` (`resultCode=0`, `paymentStatus=6`) je uzavřený jako
+      NO-DEFECT / automated-covered evidence bod, nikoli jako fresh live browser
+      PASS. Standardní decline testovací kartou session neukončuje stavem 6 a
+      není znám dokumentovaný deterministický Basic Payment simulator recipe.
+      `CsobPaymentReconciliationServiceTests` přímo ověřují `0/6` bez verified
+      expiry evidence -> interní `Failed`, provenance
+      `CsobResult0Status6`, audit a žádný settlement. Fresh live simulátorový
+      důkaz se proto nepovažuje za production GO blocker; pokud ČSOB poskytne
+      deterministický recipe, lze jej doplnit jako dodatečnou live evidenci.
 - [x] Duplicate browser return: 2026-09-22 byl čerstvý autentický podepsaný
       `application/x-www-form-urlencoded` POST z ČSOB pro platbu
       `d707aa08-681f-4557-8298-f46e5ee6cbd9` / `106199d5aa1e@LI` zopakován beze
@@ -314,7 +339,66 @@ ověření odstraněn. Production zůstala `Healthy` se stejným Nginx site SHA-
 `491a7228c460ce5c8674a98e6c4c0d0433e0b4fd990360f29cf2d9c9280a91d9` a alias
 na 443 dál vrací HTTP 301 na `https://fuapay.tul.cz/`.
 
-## E. Historický přechodný staging release/deploy gate
+## E. Finální GO plán 2026-09-23
+
+Tento plán je kanonický sled kroků před oznámením GO centrálnímu správci TUL.
+Cílem je, aby bankovní submission nebyl postaven na několik dní starých testech.
+
+1. Opravit jediný potvrzený Codex MEDIUM: environment-bound ČSOB return URL,
+   doplnit negativní testy a zpřesnit dokumentaci o key/fingerprint preflightu.
+2. Dokončit veřejné anonymní stránky `/Privacy` a `/Terms` bez nové zbytečné
+   právní stránky:
+   - `poverenec@tul.cz` ponechat jako DPO/GDPR kontakt TUL;
+   - provozní/platební kontakt FUA Pay má být `fuapay@tul.cz`, ale před
+     zveřejněním se musí potvrdit, že alias/mailbox skutečně existuje a je
+     monitorovaný;
+   - Terms musí výslovně pokrýt provozovatele, CZK, charakter fakultních služeb,
+     reklamace/vratky, způsob poskytnutí služby, bezpečné karetní zpracování a
+     fakt, že FUA Pay neukládá číslo karty ani CVC;
+   - doplnit pouze oficiální schválená loga sjednaných platebních služeb/karetních
+     schémat.
+3. Dokončit production-grade returns scope z
+   [payment-returns.md](../features/payment-returns.md), zejména refund a
+   CardTopUp návrat nevyčerpaného kreditu.
+4. Doplnit samostatný účetní/reconciliation export pro párování s centrálním
+   ČSOB výpisem. Minimální párovací pole: `orderNo`, `payId`, FUA payment ID,
+   datum, částka, měna, účel, job number/service unit, finanční dokument a
+   reverse/refund stav/částka/čas. Osobní údaje pouze pokud je účetní proces
+   skutečně potřebuje.
+5. Entra logout neobcházet cookie-only hackem. Nejprve znovu urgovat tenant
+   správce, aby app registration správně obsahovala samostatný
+   `/signout-callback-oidc`; známý stav je popsán v
+   [entra-id.md](entra-id.md).
+6. Doplnit automatické hardening testy identifikované auditem: concurrent
+   CardJob creation, celou `Succeeded + nový status 7/8` reconciliation cestu
+   a HTTP-level object-isolation probe.
+7. Z jednoho clean commitu/release artefaktu udělat izolovaný staging deploy a
+   v jediném souvislém testovacím okně zopakovat:
+   - fresh GET echo a POST echo;
+   - success, cancel a expiry;
+   - fresh reverse `0/5` na aktuálním release;
+   - refund scénáře odpovídající implementovanému scope;
+   - repeated provider `payment/status` nad již `Succeeded`;
+   - cross-customer/cross-requester URL isolation;
+   - skutečný double-click/concurrent CardJob creation;
+   - účetní export a exactly-once read-only DB evidence.
+8. Před closeoutem musí být `Pending=0`, due reconciliation `=0`; staging se
+   vrátí fail-closed a Production guard musí být beze změny.
+9. Dokumentační evidence se doplní bez přepisování historie a bez tvrzení, že
+   neprovedený scénář je PASS.
+10. GO mail centrálnímu správci TUL odeslat tentýž den, ideálně bezprostředně po
+    closeoutu (řádově hodiny, ne dny). Mezi finálním runem a GO nesmí nastat
+    změna release artefaktu ani payment konfigurace; pokud nastane, relevantní
+    acceptance se opakuje.
+11. Po bankovním potvrzení nainstalovat production merchant konfiguraci/klíče,
+    provést fresh production preflight a jeden řízený malý reálný payment před
+    otevřením karetního toku běžným uživatelům.
+
+Fresh live `payment/status` replay nad již `Succeeded` zůstává do kroku 7
+otevřenou evidence položkou. Terminální `0/6 Failed` je naopak uzavřený
+automated-covered non-blocking bod, viz sekce D.
+
+## F. Historický přechodný staging release/deploy gate
 
 Následující checklist zachovává pravidla a evidence historického
 pre-production demo/staging runtime. Od 2026-09-20 už není návrhem budoucího
@@ -352,7 +436,7 @@ obnovení merchant eAPI. Historický staging runtime od 2026-09-15 běžel na re
 post-activation gate. Historická diagnostika z 2026-09-13 zůstává zachována jako
 evidence, nikoli jako aktuální runtime stav.
 
-## F. Pozdější aktivace produkčního ČSOB až po bankovním schválení
+## G. Pozdější aktivace produkčního ČSOB až po bankovním schválení
 
 - [ ] Potvrdit, že produkční FUA Pay běží nad čistou produkční databází a že
       aktivace ČSOB nevyžaduje schema redesign ani přenos demo/seed dat.
