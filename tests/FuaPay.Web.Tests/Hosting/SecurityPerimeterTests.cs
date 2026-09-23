@@ -912,8 +912,9 @@ public sealed class SecurityPerimeterTests :
             ["Csob:MerchantId"] = "M123456789",
             ["Csob:PrivateKeyPath"] = privateKeyPath,
             ["Csob:GatewayPublicKeyPath"] = publicKeyPath,
-            ["Csob:ReturnUrl"] =
-                "https://fuapay.example.test/payments/csob/return"
+            ["Csob:ReturnUrl"] = isProduction
+                ? "https://fuapay.tul.cz/payments/csob/return"
+                : "https://fuapay.fa.tul.cz:8443/payments/csob/return"
         };
     }
 

@@ -25,6 +25,12 @@ public sealed record CsobGatewayConfiguration(
     public static readonly Uri ProductionPaymentPageBaseUri =
         new("https://platebnibrana.csob.cz/");
 
+    public static readonly Uri ProductionReturnUri =
+        new("https://fuapay.tul.cz/payments/csob/return");
+
+    public static readonly Uri StagingReturnUri =
+        new("https://fuapay.fa.tul.cz:8443/payments/csob/return");
+
     public IReadOnlyList<Uri> BrowserFormActionOrigins =>
         ApiBaseUri == IntegrationApiBaseUri
             ? [IntegrationApiBaseUri, IntegrationPaymentPageBaseUri]
@@ -89,10 +95,28 @@ public sealed record CsobGatewayConfiguration(
             return;
         }
 
+        var isDevelopment = string.Equals(
+            environmentName,
+            "Development",
+            StringComparison.OrdinalIgnoreCase);
+        var isStaging = string.Equals(
+            environmentName,
+            "Staging",
+            StringComparison.OrdinalIgnoreCase);
         var isProduction = string.Equals(
             environmentName,
             "Production",
             StringComparison.OrdinalIgnoreCase);
+
+        if (
+            !isDevelopment &&
+            !isStaging &&
+            !isProduction)
+        {
+            throw new InvalidOperationException(
+                "Enabled CSOB configuration is allowed only in " +
+                "Development, Staging, or Production environment.");
+        }
 
         if (
             isProduction &&
@@ -145,6 +169,28 @@ public sealed record CsobGatewayConfiguration(
                 "Csob:ReturnUrl musí být veřejná HTTPS adresa; loopback je povolen pouze ve Development prostředí.");
         }
 
+        if (
+            isProduction &&
+            !HasExactReturnBoundary(
+                ReturnUri,
+                ProductionReturnUri))
+        {
+            throw new InvalidOperationException(
+                "Production CSOB configuration must use only " +
+                $"return URL {ProductionReturnUri.AbsoluteUri}.");
+        }
+
+        if (
+            isStaging &&
+            !HasExactReturnBoundary(
+                ReturnUri,
+                StagingReturnUri))
+        {
+            throw new InvalidOperationException(
+                "Staging CSOB configuration must use only " +
+                $"return URL {StagingReturnUri.AbsoluteUri}.");
+        }
+
         if (PaymentTtlSeconds is < 300 or > 1800)
         {
             throw new InvalidOperationException(
@@ -159,6 +205,26 @@ public sealed record CsobGatewayConfiguration(
                 "Csob:RequestTimeoutSeconds musí být v rozsahu 5 až 120 sekund.");
         }
     }
+
+    private static bool HasExactReturnBoundary(
+        Uri actual,
+        Uri expected) =>
+        string.Equals(
+            actual.Scheme,
+            expected.Scheme,
+            StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(
+            actual.Host,
+            expected.Host,
+            StringComparison.OrdinalIgnoreCase) &&
+        actual.Port == expected.Port &&
+        string.Equals(
+            actual.AbsolutePath,
+            expected.AbsolutePath,
+            StringComparison.Ordinal) &&
+        string.IsNullOrEmpty(actual.UserInfo) &&
+        string.IsNullOrEmpty(actual.Query) &&
+        string.IsNullOrEmpty(actual.Fragment);
 
     private static Uri ParseUri(
         string? value,

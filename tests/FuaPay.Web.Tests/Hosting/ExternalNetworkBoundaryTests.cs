@@ -205,7 +205,7 @@ public sealed class ExternalNetworkBoundaryTests
             ["Csob:PrivateKeyPath"] = privateKeyPath,
             ["Csob:GatewayPublicKeyPath"] = publicKeyPath,
             ["Csob:ReturnUrl"] =
-                "https://fuapay.example.test/payments/csob/return"
+                "https://fuapay.tul.cz/payments/csob/return"
         };
     }
 
