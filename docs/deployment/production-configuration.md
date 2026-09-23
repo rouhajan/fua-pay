@@ -150,8 +150,18 @@ Csob__ReturnUrl=https://fuapay.tul.cz/payments/csob/return
 V tomto profilu zůstávají beze změny všechny dosavadní požadavky na produkční
 URL, klíče, podpisy, return endpoint, trusted process URI, CSP a reconciliation.
 ČSOB privátní klíč musí být trvalý mimo release a pouze čitelný účtem služby.
-Neúplná nebo konfliktní konfigurace musí zastavit startup; `Development` provider
-není fallback.
+Provider/API pairing a syntakticky neplatná konfigurace už fail-closed zastavují
+startup; `Development` provider není fallback.
+
+Audit 2026-09-23 ale potvrdil jednu otevřenou MEDIUM mezeru: současný commit
+`9897ef58bcc4caf90d148fe5d4f0bf32864a3a25` ještě environmentálně nesvazuje
+`Csob__ReturnUrl` s přesným produkčním hostem/portem/cestou. Produkční ČSOB
+proto nesmí být aktivován, dokud narrow hardening PR nevynutí přesně
+`https://fuapay.tul.cz/payments/csob/return` pro Production a přesně současnou
+staging URL pro Staging a nepřidá negativní cross-environment testy. Dvě
+strukturálně validní RSA sady navíc nelze pouze z PEM syntaxe spolehlivě
+rozlišit podle prostředí; deployment preflight proto musí dál používat očekávané
+fingerprinty a fresh signed echo gate.
 
 Persistentní tiskové credentialy se zapínají pouze společně s PrintPayments:
 

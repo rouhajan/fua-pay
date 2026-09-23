@@ -71,6 +71,17 @@ Microsoft Entra přihlášení je na `https://fuapay.tul.cz` živě nasazené a
 používané. App registration, Tenant ID, Client ID a přihlašovací redirect tedy
 nejsou otevřené onboarding úkoly.
 
+Známý externí tenant-side rest 2026-09-23: aplikace používá dvě různé OIDC
+callback cesty, `/signin-oidc` a `/signout-callback-oidc`. Správce TUL Entra
+tenantu byl o samostatné signed-out callback URI informován, ale změna zatím
+nebyla dokončena/ověřena. Pozorované produkční UX je, že první klik na
+`Odhlásit` ukončí FUA Pay session, ale OIDC logout flow se nevrátí spolehlivě
+na veřejnou homepage; následná navigace už zobrazí odhlášený stav. Preferovaná
+oprava je správná tenant app-registration konfigurace, nikoli lokální
+cookie-only workaround, který by ponechal Entra SSO session aktivní. Před
+jakýmkoli aplikačním fallbackem se správce tenantu znovu kontaktuje a stav obou
+URI se ověří.
+
 Provozní pravidla zůstávají:
 
 - client secret patří mimo Git/release a musí se řízeně rotovat;

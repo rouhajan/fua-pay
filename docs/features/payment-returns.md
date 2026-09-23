@@ -71,9 +71,53 @@ existujícím aktivním pokusu zobrazuje stavové ověření se stejným uložen
 operation ID; dokončená, zamítnutá nebo nekonzistentní vratka nový reverse
 nenabízí.
 
-## Zatím nepodporované
+## Cílový rozsah před aktivací produkčních karetních plateb
 
-- `payment/refund` volání ČSOB ani vratka jiného karetního poskytovatele;
-- vratka karetního dobití kreditu;
-- PDF nebo potvrzení o vratce;
-- částečné vratky.
+Produktové rozhodnutí 2026-09-23 je podporovat od začátku běžné bezpečné vratky,
+nikoli odkládat refund na neurčito. Aktuální implementovaný stav se tím nemění:
+dokud níže uvedené body nejsou implementované a otestované, nesmějí se v UI
+tvářit jako dostupné.
+
+Požadovaný cílový tok:
+
+- CardJob plná vratka: pokud je původní transakce ještě v reversibilním stavu,
+  použít stávající `payment/reverse`; pokud už je zúčtovaná, použít
+  `payment/refund`.
+- CardJob částečná vratka: podporovat přes `payment/refund`, pokud to stav
+  původní platby dovoluje. Součet všech potvrzených refundů nikdy nesmí překročit
+  původní zúčtovanou částku.
+- CardTopUp návrat na kartu: uživatelská/admin operace má podle
+  autoritativního stavu původní ČSOB platby zvolit `payment/reverse`, pokud je
+  transakce ještě reverzibilní, jinak `payment/refund`. Vrátit lze pouze
+  částku, která je současně krytá původním karetním top-upem a stále bezpečně
+  dostupná v kreditu zákazníka. Před externím providerovým krokem se vratná
+  částka musí durabilně zablokovat přes `CreditReturnHold`, aby ji nebylo možné
+  současně utratit. Potvrzený reverse/refund musí odpovídající kredit přesně
+  jednou odebrat/spotřebovat; definitivně zamítnutá operace hold uvolní.
+- U všech providerových vratek vznikne durabilní attempt před externím PUT.
+  Jakmile mohl request odejít a výsledek není autoritativně známý, stav musí
+  zůstat `Uncertain` / `RequiresAttention`; stejný refund/reverse se nesmí
+  automaticky poslat podruhé jen kvůli timeoutu.
+- Refund se vždy váže na původní provider reference/payId a na původní kartu
+  prostřednictvím ČSOB; FUA Pay nevyplácí karetní platbu hotově ani běžným
+  převodem jako standardní cestu.
+- Vrácení musí být auditovatelné a zahrnuté do účetního/reconciliation exportu.
+  PDF potvrzení o vratce je samostatný výstup a nesmí být zaměněno za
+  providerovou idempotenci.
+
+ČSOB eAPI 1.9 podporuje `payment/refund` bez částky pro plný refund a s
+`amount` pro částečný refund
+(https://github.com/csob/platebnibrana/blob/main/examples/eApi%20v1.9/php/Readme.md).
+Standardní nízké refundy se proto nemají navrhovat jako proces vyžadující
+telefonát bance při každé operaci. Ve veřejném merchant manuálu ČSOB je pro
+návraty nad 50 000 Kč uveden zvláštní kontakt s Akceptací karet; tento limit se
+však nesmí bez kontroly aktuální smlouvy/podmínek napevno zakódovat do domény.
+Před implementací guardu se aktuální smluvní pravidlo znovu ověří. Očekávané
+FUA Pay částky jsou výrazně nižší.
+
+## Aktuálně ještě nepodporované
+
+- skutečné ČSOB `payment/refund` volání a jeho recovery lifecycle;
+- CardTopUp návrat nevyčerpaného kreditu na kartu;
+- opakované/částečné refundy a jejich kumulativní limit;
+- PDF nebo samostatné potvrzení o vratce.
