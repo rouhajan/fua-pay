@@ -153,13 +153,17 @@ URL, klíče, podpisy, return endpoint, trusted process URI, CSP a reconciliatio
 Provider/API pairing a syntakticky neplatná konfigurace už fail-closed zastavují
 startup; `Development` provider není fallback.
 
-Audit 2026-09-23 ale potvrdil jednu otevřenou MEDIUM mezeru: současný commit
-`9897ef58bcc4caf90d148fe5d4f0bf32864a3a25` ještě environmentálně nesvazuje
-`Csob__ReturnUrl` s přesným produkčním hostem/portem/cestou. Produkční ČSOB
-proto nesmí být aktivován, dokud narrow hardening PR nevynutí přesně
-`https://fuapay.tul.cz/payments/csob/return` pro Production a přesně současnou
-staging URL pro Staging a nepřidá negativní cross-environment testy. Dvě
-strukturálně validní RSA sady navíc nelze pouze z PEM syntaxe spolehlivě
+Audit 2026-09-23 nad commitem
+`9897ef58bcc4caf90d148fe5d4f0bf32864a3a25` potvrdil jednu MEDIUM
+fail-closed mezeru v environmentálním svázání `Csob__ReturnUrl`. Následný
+narrow hardening ji uzavírá: při aktivním ČSOB přijme Production pouze
+`https://fuapay.tul.cz/payments/csob/return` a Staging pouze
+`https://fuapay.fa.tul.cz:8443/payments/csob/return`. Neznámé runtime prostředí
+s aktivním ČSOB se odmítne při startupu; return boundary zároveň vyžaduje
+očekávaný scheme, host, port a path a odmítá userinfo, query i fragment.
+Negativní testy výslovně pokrývají i vzájemnou záměnu Production a Staging.
+
+Dvě strukturálně validní RSA sady nadále nelze pouze z PEM syntaxe spolehlivě
 rozlišit podle prostředí; deployment preflight proto musí dál používat očekávané
 fingerprinty a fresh signed echo gate.
 

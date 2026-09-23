@@ -133,6 +133,167 @@ public sealed class CsobGatewayConfigurationTests
         Assert.Equal(
             CsobGatewayConfiguration.ProductionApiBaseUri,
             result.ApiBaseUri);
+        Assert.Equal(
+            CsobGatewayConfiguration.ProductionReturnUri,
+            result.ReturnUri);
+    }
+
+    [Fact]
+    public void Resolve_EnabledStagingConfigurationUsesStagingReturnUri()
+    {
+        using var keys = new TemporaryDirectory("fuapay-csob-keys");
+        var privateKeyPath = Path.Combine(keys.Path, "merchant.key");
+        var publicKeyPath = Path.Combine(keys.Path, "gateway.pub");
+        File.WriteAllText(privateKeyPath, "test-only");
+        File.WriteAllText(publicKeyPath, "test-only");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Csob:Enabled"] = "true",
+                    ["Csob:MerchantId"] = "M123456789",
+                    ["Csob:PrivateKeyPath"] = privateKeyPath,
+                    ["Csob:GatewayPublicKeyPath"] = publicKeyPath,
+                    ["Csob:ReturnUrl"] =
+                        "https://fuapay.fa.tul.cz:8443/payments/csob/return"
+                })
+            .Build();
+
+        var result = CsobGatewayConfiguration.Resolve(
+            configuration,
+            "Staging");
+
+        Assert.True(result.Enabled);
+        Assert.Equal(
+            CsobGatewayConfiguration.IntegrationApiBaseUri,
+            result.ApiBaseUri);
+        Assert.Equal(
+            CsobGatewayConfiguration.StagingReturnUri,
+            result.ReturnUri);
+    }
+
+    [Theory]
+    [InlineData(
+        "https://fuapay.fa.tul.cz:8443/payments/csob/return")]
+    [InlineData(
+        "https://fuapay.fa.tul.cz/payments/csob/return")]
+    [InlineData(
+        "https://fuapay.tul.cz:8443/payments/csob/return")]
+    [InlineData(
+        "https://fuapay.tul.cz/payments/csob/other")]
+    [InlineData(
+        "https://user@fuapay.tul.cz/payments/csob/return")]
+    [InlineData(
+        "https://fuapay.tul.cz/payments/csob/return?unexpected=1")]
+    [InlineData(
+        "https://fuapay.tul.cz/payments/csob/return#unexpected")]
+    public void Resolve_EnabledProductionConfigurationRejectsUnexpectedReturnUrl(
+        string returnUrl)
+    {
+        using var keys = new TemporaryDirectory("fuapay-csob-keys");
+        var privateKeyPath = Path.Combine(keys.Path, "merchant.key");
+        var publicKeyPath = Path.Combine(keys.Path, "gateway.pub");
+        File.WriteAllText(privateKeyPath, "test-only");
+        File.WriteAllText(publicKeyPath, "test-only");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Csob:Enabled"] = "true",
+                    ["Csob:MerchantId"] = "M123456789",
+                    ["Csob:PrivateKeyPath"] = privateKeyPath,
+                    ["Csob:GatewayPublicKeyPath"] = publicKeyPath,
+                    ["Csob:ReturnUrl"] = returnUrl
+                })
+            .Build();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => CsobGatewayConfiguration.Resolve(
+                configuration,
+                "Production"));
+
+        Assert.Contains(
+            CsobGatewayConfiguration.ProductionReturnUri.AbsoluteUri,
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(
+        "https://fuapay.tul.cz/payments/csob/return")]
+    [InlineData(
+        "https://fuapay.tul.cz:8443/payments/csob/return")]
+    [InlineData(
+        "https://fuapay.fa.tul.cz/payments/csob/return")]
+    [InlineData(
+        "https://fuapay.fa.tul.cz:8443/payments/csob/other")]
+    [InlineData(
+        "https://user@fuapay.fa.tul.cz:8443/payments/csob/return")]
+    [InlineData(
+        "https://fuapay.fa.tul.cz:8443/payments/csob/return?unexpected=1")]
+    [InlineData(
+        "https://fuapay.fa.tul.cz:8443/payments/csob/return#unexpected")]
+    public void Resolve_EnabledStagingConfigurationRejectsUnexpectedReturnUrl(
+        string returnUrl)
+    {
+        using var keys = new TemporaryDirectory("fuapay-csob-keys");
+        var privateKeyPath = Path.Combine(keys.Path, "merchant.key");
+        var publicKeyPath = Path.Combine(keys.Path, "gateway.pub");
+        File.WriteAllText(privateKeyPath, "test-only");
+        File.WriteAllText(publicKeyPath, "test-only");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Csob:Enabled"] = "true",
+                    ["Csob:MerchantId"] = "M123456789",
+                    ["Csob:PrivateKeyPath"] = privateKeyPath,
+                    ["Csob:GatewayPublicKeyPath"] = publicKeyPath,
+                    ["Csob:ReturnUrl"] = returnUrl
+                })
+            .Build();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => CsobGatewayConfiguration.Resolve(
+                configuration,
+                "Staging"));
+
+        Assert.Contains(
+            CsobGatewayConfiguration.StagingReturnUri.AbsoluteUri,
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_EnabledConfigurationRejectsUnknownEnvironment()
+    {
+        using var keys = new TemporaryDirectory("fuapay-csob-keys");
+        var privateKeyPath = Path.Combine(keys.Path, "merchant.key");
+        var publicKeyPath = Path.Combine(keys.Path, "gateway.pub");
+        File.WriteAllText(privateKeyPath, "test-only");
+        File.WriteAllText(publicKeyPath, "test-only");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Csob:Enabled"] = "true",
+                    ["Csob:MerchantId"] = "M123456789",
+                    ["Csob:PrivateKeyPath"] = privateKeyPath,
+                    ["Csob:GatewayPublicKeyPath"] = publicKeyPath,
+                    ["Csob:ReturnUrl"] =
+                        "https://example.invalid/payments/csob/return"
+                })
+            .Build();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => CsobGatewayConfiguration.Resolve(
+                configuration,
+                "Acceptance"));
+
+        Assert.Contains(
+            "environment",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

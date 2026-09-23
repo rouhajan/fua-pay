@@ -181,12 +181,19 @@ Release build a 1076 aplikačních/webových testů prošly; PostgreSQL testy au
 pouze inspektoval, protože pro jejich lokální spuštění nebyl udělen explicitní
 DB opt-in.
 
-Jediný potvrzený implementační nález je MEDIUM fail-closed mezera: ČSOB API base
-je svázaná s Production/non-Production prostředím, ale `Csob__ReturnUrl` zatím
-není svázaná s přesným očekávaným hostem, portem a cestou. Před produkční
-aktivací se musí opravit a unit-testovat tak, aby Production přijala pouze
-`https://fuapay.tul.cz/payments/csob/return` a současný Staging pouze
-`https://fuapay.fa.tul.cz:8443/payments/csob/return`.
+Jediný potvrzený implementační nález byl MEDIUM fail-closed mezera v
+environmentálním svázání `Csob__ReturnUrl`. Narrow hardening 2026-09-23 ji
+uzavírá: Production s aktivním ČSOB přijme pouze
+`https://fuapay.tul.cz/payments/csob/return`, Staging pouze
+`https://fuapay.fa.tul.cz:8443/payments/csob/return` a neznámé prostředí s
+aktivním ČSOB startup odmítne. Return boundary navíc explicitně odmítá userinfo,
+query a fragment. Pozitivní i negativní testy pokrývají správné URL, vzájemnou
+záměnu Production/Staging i chybné hosty, porty a cesty.
+
+Lokální verification stejné změny 2026-09-23 prošla Release buildem,
+formátováním, 1092/1092 webovými a aplikačními testy a kontrolou EF modelu bez
+pending změny. PostgreSQL integrační testy ani živé ČSOB sandbox testy tento
+lokální gate nespouštěl.
 
 Produktové rozhodnutí 2026-09-23:
 
@@ -344,8 +351,10 @@ na 443 dál vrací HTTP 301 na `https://fuapay.tul.cz/`.
 Tento plán je kanonický sled kroků před oznámením GO centrálnímu správci TUL.
 Cílem je, aby bankovní submission nebyl postaven na několik dní starých testech.
 
-1. Opravit jediný potvrzený Codex MEDIUM: environment-bound ČSOB return URL,
-   doplnit negativní testy a zpřesnit dokumentaci o key/fingerprint preflightu.
+1. **Dokončeno 2026-09-23:** environment-bound ČSOB return URL hardening,
+   negativní cross-environment a URI-boundary testy a zpřesnění dokumentace;
+   key/fingerprint preflight a fresh signed echo zůstávají samostatnou
+   deployment/activation hranicí.
 2. Dokončit veřejné anonymní stránky `/Privacy` a `/Terms` bez nové zbytečné
    právní stránky:
    - `poverenec@tul.cz` ponechat jako DPO/GDPR kontakt TUL;
