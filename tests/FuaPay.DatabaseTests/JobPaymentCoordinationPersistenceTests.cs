@@ -103,6 +103,91 @@ public sealed class JobPaymentCoordinationPersistenceTests :
     }
 
     [Fact]
+    public async Task ConcurrentDirectPayments_CreateSinglePayment()
+    {
+        var scenario = await SeedScenarioAsync(_factory);
+        var gate = new JobLockGate();
+        using var factory = CreateCoordinatedFactory(gate);
+
+        try
+        {
+            using var firstScope = factory.Services.CreateScope();
+            var firstService = firstScope.ServiceProvider
+                .GetRequiredService<PaymentCreationService>();
+            var firstTask = firstService.CreateJobPaymentAsync(
+                scenario.CustomerUserId,
+                scenario.JobId);
+
+            await gate.FirstLockAcquired.WaitAsync(
+                TimeSpan.FromSeconds(30));
+
+            using var secondScope = factory.Services.CreateScope();
+            var secondService = secondScope.ServiceProvider
+                .GetRequiredService<PaymentCreationService>();
+            var secondTask = secondService.CreateJobPaymentAsync(
+                scenario.CustomerUserId,
+                scenario.JobId);
+
+            await gate.SecondLockAttempted.WaitAsync(
+                TimeSpan.FromSeconds(30));
+            gate.ReleaseFirstLock();
+
+            var outcomes = await Task.WhenAll(firstTask, secondTask);
+
+            Assert.Equal(
+                outcomes[0].Payment.Id,
+                outcomes[1].Payment.Id);
+            Assert.All(
+                outcomes,
+                outcome => Assert.Equal(
+                    scenario.JobId,
+                    outcome.Payment.JobId));
+            Assert.Single(
+                outcomes,
+                outcome => outcome.Disposition ==
+                    PaymentCreationDisposition.ExistingPayment);
+            Assert.Single(
+                outcomes,
+                outcome => outcome.Disposition !=
+                    PaymentCreationDisposition.ExistingPayment);
+
+            using var verifyScope = factory.Services.CreateScope();
+            var database = verifyScope.ServiceProvider
+                .GetRequiredService<FuaPayDbContext>()
+                .Database;
+            var paymentCount = await database.SqlQuery<int>(
+                    $"""
+                    SELECT COUNT(*)::int AS "Value"
+                    FROM payments.payments
+                    WHERE job_id = {scenario.JobId}
+                    """)
+                .SingleAsync();
+            var initiationCount = await database.SqlQuery<int>(
+                    $"""
+                    SELECT COUNT(*)::int AS "Value"
+                    FROM payments.payment_initiations AS initiation
+                    INNER JOIN payments.payments AS payment
+                        ON payment.id = initiation.payment_id
+                    WHERE payment.job_id = {scenario.JobId}
+                    """)
+                .SingleAsync();
+
+            Assert.Equal(1, paymentCount);
+            Assert.Equal(1, initiationCount);
+            await AssertUnsettledScenarioAsync(
+                factory,
+                scenario,
+                expectedProductionStatus:
+                    JobProductionStatus.Published);
+        }
+        finally
+        {
+            gate.ReleaseFirstLock();
+            await DeleteScenarioAsync(factory, scenario);
+        }
+    }
+
+    [Fact]
     public async Task ConcurrentDirectAndCreditPayment_LeavesOneFinancialPath()
     {
         var scenario = await SeedScenarioAsync(_factory);
