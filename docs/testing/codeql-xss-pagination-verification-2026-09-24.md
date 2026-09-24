@@ -98,3 +98,35 @@ PostgreSQL integrační testy nebyly znovu spouštěny, protože změna nezasahu
 aplikační ani persistence logiku.
 
 Production a staging zůstaly beze změny.
+
+## Merge a closeout 2026-09-24
+
+[PR #77](https://github.com/rouhajan/fua-pay/pull/77) byl mergnutý z commitu
+`f007375120a4876687322f83f5aaa3f5f53f4a78` do `main` merge commitem
+`4497133577b004b0f64f84116f9cc2706cd578cd`. Diff proti předchozímu `main`
+`8e45f248f295d1d9af665e3214dfce2ab2eef399` obsahoval pouze tento evidenční
+soubor a `AdminPaymentReturnRenderingTests.cs`.
+
+Post-merge gate na přesném `4497133577b004b0f64f84116f9cc2706cd578cd`:
+
+- [CI #402](https://github.com/rouhajan/fua-pay/actions/runs/35996673068):
+  `SUCCESS`, včetně PostgreSQL integračních testů, migračního gate,
+  NuGet auditu, linux-x64 publish, ověření release archivu a čistoty runneru.
+- [CodeQL #407](https://github.com/rouhajan/fua-pay/actions/runs/35996673119):
+  `SUCCESS` pro C#, JavaScript/TypeScript a Actions.
+
+Úspěšný CodeQL workflow není sám o sobě důkazem uzavření jednotlivých alertů.
+Stav `Dismissed` u #2 i #3 potvrdil provozovatel v GitHub UI; konkrétní
+metadata dismissalů nebyla nezávisle načtena přes bezpečnostní API.
+U #3 provozovatel uvedl komentář `fixed`. Tento komentář nemění technický
+závěr výše: jde o false positive doložený testem, nikoli o opravu produkčního
+aplikačního kódu. Původní analýza a její výsledky zůstávají zachované.
+
+Provozovatel dodal úspěšný výstup kontrolovaného fast-forwardu místního `main`
+na merge commit a následného odstranění pouze větve
+`test/codeql-xss-runtime-proof` místně i vzdáleně. Konečný místní výpis
+potvrdil čistý pracovní strom. GitHub read-only kontrola nezávisle potvrdila
+nezměněný `main` a nepřítomnost této vzdálené větve.
+
+Closeout neprováděl deployment, změnu konfigurace, migraci ani živý bankovní
+test. Nejde o nové ověření aktuálního běžícího stavu Production či stagingu.
