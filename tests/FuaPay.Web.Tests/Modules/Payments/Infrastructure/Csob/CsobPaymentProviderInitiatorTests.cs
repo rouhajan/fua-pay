@@ -280,5 +280,11 @@ public sealed class CsobPaymentProviderInitiatorTests
             string payId,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

@@ -107,7 +107,7 @@ Požadovaný cílový tok:
 
 ČSOB eAPI 1.9 podporuje `payment/refund` bez částky pro plný refund a s
 `amount` pro částečný refund
-(https://github.com/csob/platebnibrana/blob/main/examples/eApi%20v1.9/php/Readme.md).
+(https://github.com/csob/paymentgateway/wiki/Basic-Methods#paymentrefund-method).
 Standardní nízké refundy se proto nemají navrhovat jako proces vyžadující
 telefonát bance při každé operaci. Ve veřejném merchant manuálu ČSOB je pro
 návraty nad 50 000 Kč uveden zvláštní kontakt s Akceptací karet; tento limit se
@@ -117,7 +117,9 @@ FUA Pay částky jsou výrazně nižší.
 
 ## Aktuálně ještě nepodporované
 
-- skutečné ČSOB `payment/refund` volání a jeho recovery lifecycle;
+- doménová orchestrace ČSOB `payment/refund`, jeho perzistentní attempt a
+  recovery lifecycle; klientská protokolová hranice je implementovaná, ale
+  žádná aplikační služba, endpoint, worker ani UI ji zatím nevolá;
 - CardTopUp návrat nevyčerpaného kreditu na kartu;
 - opakované/částečné refundy a jejich kumulativní limit;
 - PDF nebo samostatné potvrzení o vratce.

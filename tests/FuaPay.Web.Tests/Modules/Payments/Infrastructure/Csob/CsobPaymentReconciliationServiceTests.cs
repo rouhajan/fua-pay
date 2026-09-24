@@ -693,6 +693,12 @@ public sealed class CsobPaymentReconciliationServiceTests
             string payId,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class StubPaymentRepository : IPaymentRepository

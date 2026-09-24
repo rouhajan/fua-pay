@@ -234,6 +234,22 @@ původním uloženým request ID. Dokončená vratka se zobrazí jako vrácená;
 zamítnutý Reverse jako rozhodnutí o refundu a nekonzistentní stav jako
 vyžadující pozornost. Žádný z těchto stavů nenabídne nový reverse.
 
+## Protokolová hranice payment/refund
+
+Klient ČSOB podporuje eAPI 1.9 `PUT api/v1.9/payment/refund`. Plný refund
+vynechá `amount` z JSON i podpisového řetězce; částečný refund přijímá pouze
+kladnou částku v celých haléřích (`long`). Odpověď pro stejné `payId` projde
+stejným HTTP, RSA/SHA-256, freshness a fail-closed ověřením jako ostatní
+gateway operace a vrací strukturovaný protokolový výsledek včetně volitelných
+`authCode` a `statusDetail`.
+
+Jde pouze o transportní podporu. Žádná současná aplikační služba, endpoint,
+worker ani UI tuto metodu nevolá a samotný HTTP 200 nebo `resultCode=0`
+nevytváří ani nedokončuje `SettlementReturn` či provider attempt. Doménová
+rezervace vratného limitu, korelace nejasného výsledku, opakované/částečné
+refund lifecycle a CardTopUp návrat zůstávají samostatným neimplementovaným
+rozsahem.
+
 ## Známé implementační mezery před production readiness
 
 Skutečné ČSOB `payment/reverse` pro plnou CardJob vratku je implementované nad
@@ -252,10 +268,10 @@ krytá implementací: `PaymentSettlementService.CompleteAsync()` nad již
 opakovaný i concurrent ČSOB settlement s právě jedním pohybem/dokumentem nebo
 job settlementem. Tato evidence nenahrazuje chybějící fresh live provider replay.
 
-Refund není součástí povinného ČSOB production-activation checklistu. Zda má být
-in-app card refund součást první produkční verze FUA Pay, zůstává samostatné
-produktové/účetní rozhodnutí. Pokud nebude, musí být výslovně definován
-operátorský postup mimo aplikaci.
+Refund není součástí povinného ČSOB production-activation checklistu. Přidaná
+protokolová hranice sama o sobě není in-app card refund ani production-ready
+vratka; před zpřístupněním je stále nutná samostatná doménová orchestrace,
+perzistence, recovery, audit, UI a odpovídající acceptance.
 
 ## Konfigurace
 

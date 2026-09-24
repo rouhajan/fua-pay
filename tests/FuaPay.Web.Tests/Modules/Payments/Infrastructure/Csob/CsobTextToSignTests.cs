@@ -139,4 +139,41 @@ public sealed class CsobTextToSignTests
                 "ff41e84b7e33@HA",
                 "20220125131559"));
     }
+
+    [Fact]
+    public void PaymentRefund_FullRefundOmitsAmountAndDelimiter()
+    {
+        Assert.Equal(
+            "M1MIPS0000|ff41e84b7e33@HA|20220125133015",
+            CsobTextToSign.PaymentRefund(
+                "M1MIPS0000",
+                "ff41e84b7e33@HA",
+                "20220125133015",
+                amountMinorUnits: null));
+    }
+
+    [Fact]
+    public void PaymentRefund_PartialRefundUsesPositiveInvariantMinorUnits()
+    {
+        Assert.Equal(
+            "M1MIPS0000|ff41e84b7e33@HA|20220125133015|123456",
+            CsobTextToSign.PaymentRefund(
+                "M1MIPS0000",
+                "ff41e84b7e33@HA",
+                "20220125133015",
+                123456));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void PaymentRefund_RejectsNonPositivePartialAmount(long amount)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => CsobTextToSign.PaymentRefund(
+                "M1MIPS0000",
+                "ff41e84b7e33@HA",
+                "20220125133015",
+                amount));
+    }
 }

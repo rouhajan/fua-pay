@@ -451,6 +451,12 @@ public sealed class CsobExpiryReconciliationRacePersistenceTests :
             string payId,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class RejectingSettlementService : IPaymentSettlementService

@@ -298,6 +298,67 @@ public sealed class CsobGatewayClient : ICsobGatewayClient
             gatewayResponse.StatusDetail);
     }
 
+    public async Task<CsobPaymentRefundResult> RefundAsync(
+        string payId,
+        long? amountMinorUnits = null,
+        CancellationToken cancellationToken = default)
+    {
+        _availability.EnsureEnabled();
+        var normalizedPayId = CsobPayId.RequireGatewayInput(payId);
+        var requestStartedAt = _timeProvider.GetUtcNow();
+        var dttm = CreateDttm(requestStartedAt);
+        var textToSign = CsobTextToSign.PaymentRefund(
+            _configuration.MerchantId,
+            normalizedPayId,
+            dttm,
+            amountMinorUnits);
+        var request = new CsobPaymentRefundRequest(
+            _configuration.MerchantId,
+            normalizedPayId,
+            dttm,
+            amountMinorUnits,
+            _signature.Sign(textToSign));
+
+        using var response = await SendAsync(
+            () => _httpClient.PutAsJsonAsync(
+                $"api/{ApiVersion}/payment/refund",
+                request,
+                JsonOptions,
+                cancellationToken),
+            cancellationToken);
+        var responseReceivedAt = _timeProvider.GetUtcNow();
+        var gatewayResponse = await ReadVerifiedResponseAsync(
+            response,
+            CsobTextToSign.PaymentRefundResponse,
+            requestStartedAt,
+            responseReceivedAt,
+            cancellationToken);
+        var responsePayId = CsobPayId.RequireSigned(
+            gatewayResponse.PayId,
+            "Odpověď payment/refund neobsahuje platné payId.");
+
+        if (!string.Equals(
+            responsePayId,
+            normalizedPayId,
+            StringComparison.Ordinal))
+        {
+            throw new CsobGatewayException(
+                "Odpověď payment/refund patří jiné platbě než požadované payId.");
+        }
+
+        return new CsobPaymentRefundResult(
+            responsePayId,
+            gatewayResponse.ResultCode,
+            RequireResponseValue(
+                gatewayResponse.ResultMessage,
+                "Odpověď payment/refund neobsahuje resultMessage."),
+            gatewayResponse.PaymentStatus
+                ?? throw new CsobGatewayException(
+                    "Odpověď payment/refund neobsahuje stav platby."),
+            gatewayResponse.AuthCode,
+            gatewayResponse.StatusDetail);
+    }
+
     private Uri CreateProcessUri(string payId)
     {
         var dttm = CreateDttm(_timeProvider.GetUtcNow());
