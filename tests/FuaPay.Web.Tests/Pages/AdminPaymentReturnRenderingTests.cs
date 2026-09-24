@@ -145,8 +145,45 @@ public sealed class AdminPaymentReturnRenderingTests :
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task PaginationSearch_DoesNotRenderExecutableHtml()
+    {
+        const string payload =
+            "\"><script>alert(1)</script>";
+
+        var requestPath =
+            "/Admin/Payments?view=admin&offset=40&search=" +
+            Uri.EscapeDataString(payload);
+
+        var html = await RenderAsync(
+            settlementReturn: null,
+            requestPath,
+            totalCount: 100);
+
+        Assert.DoesNotContain(
+            "<script>alert(1)</script>",
+            html,
+            StringComparison.OrdinalIgnoreCase);
+
+        Assert.DoesNotContain(
+            "\"><script>",
+            html,
+            StringComparison.OrdinalIgnoreCase);
+
+        const string encodedPayloadPrefix =
+            "search=%22%3E%3Cscript%3E";
+
+        Assert.Equal(
+            2,
+            html.Split(
+                encodedPayloadPrefix,
+                StringSplitOptions.None).Length - 1);
+    }
+
     private async Task<string> RenderAsync(
-        SettlementReturnAdministrationItem? settlementReturn)
+        SettlementReturnAdministrationItem? settlementReturn,
+        string requestPath = "/Admin/Payments?view=admin",
+        long totalCount = 1)
     {
         var session = new AccessSessionSnapshot(
             Guid.NewGuid(),
@@ -154,7 +191,9 @@ public sealed class AdminPaymentReturnRenderingTests :
             "admin@example.cz",
             AccessUserStatus.Active,
             [AccessRole.Admin]);
-        var queries = new AdminPageQueries(settlementReturn);
+        var queries = new AdminPageQueries(
+            settlementReturn,
+            totalCount);
         using var configuredFactory = _factory.WithWebHostBuilder(
             builder => builder.ConfigureTestServices(services =>
             {
@@ -191,8 +230,7 @@ public sealed class AdminPaymentReturnRenderingTests :
             "Cookie",
             $"{cookieOptions.Cookie.Name}=" +
             cookieOptions.TicketDataFormat.Protect(ticket));
-        using var response = await client.GetAsync(
-            "/Admin/Payments?view=admin");
+        using var response = await client.GetAsync(requestPath);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadAsStringAsync();
@@ -220,11 +258,14 @@ public sealed class AdminPaymentReturnRenderingTests :
         ISettlementReturnQueries
     {
         private readonly SettlementReturnAdministrationItem? _return;
+        private readonly long _totalCount;
 
         public AdminPageQueries(
-            SettlementReturnAdministrationItem? settlementReturn)
+            SettlementReturnAdministrationItem? settlementReturn,
+            long totalCount = 1)
         {
             _return = settlementReturn;
+            _totalCount = totalCount;
         }
 
         public Task<PaymentPage> ListForAdministrationAsync(
@@ -245,9 +286,9 @@ public sealed class AdminPaymentReturnRenderingTests :
                     DateTimeOffset.UtcNow,
                     DateTimeOffset.UtcNow,
                     DateTimeOffset.UtcNow)],
-                0,
-                40,
-                1));
+                page.Offset,
+                page.Limit,
+                _totalCount));
 
         public Task<
             IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>>
