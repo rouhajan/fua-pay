@@ -727,6 +727,12 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             CsobPaymentInit payment,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class RecordingAuditTrail : IAuditTrail

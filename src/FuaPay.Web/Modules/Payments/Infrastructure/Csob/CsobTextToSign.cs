@@ -84,6 +84,30 @@ public static class CsobTextToSign
         string dttm) =>
         PaymentReferenceOperation(merchantId, payId, dttm);
 
+    public static string PaymentRefund(
+        string merchantId,
+        string payId,
+        string dttm,
+        long? amountMinorUnits)
+    {
+        var values = new List<string>
+        {
+            RequireValue(merchantId, nameof(merchantId)),
+            RequireValue(payId, nameof(payId)),
+            RequireDttm(dttm)
+        };
+
+        if (amountMinorUnits.HasValue)
+        {
+            values.Add(
+                RequirePositive(
+                    amountMinorUnits.Value,
+                    nameof(amountMinorUnits)));
+        }
+
+        return string.Join('|', values);
+    }
+
     internal static string PaymentInitResponse(
         CsobGatewayResponse response)
     {
@@ -138,6 +162,26 @@ public static class CsobTextToSign
         ArgumentNullException.ThrowIfNull(response);
 
         var values = BaseResponse(response);
+
+        if (!string.IsNullOrEmpty(response.StatusDetail))
+        {
+            values.Add(response.StatusDetail);
+        }
+
+        return string.Join('|', values);
+    }
+
+    internal static string PaymentRefundResponse(
+        CsobGatewayResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+
+        var values = BaseResponse(response);
+
+        if (!string.IsNullOrEmpty(response.AuthCode))
+        {
+            values.Add(response.AuthCode);
+        }
 
         if (!string.IsNullOrEmpty(response.StatusDetail))
         {

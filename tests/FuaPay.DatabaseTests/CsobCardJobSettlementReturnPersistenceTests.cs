@@ -398,6 +398,12 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
             CsobPaymentInit payment,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class StatusOnlyGateway : ICsobGatewayClient
@@ -447,6 +453,12 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
 
         public Task<CsobPaymentInitResult> InitializeAsync(
             CsobPaymentInit payment,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }

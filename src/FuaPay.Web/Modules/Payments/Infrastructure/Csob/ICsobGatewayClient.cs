@@ -19,4 +19,9 @@ public interface ICsobGatewayClient
     Task<CsobPaymentReverseResult> ReverseAsync(
         string payId,
         CancellationToken cancellationToken = default);
+
+    Task<CsobPaymentRefundResult> RefundAsync(
+        string payId,
+        long? amountMinorUnits = null,
+        CancellationToken cancellationToken = default);
 }

@@ -36,6 +36,14 @@ public sealed record CsobPaymentReverseResult(
     int PaymentStatus,
     string? StatusDetail);
 
+public sealed record CsobPaymentRefundResult(
+    string PayId,
+    int ResultCode,
+    string ResultMessage,
+    int PaymentStatus,
+    string? AuthCode,
+    string? StatusDetail);
+
 public sealed record CsobEchoResult(
     int ResultCode,
     string ResultMessage);
@@ -49,6 +57,15 @@ internal sealed record CsobPaymentReverseRequest(
     [property: JsonPropertyName("merchantId")] string MerchantId,
     [property: JsonPropertyName("payId")] string PayId,
     [property: JsonPropertyName("dttm")] string Dttm,
+    [property: JsonPropertyName("signature")] string Signature);
+
+internal sealed record CsobPaymentRefundRequest(
+    [property: JsonPropertyName("merchantId")] string MerchantId,
+    [property: JsonPropertyName("payId")] string PayId,
+    [property: JsonPropertyName("dttm")] string Dttm,
+    [property: JsonPropertyName("amount")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    long? Amount,
     [property: JsonPropertyName("signature")] string Signature);
 
 internal sealed record CsobPaymentInitRequest(
@@ -79,7 +96,9 @@ internal sealed record CsobPaymentCartItemRequest(
 internal sealed record CsobGatewayResponse(
     [property: JsonPropertyName("payId")] string? PayId,
     [property: JsonPropertyName("dttm")] string? Dttm,
-    [property: JsonPropertyName("resultCode")] int ResultCode,
+    [property: JsonPropertyName("resultCode")]
+    [property: JsonRequired]
+    int ResultCode,
     [property: JsonPropertyName("resultMessage")] string? ResultMessage,
     [property: JsonPropertyName("paymentStatus")] int? PaymentStatus,
     [property: JsonPropertyName("authCode")] string? AuthCode,
