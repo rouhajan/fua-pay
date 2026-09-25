@@ -75,6 +75,13 @@ public static class PageOperationError
             CardJobPartialRefundAmountException or
             CardJobSettlementReturnStateInconsistentException or
             CardJobSettlementReturnSafetyStateException or
+            CardTopUpSettlementReturnNotAvailableException or
+            CardTopUpSettlementReturnNotAllowedException or
+            CardTopUpSettlementReturnStateInconsistentException or
+            CardTopUpSettlementReturnSafetyStateException or
+            InsufficientAvailableCreditForReturnHoldException or
+            CreditReturnHoldConflictException or
+            CreditReturnHoldConcurrencyException or
             SettlementReturnRequestConflictException or
             SettlementReturnSourceConflictException or
             SettlementReturnConcurrencyException or
@@ -184,10 +191,15 @@ public static class PageOperationError
                 "Platební služba nyní není dostupná.",
             CardJobSettlementReturnNotAvailableException =>
                 "Karetní vratky nyní nejsou dostupné.",
+            CardTopUpSettlementReturnNotAvailableException =>
+                "Vratky karetního dobití nyní nejsou dostupné.",
             CardJobSettlementReturnNotAllowedException or
             CardJobPartialRefundAmountException or
             SettlementReturnProviderAttemptNotAllowedException =>
                 "Požadovanou částku karetní vratky nelze bezpečně provést.",
+            CardTopUpSettlementReturnNotAllowedException or
+            InsufficientAvailableCreditForReturnHoldException =>
+                "Celé původní dobití nelze bezpečně vrátit; ověřte dostupný kredit.",
             SettlementReturnRequestConflictException or
             SettlementReturnSourceConflictException or
             SettlementReturnProviderAttemptAlreadyActiveException or
@@ -196,6 +208,10 @@ public static class PageOperationError
             CardJobSettlementReturnStateInconsistentException or
             CardJobSettlementReturnSafetyStateException =>
                 "Vratka vyžaduje kontrolu administrátorem; operaci neopakujte.",
+            CardTopUpSettlementReturnStateInconsistentException or
+            CardTopUpSettlementReturnSafetyStateException or
+            CreditReturnHoldConflictException =>
+                "Vratka dobití vyžaduje kontrolu administrátorem; operaci neopakujte.",
             JobPriceNotAllowedException =>
                 "Cena zakázky je mimo povolený rozsah.",
             BlockingJobPaymentAlreadyExistsException or
@@ -212,6 +228,7 @@ public static class PageOperationError
             PaymentConcurrencyException or
             SettlementReturnConcurrencyException or
             SettlementReturnProviderAttemptConcurrencyException or
+            CreditReturnHoldConcurrencyException or
             PaymentCreationRequestAlreadyExistsException or
             ServiceUnitConcurrencyException or
             RequesterAssignmentConcurrencyException =>

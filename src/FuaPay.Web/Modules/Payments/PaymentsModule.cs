@@ -55,6 +55,9 @@ public static class PaymentsModule
         services.AddScoped<
             ICardJobSettlementReturnService,
             UnavailableCardJobSettlementReturnService>();
+        services.AddScoped<
+            ICardTopUpSettlementReturnService,
+            UnavailableCardTopUpSettlementReturnService>();
         services.AddScoped<IPaymentSettlementService>(
             provider => provider.GetRequiredService<
                 PaymentSettlementService>());

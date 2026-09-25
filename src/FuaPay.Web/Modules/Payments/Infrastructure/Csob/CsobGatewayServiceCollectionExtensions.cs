@@ -119,6 +119,10 @@ public static class CsobGatewayServiceCollectionExtensions
             ServiceDescriptor.Scoped<
                 ICardJobSettlementReturnService,
                 CsobCardJobSettlementReturnService>());
+        services.Replace(
+            ServiceDescriptor.Scoped<
+                ICardTopUpSettlementReturnService,
+                CsobCardJobSettlementReturnService>());
 
         if (reconciliationConfiguration.Enabled)
         {

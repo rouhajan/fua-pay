@@ -6,6 +6,8 @@ using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.Modules.Access.Application;
 using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Access.Web;
+using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.Credits.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
@@ -64,6 +66,116 @@ public sealed class CsobCardJobSettlementReturnServiceTests
                 nameof(CardJobPartialRefundCommand.Reason)
             ],
             properties);
+    }
+
+    [Fact]
+    public void TopUpCommand_DoesNotAcceptAmountCustomerOrProviderIdentity()
+    {
+        var properties = typeof(CardTopUpSettlementReturnCommand)
+            .GetProperties()
+            .Select(property => property.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                nameof(CardTopUpSettlementReturnCommand.AdministratorUserId),
+                nameof(CardTopUpSettlementReturnCommand.OriginalPaymentId),
+                nameof(CardTopUpSettlementReturnCommand.Reason),
+                nameof(CardTopUpSettlementReturnCommand.RequestId)
+            ],
+            properties);
+    }
+
+    [Fact]
+    public async Task TopUpReturn_DirectReverseDebitsAndConsumesExactlyOnce()
+    {
+        var fixture = new Fixture(PaymentPurposeType.CreditTopUp);
+        var command = fixture.TopUpCommand();
+        var service = (ICardTopUpSettlementReturnService)fixture.Service;
+
+        var first = await service.ReturnAsync(command);
+        var replay = await service.ReturnAsync(command);
+
+        Assert.Equal(
+            CardTopUpSettlementReturnOutcome.ReverseCompleted,
+            first.Outcome);
+        Assert.Equal(first, replay with
+        {
+            ReverseRequestSent = first.ReverseRequestSent
+        });
+        Assert.Equal(1, fixture.Gateway.ReverseCalls);
+        Assert.Equal(Money.Zero, fixture.CreditAccount.Balance);
+        Assert.Equal(2, fixture.CreditAccount.Movements.Count);
+        Assert.Equal(
+            first.SettlementReturnId,
+            fixture.CreditAccount.Movements[^1].OperationId);
+        Assert.Equal(
+            CreditReturnHoldState.Consumed,
+            Assert.Single(fixture.CreditHolds.Stored).State);
+        Assert.Equal(
+            SettlementReturnState.Completed,
+            Assert.Single(fixture.ReturnRepository.Stored).State);
+    }
+
+    [Fact]
+    public async Task TopUpReturn_InsufficientCreditStopsBeforeProviderMutation()
+    {
+        var fixture = new Fixture(
+            PaymentPurposeType.CreditTopUp,
+            creditAmountMinorUnits: 1_000);
+        var service = (ICardTopUpSettlementReturnService)fixture.Service;
+
+        await Assert.ThrowsAsync<
+            InsufficientAvailableCreditForReturnHoldException>(
+            () => service.ReturnAsync(fixture.TopUpCommand()));
+
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Empty(fixture.CreditHolds.Stored);
+        Assert.Empty(fixture.AttemptRepository.Stored);
+    }
+
+    [Fact]
+    public async Task TopUpReturn_AmbiguousMutationKeepsActiveHold()
+    {
+        var fixture = new Fixture(PaymentPurposeType.CreditTopUp);
+        fixture.Gateway.ReverseException = new HttpRequestException("timeout");
+        var service = (ICardTopUpSettlementReturnService)fixture.Service;
+
+        var result = await service.ReturnAsync(fixture.TopUpCommand());
+
+        Assert.Equal(
+            CardTopUpSettlementReturnOutcome.RequiresAttention,
+            result.Outcome);
+        Assert.Equal(1, fixture.Gateway.ReverseCalls);
+        Assert.Equal(
+            CreditReturnHoldState.Active,
+            Assert.Single(fixture.CreditHolds.Stored).State);
+        Assert.Equal(fixture.Payment.Amount, fixture.CreditAccount.Balance);
+    }
+
+    [Fact]
+    public async Task TopUpReturn_SettledPaymentUsesFullRefundWithoutAmount()
+    {
+        var fixture = new Fixture(PaymentPurposeType.CreditTopUp);
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 8,
+            resultCode: 150);
+        fixture.Gateway.RefundResult = Refund(paymentStatus: 10);
+        var service = (ICardTopUpSettlementReturnService)fixture.Service;
+
+        var result = await service.ReturnAsync(fixture.TopUpCommand());
+
+        Assert.Equal(
+            CardTopUpSettlementReturnOutcome.RefundCompleted,
+            result.Outcome);
+        Assert.Equal(1, fixture.Gateway.ReverseCalls);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Null(fixture.Gateway.LastRefundAmountMinorUnits);
+        Assert.Equal(Money.Zero, fixture.CreditAccount.Balance);
+        Assert.Equal(
+            CreditReturnHoldState.Consumed,
+            Assert.Single(fixture.CreditHolds.Stored).State);
     }
 
     [Fact]
@@ -1107,7 +1219,8 @@ public sealed class CsobCardJobSettlementReturnServiceTests
     private sealed class Fixture
     {
         public Fixture(
-            PaymentPurposeType paymentPurpose = PaymentPurposeType.Job)
+            PaymentPurposeType paymentPurpose = PaymentPurposeType.Job,
+            long? creditAmountMinorUnits = null)
         {
             var customerId = Guid.NewGuid();
             var jobId = paymentPurpose == PaymentPurposeType.Job
@@ -1142,6 +1255,21 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             ReturnRepository = new FakeSettlementReturnRepository();
             AttemptRepository =
                 new FakeSettlementReturnProviderAttemptRepository();
+            CreditAccount = new CreditAccount(Guid.NewGuid(), customerId);
+            var creditAmount = new Money(
+                creditAmountMinorUnits ?? Payment.Amount.MinorUnits);
+            if (creditAmount.MinorUnits > 0)
+            {
+                CreditAccount.Credit(
+                    Guid.NewGuid(),
+                    creditAmount,
+                    Now.AddMinutes(-7),
+                    "Test top-up");
+            }
+            CreditAccounts = new FakeCreditAccountRepository(CreditAccount);
+            CreditHolds = new FakeCreditReturnHoldRepository();
+            CreditAvailability = new CreditAvailabilityService(
+                new FakeCreditAvailabilityRepository(CreditHolds));
             Transaction = new RecordingTransaction();
             Audit = new RecordingAuditTrail();
             Gateway = new FakeGateway();
@@ -1154,6 +1282,9 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             Service = new CsobCardJobSettlementReturnService(
                 JobRepository,
                 new ExistingJobCoordination(),
+                CreditAccounts,
+                CreditHolds,
+                CreditAvailability,
                 PaymentRepository,
                 ReturnRepository,
                 AttemptRepository,
@@ -1184,6 +1315,14 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             AttemptRepository
         { get; }
 
+        public CreditAccount CreditAccount { get; }
+
+        public FakeCreditAccountRepository CreditAccounts { get; }
+
+        public FakeCreditReturnHoldRepository CreditHolds { get; }
+
+        public CreditAvailabilityService CreditAvailability { get; }
+
         public SettlementReturnProviderAttemptService AttemptService
         {
             get;
@@ -1198,6 +1337,15 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         public CsobCardJobSettlementReturnService Service { get; }
 
         public CardJobSettlementReturnCommand Command { get; }
+
+        public CardTopUpSettlementReturnCommand TopUpCommand(
+            Guid? requestId = null,
+            string? reason = null) =>
+            new(
+                requestId ?? Guid.NewGuid(),
+                Payment.Id,
+                Command.AdministratorUserId,
+                reason ?? "Administrator approved full CardTopUp return");
 
         public CardJobPartialRefundCommand PartialCommand(
             long amountMinorUnits,
@@ -1514,6 +1662,117 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             job.Publish(Now.AddMinutes(-11));
             return job;
         }
+    }
+
+    private sealed class FakeCreditAccountRepository :
+        ICreditAccountRepository
+    {
+        private readonly CreditAccount _account;
+
+        public FakeCreditAccountRepository(CreditAccount account)
+        {
+            _account = account;
+        }
+
+        public int SaveCalls { get; private set; }
+
+        public Task<CreditAccount?> FindByOwnerIdAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<CreditAccount?>(
+                ownerId == _account.OwnerId ? _account : null);
+
+        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) =>
+            FindByOwnerIdAsync(ownerId, cancellationToken);
+
+        public Task<CreditAccount?> FindByIdForUpdateAsync(
+            Guid accountId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<CreditAccount?>(
+                accountId == _account.Id ? _account : null);
+
+        public Task LockOwnerForAccountCreationAsync(
+            Guid ownerId,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task AddAsync(
+            CreditAccount account,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task SaveAsync(
+            CreditAccount account,
+            CancellationToken cancellationToken)
+        {
+            Assert.Same(_account, account);
+            SaveCalls++;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeCreditReturnHoldRepository :
+        ICreditReturnHoldRepository
+    {
+        public List<CreditReturnHold> Stored { get; } = [];
+
+        public Task<CreditReturnHold?> FindBySettlementReturnIdAsync(
+            Guid settlementReturnId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Stored.SingleOrDefault(item =>
+                item.SettlementReturnId == settlementReturnId));
+
+        public Task<CreditReturnHold?> FindBySettlementReturnIdForUpdateAsync(
+            Guid settlementReturnId,
+            CancellationToken cancellationToken = default) =>
+            FindBySettlementReturnIdAsync(
+                settlementReturnId,
+                cancellationToken);
+
+        public Task AddAsync(
+            CreditReturnHold hold,
+            CancellationToken cancellationToken = default)
+        {
+            if (Stored.Any(item =>
+                    item.SettlementReturnId == hold.SettlementReturnId))
+            {
+                throw new CreditReturnHoldAlreadyExistsException(
+                    hold.SettlementReturnId);
+            }
+
+            Stored.Add(hold);
+            return Task.CompletedTask;
+        }
+
+        public Task SaveAsync(
+            CreditReturnHold hold,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Contains(hold, Stored);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeCreditAvailabilityRepository :
+        ICreditAvailabilityRepository
+    {
+        private readonly FakeCreditReturnHoldRepository _holds;
+
+        public FakeCreditAvailabilityRepository(
+            FakeCreditReturnHoldRepository holds)
+        {
+            _holds = holds;
+        }
+
+        public Task<Money> GetTotalBlockingAmountAsync(
+            Guid creditAccountId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new Money(_holds.Stored
+                .Where(item =>
+                    item.CreditAccountId == creditAccountId &&
+                    item.State == CreditReturnHoldState.Active)
+                .Sum(item => item.Amount.MinorUnits)));
     }
 
     private sealed class RecordingTransaction : IApplicationTransaction
