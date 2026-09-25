@@ -371,7 +371,7 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
    [payment-returns.md](../features/payment-returns.md):
    - [x] R2 CardJob plná vratka Reverse → full Refund je implementovaná v
      `58173deabc396a2d428d265a015477e22ac28195`. Přímé `150/8` nebo
-     status-only `0/8` vede po durabilním uzavření Reverse k jednomu plnému
+     status-only `0/8` vedou po durabilním uzavření Reverse k jednomu plnému
      `payment/refund` bez `amount`; nejasný výsledek se nereplayuje druhým PUT
      a recovery je status-only. Před commitem prošel focused PostgreSQL gate
      17/17, oba concurrency scénáře 20/20 + 20/20 a canonical
@@ -380,7 +380,7 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
    - [ ] R3: částečné a opakované CardJob refundy včetně kumulativního limitu a
      odpovídající perzistence/recovery.
    - [ ] R4: CardTopUp návrat nevyčerpaného kreditu na původní kartu s
-     `CreditReturnHold` a přesně-jednou consume/release lifecyclem.
+     `CreditReturnHold` a přesně-jednou životním cyklem consume/release.
 4. Doplnit samostatný účetní/reconciliation export pro párování s centrálním
    ČSOB výpisem. Minimální párovací pole: `orderNo`, `payId`, FUA payment ID,
    datum, částka, měna, účel, job number/service unit, finanční dokument a
