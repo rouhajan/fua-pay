@@ -267,6 +267,55 @@ public sealed class SecurityPerimeterTests :
     }
 
     [Fact]
+    public async Task CardJobPartialRefundPost_WithoutAntiforgeryToken_ReturnsBadRequest()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Testovací administrátor",
+            "admin@example.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Admin]);
+        var sessionQueries = new RecordingAccessSessionQueries(session);
+        using var configuredFactory = _factory.WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IAccessSessionQueries>();
+                services.AddSingleton<IAccessSessionQueries>(sessionQueries);
+            }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<
+                IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = AccessClaimsPrincipalFactory.Create(
+            session,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            principal,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}=" +
+            cookieOptions.TicketDataFormat.Protect(ticket));
+        using var content = new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["operationId"] = Guid.NewGuid().ToString(),
+                ["originalPaymentId"] = Guid.NewGuid().ToString(),
+                ["amount"] = "25.50",
+                ["reason"] = "Approved partial return"
+            });
+        using var response = await client.PostAsync(
+            "/Admin/Payments?handler=PartialRefund",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(1, sessionQueries.CallCount);
+        Assert.Equal(session.UserId, sessionQueries.LastUserId);
+    }
+
+    [Fact]
     public async Task ManualCreditTopUpPost_ByCustomerIsDeniedBeforeHandler()
     {
         var session = new AccessSessionSnapshot(

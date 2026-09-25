@@ -163,7 +163,7 @@ hardening z PR #44 byl po předchozím incidentu samostatně live-accepted
 uzavření byl aktivní `staging.env` vrácen na `Payments__Provider=None` a
 `Csob__Enabled=false`.
 
-Stage 3 + R2 ukládá `SettlementReturn` i provider attempt jako `InProgress`
+Stage 3 + R2/R3 ukládá `SettlementReturn` i provider attempt jako `InProgress`
 před externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy
 Reverse nebo Refund PUT mohl odejít, je replay/restart pouze statusový a stejný
 externí PUT se automaticky neposílá podruhé. Přímé Reverse `0/5` vratku dokončí;
@@ -173,6 +173,15 @@ vlastním Refundem znamená attention/reconciliation bez Refund PUT. Přímé Re
 `0/10` dokončí právě odeslaný plný refund, zatímco `0/9` zůstává processing a
 další průchod je status-only. Živý Reverse scénář byl na stagingu ověřen
 2026-09-12 výsledkem `0/5`; živý Refund scénář zatím ověřen nebyl.
+
+R3 partial CardJob refund používá kladné `amount` a každý požadavek má vlastní
+return i Refund attempt. Před PUT se pod zámkem autoritativní zakázky rezervuje
+částka proti součtu všech neodmítnutých vratek. `Requested`, `InProgress`,
+`RequiresAttention` a `Completed` zůstávají započtené, `Rejected` se uvolní.
+Přímé `0/10` potvrzuje konkrétní právě odeslanou částku; po nejasném PUT je každý
+replay status-only a samotný status 10 konkrétní partial refund automaticky
+nepotvrdí. Po dřívějším partial refundu je R2 full Refund bez `amount`
+fail-closed. Tyto automatické testy nejsou live ČSOB acceptance.
 
 ### Rozhodnutí po production-hardening auditu 2026-09-23
 
@@ -377,8 +386,10 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
      17/17, oba concurrency scénáře 20/20 + 20/20 a canonical
      `scripts/verify.ps1 -RunDatabaseTests` včetně PostgreSQL 291/291. Živý
      gateway Refund scénář zatím nebyl proveden a zůstává v kroku 7.
-   - [ ] R3: částečné a opakované CardJob refundy včetně kumulativního limitu a
-     odpovídající perzistence/recovery.
+   - [x] R3: částečné a opakované CardJob refundy včetně konzervativního
+     kumulativního limitu, per-return persistence, souběžné rezervace a
+     status-only recovery. Živý ČSOB partial Refund scénář zůstává otevřený v
+     kroku 7 a není tímto označen PASS.
    - [ ] R4: CardTopUp návrat nevyčerpaného kreditu na původní kartu s
      `CreditReturnHold` a přesně-jednou životním cyklem consume/release.
 4. Doplnit samostatný účetní/reconciliation export pro párování s centrálním
@@ -461,6 +472,21 @@ Tento checkpoint neznamená deployment ani live ČSOB Refund PASS. R3
 částečné/opakované refundy, R4 CardTopUp návrat, veřejné právní stránky,
 účetní/reconciliation export, Entra logout, zbývající hardening a finální fresh
 staging acceptance zůstávají otevřené před produkčním GO.
+
+### Implementační stav 2026-09-25 — R3 CardJob partial Refund
+
+R3 přidává samostatný `SettlementReturn` a Refund attempt pro každou partial
+částku, filtrované source indexy zachovávající `CreditJob`/`CardTopUp`
+unikátnost a non-unique CardJob lookupy. Rezervace pod řádkovým zámkem zakázky
+započítává všechny stavy kromě definitivně `Rejected`; souběžné požadavky proto
+nemohou překročit původní autoritativní částku. R2 plná cesta zůstává beze změny
+bez dřívějšího partial refundu a po partial refundu fail-closed neodešle
+neomezený Refund bez `amount`.
+
+Nejasný partial PUT se nikdy automaticky neopakuje a samotný status 10 při
+status-only recovery konkrétní částku nepotvrdí. Admin UI zobrazuje remaining i
+historii jednotlivých vratek. Jde o automaticky pokrytou implementaci, nikoli o
+deployment nebo live ČSOB Refund PASS; živý scénář v kroku 7 zůstává otevřený.
 
 ## F. Historický přechodný staging release/deploy gate
 

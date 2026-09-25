@@ -20,6 +20,11 @@ public interface ISettlementReturnRepository
         Guid jobId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<SettlementReturn>> ListByOriginalPaymentIdAsync(
+        Guid originalPaymentId,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
     Task AddAsync(
         SettlementReturn settlementReturn,
         CancellationToken cancellationToken = default);

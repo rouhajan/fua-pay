@@ -21,6 +21,12 @@ internal sealed class SettlementReturnConfiguration :
     internal const string JobUniqueConstraint =
         "uq_payments_settlement_returns_job";
 
+    internal const string CardJobPaymentLookupIndex =
+        "ix_payments_settlement_returns_card_job_payment";
+
+    internal const string CardJobJobLookupIndex =
+        "ix_payments_settlement_returns_card_job_job";
+
     public void Configure(
         EntityTypeBuilder<SettlementReturnEntity> builder)
     {
@@ -149,12 +155,29 @@ internal sealed class SettlementReturnConfiguration :
 
         builder.HasIndex(item => item.OriginalPaymentId)
             .IsUnique()
-            .HasFilter("original_payment_id IS NOT NULL")
+            .HasFilter("original_payment_id IS NOT NULL AND kind = 3")
             .HasDatabaseName(OriginalPaymentUniqueConstraint);
 
-        builder.HasIndex(item => item.JobId)
+        builder.HasIndex(
+                item => item.JobId,
+                "CreditJobSourceUniqueness")
             .IsUnique()
-            .HasFilter("job_id IS NOT NULL")
+            .HasFilter("job_id IS NOT NULL AND kind = 2")
             .HasDatabaseName(JobUniqueConstraint);
+
+        builder.HasIndex(
+                item => new
+                {
+                    item.OriginalPaymentId,
+                    item.State
+                })
+            .HasFilter("kind = 1")
+            .HasDatabaseName(CardJobPaymentLookupIndex);
+
+        builder.HasIndex(
+                item => item.JobId,
+                "CardJobJobLookup")
+            .HasFilter("kind = 1")
+            .HasDatabaseName(CardJobJobLookupIndex);
     }
 }

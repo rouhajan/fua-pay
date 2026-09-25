@@ -26,6 +26,10 @@ public sealed class AdminPaymentReturnPageTests
         Assert.Equal("Admin", authorization.Roles);
         Assert.NotNull(typeof(IndexModel).GetMethod("OnPostReverseAsync"));
         Assert.Null(typeof(IndexModel).GetMethod("OnGetReverseAsync"));
+        Assert.NotNull(
+            typeof(IndexModel).GetMethod("OnPostPartialRefundAsync"));
+        Assert.Null(
+            typeof(IndexModel).GetMethod("OnGetPartialRefundAsync"));
     }
 
     [Fact]
@@ -125,6 +129,81 @@ public sealed class AdminPaymentReturnPageTests
             StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task PartialRefundPost_UsesAuthenticatedAdministratorAndMinorUnits()
+    {
+        var service = new RecordingCardJobSettlementReturnService(
+            CardJobSettlementReturnOutcome.PartialRefundCompleted);
+        var model = new IndexModel(
+            new EmptyPaymentQueries(),
+            new EmptyAccessUserQueries(),
+            new EmptyReconciliationQueries(),
+            new EmptySettlementReturnQueries(),
+            service);
+        var administratorId = Guid.NewGuid();
+        var httpContext = new DefaultHttpContext
+        {
+            User = AccessClaimsPrincipalFactory.Create(
+                new AccessSessionSnapshot(
+                    administratorId,
+                    "Administrator",
+                    "admin@example.cz",
+                    AccessUserStatus.Active,
+                    [AccessRole.Admin]),
+                "Test")
+        };
+        model.PageContext = new PageContext { HttpContext = httpContext };
+        model.TempData = new TempDataDictionary(
+            httpContext,
+            new MemoryTempDataProvider());
+        var operationId = Guid.NewGuid();
+        var paymentId = Guid.NewGuid();
+
+        var response = await model.OnPostPartialRefundAsync(
+            operationId,
+            paymentId,
+            25.50m,
+            "Approved partial return");
+
+        Assert.IsType<RedirectToPageResult>(response);
+        var command = Assert.IsType<CardJobPartialRefundCommand>(
+            service.PartialCommand);
+        Assert.Equal(operationId, command.OperationId);
+        Assert.Equal(paymentId, command.OriginalPaymentId);
+        Assert.Equal(administratorId, command.AdministratorUserId);
+        Assert.Equal(2_550, command.AmountMinorUnits);
+        Assert.Equal("Approved partial return", command.Reason);
+    }
+
+    [Fact]
+    public async Task PartialRefundPost_MaxDecimalReturnsValidationWithoutCallingService()
+    {
+        var service = new RecordingCardJobSettlementReturnService();
+        var model = new IndexModel(
+            new EmptyPaymentQueries(),
+            new EmptyAccessUserQueries(),
+            new EmptyReconciliationQueries(),
+            new EmptySettlementReturnQueries(),
+            service)
+        {
+            PageContext = new PageContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        var response = await model.OnPostPartialRefundAsync(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            decimal.MaxValue,
+            "Overflow regression");
+
+        Assert.IsType<PageResult>(response);
+        Assert.False(model.ModelState.IsValid);
+        Assert.True(model.ModelState.ContainsKey("amount"));
+        Assert.Null(service.PartialCommand);
+    }
+
     private sealed class RecordingCardJobSettlementReturnService :
         ICardJobSettlementReturnService
     {
@@ -139,6 +218,8 @@ public sealed class AdminPaymentReturnPageTests
 
         public CardJobSettlementReturnCommand? Command { get; private set; }
 
+        public CardJobPartialRefundCommand? PartialCommand { get; private set; }
+
         public Task<CardJobSettlementReturnResult> ReturnAsync(
             CardJobSettlementReturnCommand command,
             CancellationToken cancellationToken = default)
@@ -149,6 +230,19 @@ public sealed class AdminPaymentReturnPageTests
                 Guid.NewGuid(),
                 _outcome,
                 ReverseRequestSent: true));
+        }
+
+        public Task<CardJobSettlementReturnResult> PartialRefundAsync(
+            CardJobPartialRefundCommand command,
+            CancellationToken cancellationToken = default)
+        {
+            PartialCommand = command;
+            return Task.FromResult(new CardJobSettlementReturnResult(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                _outcome,
+                ReverseRequestSent: false,
+                RefundRequestSent: true));
         }
     }
 
@@ -182,7 +276,11 @@ public sealed class AdminPaymentReturnPageTests
             PaymentListFilter filter,
             PaymentPageRequest page,
             CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            Task.FromResult(new PaymentPage(
+                [],
+                page.Offset,
+                page.Limit,
+                TotalCount: 0));
 
         public Task<PaymentDetail?> FindForCustomerAsync(
             Guid customerUserId,
@@ -216,7 +314,9 @@ public sealed class AdminPaymentReturnPageTests
             FindOptionsAsync(
                 IEnumerable<Guid> userIds,
                 CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            Task.FromResult<
+                IReadOnlyDictionary<Guid, AccessUserOption>>(
+                new Dictionary<Guid, AccessUserOption>());
 
         public Task<bool> IsActiveAsync(
             Guid userId,
@@ -241,23 +341,25 @@ public sealed class AdminPaymentReturnPageTests
             ListOpenAsync(
                 int limit,
                 CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            Task.FromResult<IReadOnlyList<PaymentReconciliationAdminItem>>([]);
     }
 
     private sealed class EmptySettlementReturnQueries :
         ISettlementReturnQueries
     {
         public Task<
-            IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>>
+            IReadOnlyDictionary<
+                Guid,
+                IReadOnlyList<SettlementReturnAdministrationItem>>>
             FindByOriginalPaymentIdsAsync(
                 IEnumerable<Guid> originalPaymentIds,
                 CancellationToken cancellationToken = default) =>
             Task.FromResult<
                 IReadOnlyDictionary<
                     Guid,
-                    SettlementReturnAdministrationItem>>(
+                    IReadOnlyList<SettlementReturnAdministrationItem>>>(
                 new Dictionary<
                     Guid,
-                    SettlementReturnAdministrationItem>());
+                    IReadOnlyList<SettlementReturnAdministrationItem>>());
     }
 }

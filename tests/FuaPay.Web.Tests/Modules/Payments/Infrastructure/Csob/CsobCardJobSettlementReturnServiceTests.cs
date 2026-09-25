@@ -47,6 +47,200 @@ public sealed class CsobCardJobSettlementReturnServiceTests
     }
 
     [Fact]
+    public void PartialCommand_AcceptsOnlyAmountBesideRequestAndActorInputs()
+    {
+        var properties = typeof(CardJobPartialRefundCommand)
+            .GetProperties()
+            .Select(property => property.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                nameof(CardJobPartialRefundCommand.AdministratorUserId),
+                nameof(CardJobPartialRefundCommand.AmountMinorUnits),
+                nameof(CardJobPartialRefundCommand.OperationId),
+                nameof(CardJobPartialRefundCommand.OriginalPaymentId),
+                nameof(CardJobPartialRefundCommand.Reason)
+            ],
+            properties);
+    }
+
+    [Fact]
+    public async Task PartialRefundAsync_RejectsNonPositiveAmountBeforeGateway()
+    {
+        var fixture = new Fixture();
+        var command = fixture.PartialCommand(amountMinorUnits: 0);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            fixture.Service.PartialRefundAsync(command));
+
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
+        Assert.Empty(fixture.ReturnRepository.Stored);
+    }
+
+    [Fact]
+    public async Task PartialRefundAsync_PersistsReservationBeforeAmountPut()
+    {
+        var fixture = new Fixture();
+        var command = fixture.PartialCommand(amountMinorUnits: 2_500);
+        fixture.Gateway.OnRefund = () =>
+        {
+            Assert.False(fixture.Transaction.IsActive);
+            Assert.Equal(
+                SettlementReturnState.InProgress,
+                Assert.Single(fixture.ReturnRepository.Stored).State);
+            Assert.Equal(
+                SettlementReturnProviderAttemptState.InProgress,
+                Assert.Single(fixture.AttemptRepository.Stored).State);
+        };
+
+        var result = await fixture.Service.PartialRefundAsync(command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.PartialRefundCompleted,
+            result.Outcome);
+        Assert.True(result.RefundRequestSent);
+        Assert.False(result.ReverseRequestSent);
+        Assert.Equal(2_500, fixture.Gateway.LastRefundAmountMinorUnits);
+        Assert.Equal(
+            new Money(2_500),
+            Assert.Single(fixture.ReturnRepository.Stored).Amount);
+    }
+
+    [Fact]
+    public async Task PartialRefundAsync_AllowsRepeatedAmountsBelowCumulativeCeiling()
+    {
+        var fixture = new Fixture();
+
+        await fixture.Service.PartialRefundAsync(
+            fixture.PartialCommand(amountMinorUnits: 2_500));
+        await fixture.Service.PartialRefundAsync(
+            fixture.PartialCommand(
+                amountMinorUnits: 3_000,
+                operationId: Guid.NewGuid()));
+
+        Assert.Equal(2, fixture.Gateway.RefundCalls);
+        Assert.Equal(2, fixture.ReturnRepository.Stored.Count);
+        Assert.Equal(
+            5_500,
+            fixture.ReturnRepository.Stored.Sum(
+                item => item.Amount.MinorUnits));
+    }
+
+    [Fact]
+    public async Task PartialRefundAsync_RejectsAmountAtOrAboveRemainingBeforePut()
+    {
+        var fixture = new Fixture();
+        await fixture.Service.PartialRefundAsync(
+            fixture.PartialCommand(amountMinorUnits: 4_000));
+
+        var exception = await Assert.ThrowsAsync<
+            CardJobPartialRefundAmountException>(() =>
+            fixture.Service.PartialRefundAsync(
+                fixture.PartialCommand(
+                    amountMinorUnits: 8_500,
+                    operationId: Guid.NewGuid())));
+
+        Assert.Equal(8_500, exception.RemainingMinorUnits);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+    }
+
+    [Fact]
+    public async Task PartialRefundAsync_DefinitivelyRejectedAmountIsAvailableAgain()
+    {
+        var fixture = new Fixture();
+        var rejected = new SettlementReturn(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            SettlementReturnKind.CardJob,
+            fixture.Payment.Id,
+            fixture.Job.Id,
+            fixture.Payment.CustomerUserId,
+            fixture.Command.AdministratorUserId,
+            new Money(7_000),
+            "Definitively rejected partial refund",
+            Now.AddMinutes(-2));
+        rejected.Begin(Now.AddMinutes(-1));
+        rejected.Reject(Now);
+        fixture.ReturnRepository.Stored.Add(rejected);
+
+        var result = await fixture.Service.PartialRefundAsync(
+            fixture.PartialCommand(amountMinorUnits: 7_000));
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.PartialRefundCompleted,
+            result.Outcome);
+        Assert.Equal(7_000, fixture.Gateway.LastRefundAmountMinorUnits);
+    }
+
+    [Fact]
+    public async Task PartialRefundAsync_SameRequestReplaysButChangedAmountConflicts()
+    {
+        var fixture = new Fixture();
+        var command = fixture.PartialCommand(amountMinorUnits: 2_500);
+
+        var first = await fixture.Service.PartialRefundAsync(command);
+        var replay = await fixture.Service.PartialRefundAsync(command);
+
+        Assert.Equal(first.SettlementReturnId, replay.SettlementReturnId);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+
+        await Assert.ThrowsAsync<SettlementReturnRequestConflictException>(() =>
+            fixture.Service.PartialRefundAsync(
+                command with { AmountMinorUnits = 2_501 }));
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+    }
+
+    [Fact]
+    public async Task PartialRefundAsync_AmbiguousPutNeverRepeatsAndStatus10DoesNotConfirm()
+    {
+        var fixture = new Fixture();
+        var command = fixture.PartialCommand(amountMinorUnits: 2_500);
+        fixture.Gateway.RefundException =
+            new CsobGatewayException("simulated transport ambiguity");
+
+        var ambiguous = await fixture.Service.PartialRefundAsync(command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RequiresAttention,
+            ambiguous.Outcome);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Equal(
+            SettlementReturnProviderAttemptState.Uncertain,
+            Assert.Single(fixture.AttemptRepository.Stored).State);
+
+        fixture.Gateway.RefundException = null;
+        fixture.Gateway.StatusResult = Status(paymentStatus: 10);
+        var replay = await fixture.Service.PartialRefundAsync(command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RequiresAttention,
+            replay.Outcome);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Equal(1, fixture.Gateway.StatusCalls);
+        Assert.Equal(
+            SettlementReturnState.RequiresAttention,
+            Assert.Single(fixture.ReturnRepository.Stored).State);
+    }
+
+    [Fact]
+    public async Task FullReturnAfterPartialRefundFailsClosedWithoutReverseOrFullRefund()
+    {
+        var fixture = new Fixture();
+        await fixture.Service.PartialRefundAsync(
+            fixture.PartialCommand(amountMinorUnits: 2_500));
+
+        await Assert.ThrowsAsync<
+            CardJobSettlementReturnNotAllowedException>(() =>
+            fixture.Service.ReturnAsync(fixture.Command));
+
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Equal(2_500, fixture.Gateway.LastRefundAmountMinorUnits);
+    }
+
+    [Fact]
     public async Task ReturnAsync_PersistsInProgressBeforeSingleReverseAndConfirms()
     {
         var fixture = new Fixture();
@@ -1005,6 +1199,16 @@ public sealed class CsobCardJobSettlementReturnServiceTests
 
         public CardJobSettlementReturnCommand Command { get; }
 
+        public CardJobPartialRefundCommand PartialCommand(
+            long amountMinorUnits,
+            Guid? operationId = null) =>
+            new(
+                operationId ?? Guid.NewGuid(),
+                Payment.Id,
+                Command.AdministratorUserId,
+                amountMinorUnits,
+                "Administrator approved partial CardJob refund");
+
         public void SeedExisting(
             SettlementReturnState returnState,
             SettlementReturnProviderAttemptState attemptState)
@@ -1568,6 +1772,16 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult<SettlementReturn?>(
                 Stored.SingleOrDefault(item => item.JobId == jobId));
+
+        public Task<IReadOnlyList<SettlementReturn>>
+            ListByOriginalPaymentIdAsync(
+                Guid originalPaymentId,
+                CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SettlementReturn>>(
+                Stored
+                    .Where(item =>
+                        item.OriginalPaymentId == originalPaymentId)
+                    .ToArray());
 
         public Task AddAsync(
             SettlementReturn settlementReturn,

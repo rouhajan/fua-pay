@@ -60,10 +60,14 @@ public sealed class IndexModel : PageModel
         private set;
     } = [];
 
-    public IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>
+    public IReadOnlyDictionary<
+        Guid,
+        IReadOnlyList<SettlementReturnAdministrationItem>>
         SettlementReturns
     { get; private set; } =
-            new Dictionary<Guid, SettlementReturnAdministrationItem>();
+            new Dictionary<
+                Guid,
+                IReadOnlyList<SettlementReturnAdministrationItem>>();
 
     public async Task OnGetAsync(
         PaymentStatus? status = null,
@@ -182,6 +186,120 @@ public sealed class IndexModel : PageModel
                 exception,
                 "settlement-return.card-job.reverse",
                 "Karetní vratku se nepodařilo bezpečně zpracovat.");
+            await LoadAsync(
+                status: null,
+                purposeType: null,
+                search: null,
+                offset: 0,
+                cancellationToken);
+            return Page();
+        }
+    }
+
+    public async Task<IActionResult> OnPostPartialRefundAsync(
+        Guid operationId,
+        Guid originalPaymentId,
+        decimal amount,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        if (operationId == Guid.Empty)
+        {
+            ModelState.AddModelError(
+                nameof(operationId),
+                "Identifikátor vratky není platný.");
+        }
+
+        if (originalPaymentId == Guid.Empty)
+        {
+            ModelState.AddModelError(
+                nameof(originalPaymentId),
+                "Identifikátor platby není platný.");
+        }
+
+        long amountMinorUnits = 0;
+        if (amount <= 0 || amount > long.MaxValue / 100m)
+        {
+            ModelState.AddModelError(
+                nameof(amount),
+                "Částka musí být kladná a mít nejvýše dvě desetinná místa.");
+        }
+        else
+        {
+            var scaledAmount = amount * 100m;
+            if (scaledAmount != decimal.Truncate(scaledAmount))
+            {
+                ModelState.AddModelError(
+                    nameof(amount),
+                    "Částka musí být kladná a mít nejvýše dvě desetinná místa.");
+            }
+            else
+            {
+                amountMinorUnits = decimal.ToInt64(scaledAmount);
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            ModelState.AddModelError(
+                nameof(reason),
+                "Důvod vratky je povinný.");
+        }
+        else if (reason.Trim().Length > SettlementReturn.MaximumReasonLength)
+        {
+            ModelState.AddModelError(
+                nameof(reason),
+                "Důvod vratky je příliš dlouhý.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            await LoadAsync(
+                status: null,
+                purposeType: null,
+                search: null,
+                offset: 0,
+                cancellationToken);
+            return Page();
+        }
+
+        try
+        {
+            var result = await _cardJobSettlementReturnService
+                .PartialRefundAsync(
+                    new CardJobPartialRefundCommand(
+                        operationId,
+                        originalPaymentId,
+                        User.FindAccessUserId()
+                            ?? throw new InvalidOperationException(
+                                "Administrátor nemá interní ID."),
+                        amountMinorUnits,
+                        reason),
+                    cancellationToken);
+
+            TempData["StatusMessage"] = result.Outcome switch
+            {
+                CardJobSettlementReturnOutcome.PartialRefundCompleted =>
+                    "ČSOB partial refund byl přímo ověřen a vratka dokončena.",
+                CardJobSettlementReturnOutcome.PartialRefundProcessing =>
+                    "ČSOB partial refund se zpracovává. Další ověření je pouze stavové.",
+                CardJobSettlementReturnOutcome.PartialRefundRejected =>
+                    "ČSOB partial refund byl definitivně zamítnut; částka je znovu dostupná.",
+                _ =>
+                    "Výsledek partial refundu je nejasný. Částka zůstává " +
+                    "rezervovaná a žádný další PUT se automaticky neposílá."
+            };
+
+            return RedirectToPage(new { view = "admin" });
+        }
+        catch (Exception exception) when (
+            PageOperationError.IsExpected(exception))
+        {
+            PageOperationError.Add(
+                this,
+                exception,
+                "settlement-return.card-job.partial-refund",
+                "Částečnou karetní vratku se nepodařilo bezpečně zpracovat.");
             await LoadAsync(
                 status: null,
                 purposeType: null,

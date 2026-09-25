@@ -56,3 +56,28 @@ public sealed class CardJobSettlementReturnSafetyStateException :
 
     public Guid OperationId { get; }
 }
+
+public sealed class CardJobPartialRefundAmountException :
+    InvalidOperationException
+{
+    public CardJobPartialRefundAmountException(
+        Guid originalPaymentId,
+        long requestedMinorUnits,
+        long remainingMinorUnits,
+        string reason)
+        : base(
+            $"Payment '{originalPaymentId}' cannot reserve partial refund " +
+            $"amount {requestedMinorUnits}; remaining amount is " +
+            $"{remainingMinorUnits}: {reason}.")
+    {
+        OriginalPaymentId = originalPaymentId;
+        RequestedMinorUnits = requestedMinorUnits;
+        RemainingMinorUnits = remainingMinorUnits;
+    }
+
+    public Guid OriginalPaymentId { get; }
+
+    public long RequestedMinorUnits { get; }
+
+    public long RemainingMinorUnits { get; }
+}

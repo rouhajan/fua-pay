@@ -116,15 +116,17 @@ public sealed class SettlementReturnProviderAttemptService
 
         var paymentMatchesReturn =
             payment.CustomerUserId == settlementReturn.CustomerUserId &&
-            payment.Amount == settlementReturn.Amount &&
             settlementReturn.Kind switch
             {
                 SettlementReturnKind.CardJob =>
                     payment.PurposeType == PaymentPurposeType.Job &&
-                    payment.JobId == settlementReturn.JobId,
+                    payment.JobId == settlementReturn.JobId &&
+                    settlementReturn.Amount.MinorUnits <=
+                        payment.Amount.MinorUnits,
                 SettlementReturnKind.CardTopUp =>
                     payment.PurposeType == PaymentPurposeType.CreditTopUp &&
-                    payment.JobId is null,
+                    payment.JobId is null &&
+                    payment.Amount == settlementReturn.Amount,
                 _ => false
             };
 

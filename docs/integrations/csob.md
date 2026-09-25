@@ -200,14 +200,14 @@ Read-only kontrola potvrdila na každou zakázku právě jednu payment, jednu
 document source ID, částky a provider reference. Jde o fresh end-to-end důkaz
 běžného uživatelského CardJob flow nad izolovaným stagingem.
 
-## CardJob Reverse → full Refund
+## CardJob Reverse → full Refund a partial Refund
 
-Administrátor může z přehledu plateb spustit pouze plnou vratku úspěšné
-ČSOB platby zakázky. POST s antiforgery předá jen idempotentní operation ID,
-identifikátor vybírané platby a důvod; zákazníka, zakázku, částku, provider a
-`payId` služba vždy znovu odvodí z autoritativní uložené platby a vypořádání
-zakázky. CardTopUp, kreditní zakázka a částečná či opakovaná vratka touto cestou
-podporovány nejsou.
+Administrátor může z přehledu plateb spustit plnou nebo částečnou vratku úspěšné
+ČSOB platby zakázky. POST s antiforgery předá idempotentní operation ID,
+identifikátor vybírané platby, důvod a u partial refundu částku. Zákazníka,
+zakázku, měnu, provider, `payId` a vratný limit služba vždy znovu odvodí z
+autoritativní uložené platby a vypořádání zakázky. CardTopUp ani kreditní zakázka
+touto cestou podporovány nejsou.
 
 `SettlementReturn` a jeho Reverse provider attempt se nejdřív v jedné databázové
 transakci uloží jako `InProgress`. Teprve po commitu smí první oprávněný request
@@ -243,10 +243,25 @@ nepublikuje jednoznačnou strojově čitelnou `statusDetail` hodnotu dokazujíc�
 refund, kterou by současný response model mohl bezpečně ověřit.
 
 Administrátorský přehled načítá provider-neutral stav existující vratky a
-rozlišuje dokončený Reverse, zpracovávaný Refund, dokončený Refund a stav
+zobrazuje historii jednotlivých částek, zbývající bezpečně rezervovatelnou
+částku a rozlišuje dokončený Reverse, zpracovávaný Refund, dokončený Refund a stav
 vyžadující pozornost včetně předem existující providerové vratky. Aktivní
 `InProgress` / `Uncertain` attempt nabídne jen stavové ověření s původním
 uloženým request ID. Žádný replay nenabídne nový Reverse ani druhý Refund PUT.
+
+Partial refund má vlastní `SettlementReturn` a jediný request-bound Refund
+attempt. Před PUT služba v databázové transakci zamkne autoritativní job a
+rezervuje částku. Do kumulativního limitu se počítají `Requested`, `InProgress`,
+`RequiresAttention` a `Completed`; pouze definitivně `Rejected` se uvolní.
+Stejné pořadí zámků brání oversubscription při souběhu. Částka musí být kladná a
+podle veřejného kontraktu přísně menší než zbývající rozdíl; stejný `RequestId`
+s jinou částkou je konflikt.
+
+Čerstvá podepsaná přímá odpověď partial PUT `0/10` potvrzuje právě odeslanou
+částku, `0/9` znamená processing. Po nejasném výsledku je replay status-only.
+Status 10 z pozdějšího `payment/status` bez publikovaného machine-readable
+důkazu konkrétní partial operaci nepotvrdí. Po existující partial vratce se plný
+refund bez `amount` neposílá, protože by mohl překročit zbytek.
 
 ## Protokolová hranice payment/refund
 
@@ -257,12 +272,11 @@ stejným HTTP, RSA/SHA-256, freshness a fail-closed ověřením jako ostatní
 gateway operace a vrací strukturovaný protokolový výsledek včetně volitelných
 `authCode` a `statusDetail`.
 
-CardJob aplikační orchestrace tuto hranici používá pouze pro výše popsaný plný
-refund po bezpečně prokázaném stavu 8. Samotný HTTP 200 není autorita; služba
-pracuje jen s výsledkem po RSA/SHA-256, freshness a `payId` ověření. Částečné a
-opakované refundy, jejich kumulativní limit, CardTopUp návrat a automatické
-rozlišení plného/částečného návratu při status-only recovery zůstávají
-neimplementované.
+CardJob aplikační orchestrace tuto hranici používá pro výše popsaný plný refund
+po bezpečně prokázaném stavu 8 i pro přímo zahájené partial refundy s částkou.
+Samotný HTTP 200 není autorita; služba pracuje jen s výsledkem po RSA/SHA-256,
+freshness a `payId` ověření. CardTopUp návrat a automatické rozlišení konkrétního
+plného/částečného návratu při status-only recovery zůstávají neimplementované.
 
 ## Známé implementační mezery před production readiness
 
@@ -282,10 +296,11 @@ krytá implementací: `PaymentSettlementService.CompleteAsync()` nad již
 opakovaný i concurrent ČSOB settlement s právě jedním pohybem/dokumentem nebo
 job settlementem. Tato evidence nenahrazuje chybějící fresh live provider replay.
 
-Plný CardJob Refund je implementovaný v aplikaci včetně durabilního attemptu,
-status-only recovery, auditu a admin UI, ale nebyl ověřen živým gateway testem.
-Částečný/opakovaný refund, CardTopUp návrat a jednoznačná recovery plného refundu
-ze samotného statusu 10 zůstávají samostatnými mezerami. Refund navíc není
+Plný i částečný/opakovaný CardJob Refund je implementovaný v aplikaci včetně
+durabilního attemptu, kumulativní rezervace, status-only recovery, auditu a admin
+UI, ale nebyl ověřen živým gateway testem. CardTopUp návrat a jednoznačná
+recovery konkrétního refundu ze samotného statusu 10 zůstávají samostatnými
+mezerami. Refund navíc není
 součástí povinného ČSOB production-activation checklistu; tento lokálně
 otestovaný slice proto sám o sobě nedokládá production readiness ani bankovní
 acceptance.

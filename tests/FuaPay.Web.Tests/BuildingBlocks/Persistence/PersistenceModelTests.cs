@@ -375,11 +375,11 @@ public sealed class PersistenceModelTests
                 (
                     "uq_payments_settlement_returns_original_payment",
                     ["OriginalPaymentId"],
-                    "original_payment_id IS NOT NULL"),
+                    "original_payment_id IS NOT NULL AND kind = 3"),
                 (
                     "uq_payments_settlement_returns_job",
                     ["JobId"],
-                    "job_id IS NOT NULL")
+                    "job_id IS NOT NULL AND kind = 2")
             ];
 
         foreach (var expected in expectedUniqueIndexes)
@@ -394,6 +394,25 @@ public sealed class PersistenceModelTests
                         .Select(property => property.Name)
                         .SequenceEqual(expected.Properties));
         }
+
+        Assert.Contains(
+            entityType.GetIndexes(),
+            index =>
+                !index.IsUnique &&
+                index.GetDatabaseName() ==
+                    "ix_payments_settlement_returns_card_job_payment" &&
+                index.GetFilter() == "kind = 1" &&
+                index.Properties.Select(property => property.Name)
+                    .SequenceEqual(["OriginalPaymentId", "State"]));
+        Assert.Contains(
+            entityType.GetIndexes(),
+            index =>
+                !index.IsUnique &&
+                index.GetDatabaseName() ==
+                    "ix_payments_settlement_returns_card_job_job" &&
+                index.GetFilter() == "kind = 1" &&
+                index.Properties.Select(property => property.Name)
+                    .SequenceEqual(["JobId"]));
 
         var foreignKey = Assert.Single(entityType.GetForeignKeys());
 

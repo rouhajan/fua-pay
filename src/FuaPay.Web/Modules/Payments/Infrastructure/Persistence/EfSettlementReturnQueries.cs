@@ -17,7 +17,9 @@ internal sealed class EfSettlementReturnQueries : ISettlementReturnQueries
     }
 
     public async Task<
-        IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>>
+        IReadOnlyDictionary<
+            Guid,
+            IReadOnlyList<SettlementReturnAdministrationItem>>>
         FindByOriginalPaymentIdsAsync(
             IEnumerable<Guid> originalPaymentIds,
             CancellationToken cancellationToken = default)
@@ -39,7 +41,7 @@ internal sealed class EfSettlementReturnQueries : ISettlementReturnQueries
         {
             return new Dictionary<
                 Guid,
-                SettlementReturnAdministrationItem>();
+                IReadOnlyList<SettlementReturnAdministrationItem>>();
         }
 
         var returns = await _dbContext.SettlementReturns
@@ -53,8 +55,10 @@ internal sealed class EfSettlementReturnQueries : ISettlementReturnQueries
                 item.RequestId,
                 item.Kind,
                 OriginalPaymentId = item.OriginalPaymentId!.Value,
+                item.AmountMinorUnits,
                 item.State,
-                item.Reason
+                item.Reason,
+                item.RequestedAt
             })
             .ToArrayAsync(cancellationToken);
 
@@ -89,24 +93,33 @@ internal sealed class EfSettlementReturnQueries : ISettlementReturnQueries
                         (int)SettlementReturnProviderAttemptState.Uncertain)
                     ?? group.First());
 
-        return returns.ToDictionary(
-            item => item.OriginalPaymentId,
-            item =>
-            {
-                var attempt = providerAttemptsByReturn.GetValueOrDefault(
-                    item.Id);
-                return new SettlementReturnAdministrationItem(
-                    item.Id,
-                    item.RequestId,
-                    (SettlementReturnKind)item.Kind,
-                    item.OriginalPaymentId,
-                    (SettlementReturnState)item.State,
-                    item.Reason,
-                    attempt?.Id,
-                    (PaymentProvider?)attempt?.Provider,
-                    (SettlementReturnProviderOperation?)attempt?.Operation,
-                    (SettlementReturnProviderAttemptState?)attempt?.State,
-                    attempt?.Diagnostic);
-            });
+        return returns
+            .GroupBy(item => item.OriginalPaymentId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<SettlementReturnAdministrationItem>)
+                    group
+                        .OrderByDescending(item => item.RequestedAt)
+                        .ThenByDescending(item => item.Id)
+                        .Select(item =>
+                        {
+                            var attempt = providerAttemptsByReturn
+                                .GetValueOrDefault(item.Id);
+                            return new SettlementReturnAdministrationItem(
+                                item.Id,
+                                item.RequestId,
+                                (SettlementReturnKind)item.Kind,
+                                item.OriginalPaymentId,
+                                item.AmountMinorUnits,
+                                (SettlementReturnState)item.State,
+                                item.Reason,
+                                item.RequestedAt,
+                                attempt?.Id,
+                                (PaymentProvider?)attempt?.Provider,
+                                (SettlementReturnProviderOperation?)attempt?.Operation,
+                                (SettlementReturnProviderAttemptState?)attempt?.State,
+                                attempt?.Diagnostic);
+                        })
+                        .ToArray());
     }
 }

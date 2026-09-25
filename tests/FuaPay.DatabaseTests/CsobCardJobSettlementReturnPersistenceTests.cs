@@ -323,7 +323,7 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
                 var existing = await readScope.ServiceProvider
                     .GetRequiredService<ISettlementReturnQueries>()
                     .FindByOriginalPaymentIdsAsync([scenario.PaymentId]);
-                var item = Assert.Single(existing).Value;
+                var item = Assert.Single(Assert.Single(existing).Value);
 
                 Assert.Equal(command.OperationId, item.RequestId);
                 Assert.Equal(
@@ -366,10 +366,194 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
             var completed = await verifyScope.ServiceProvider
                 .GetRequiredService<ISettlementReturnQueries>()
                 .FindByOriginalPaymentIdsAsync([scenario.PaymentId]);
-            var completedItem = Assert.Single(completed).Value;
+            var completedItem = Assert.Single(
+                Assert.Single(completed).Value);
             Assert.Equal(command.OperationId, completedItem.RequestId);
             Assert.True(completedItem.IsCompletedReverse);
             Assert.False(completedItem.CanRecoverProviderAttempt);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(scenario);
+        }
+    }
+
+    [Fact]
+    public async Task SequentialPartialRefundsPersistSeparateHistoryBelowCeiling()
+    {
+        var scenario = await SeedScenarioAsync();
+        var gateway = new PartialRefundGateway();
+        var first = new CardJobPartialRefundCommand(
+            Guid.NewGuid(),
+            scenario.PaymentId,
+            Guid.NewGuid(),
+            2_500,
+            "First partial refund");
+        var second = first with
+        {
+            OperationId = Guid.NewGuid(),
+            AmountMinorUnits = 3_000,
+            Reason = "Second partial refund"
+        };
+
+        try
+        {
+            await RunPartialAsync(first, gateway);
+            await RunPartialAsync(second, gateway);
+
+            Assert.Equal([2_500L, 3_000L], gateway.Amounts);
+            using var scope = _factory.Services.CreateScope();
+            var returns = await scope.ServiceProvider
+                .GetRequiredService<ISettlementReturnRepository>()
+                .ListByOriginalPaymentIdAsync(scenario.PaymentId);
+            Assert.Equal(2, returns.Count);
+            Assert.All(
+                returns,
+                item => Assert.Equal(
+                    SettlementReturnState.Completed,
+                    item.State));
+            Assert.Equal(5_500, returns.Sum(item => item.Amount.MinorUnits));
+
+            var projected = await scope.ServiceProvider
+                .GetRequiredService<ISettlementReturnQueries>()
+                .FindByOriginalPaymentIdsAsync([scenario.PaymentId]);
+            Assert.Equal(2, Assert.Single(projected).Value.Count);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(scenario);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentPartialRefundsCannotOversubscribe()
+    {
+        var scenario = await SeedScenarioAsync();
+        var gateway = new BlockingPartialRefundGateway();
+        var first = new CardJobPartialRefundCommand(
+            Guid.NewGuid(),
+            scenario.PaymentId,
+            Guid.NewGuid(),
+            7_000,
+            "First concurrent partial refund");
+        var second = first with
+        {
+            OperationId = Guid.NewGuid(),
+            Reason = "Second concurrent partial refund"
+        };
+        Task<CardJobSettlementReturnResult>? firstTask = null;
+
+        try
+        {
+            firstTask = RunPartialAsync(first, gateway);
+            await gateway.WaitUntilRefundStartedAsync();
+
+            var exception = await Assert.ThrowsAsync<
+                CardJobPartialRefundAmountException>(() =>
+                RunPartialAsync(second, gateway));
+            Assert.Equal(5_500, exception.RemainingMinorUnits);
+            Assert.Equal(1, gateway.RefundCalls);
+
+            gateway.ReleaseRefund();
+            var result = await firstTask;
+            Assert.Equal(
+                CardJobSettlementReturnOutcome.PartialRefundCompleted,
+                result.Outcome);
+
+            using var scope = _factory.Services.CreateScope();
+            var returns = await scope.ServiceProvider
+                .GetRequiredService<ISettlementReturnRepository>()
+                .ListByOriginalPaymentIdAsync(scenario.PaymentId);
+            Assert.Single(returns);
+            Assert.Equal(7_000, returns[0].Amount.MinorUnits);
+        }
+        finally
+        {
+            gateway.ReleaseRefund();
+            if (firstTask is { IsCompleted: false })
+            {
+                await firstTask;
+            }
+
+            await DeleteScenarioAsync(scenario);
+        }
+    }
+
+    [Fact]
+    public async Task UncertainPartialAmountRemainsReservedAndReplayIsStatusOnly()
+    {
+        var scenario = await SeedScenarioAsync();
+        var ambiguousGateway = new PartialRefundGateway(
+            refundException: new HttpRequestException("ambiguous"));
+        var command = new CardJobPartialRefundCommand(
+            Guid.NewGuid(),
+            scenario.PaymentId,
+            Guid.NewGuid(),
+            7_000,
+            "Ambiguous partial refund");
+
+        try
+        {
+            await RunPartialAsync(command, ambiguousGateway);
+            var replayGateway = new PartialRefundGateway(
+                statusPaymentStatus: 10);
+            var replay = await RunPartialAsync(command, replayGateway);
+
+            Assert.Equal(
+                CardJobSettlementReturnOutcome.RequiresAttention,
+                replay.Outcome);
+            Assert.Empty(replayGateway.Amounts);
+            Assert.Equal(1, replayGateway.StatusCalls);
+
+            var exceeding = command with
+            {
+                OperationId = Guid.NewGuid(),
+                AmountMinorUnits = 5_500,
+                Reason = "Must remain blocked"
+            };
+            await Assert.ThrowsAsync<CardJobPartialRefundAmountException>(() =>
+                RunPartialAsync(exceeding, new PartialRefundGateway()));
+        }
+        finally
+        {
+            await DeleteScenarioAsync(scenario);
+        }
+    }
+
+    [Theory]
+    [InlineData(SettlementReturnState.Rejected, true)]
+    [InlineData(SettlementReturnState.Completed, false)]
+    public async Task TerminalPartialAccountingUsesOnlySafeReleasedAmount(
+        SettlementReturnState state,
+        bool succeeds)
+    {
+        var scenario = await SeedScenarioAsync();
+        await SeedPartialReturnAsync(scenario, 7_000, state);
+        var gateway = new PartialRefundGateway();
+        var command = new CardJobPartialRefundCommand(
+            Guid.NewGuid(),
+            scenario.PaymentId,
+            Guid.NewGuid(),
+            7_000,
+            "Accounting probe");
+
+        try
+        {
+            if (succeeds)
+            {
+                var result = await RunPartialAsync(command, gateway);
+                Assert.Equal(
+                    CardJobSettlementReturnOutcome.PartialRefundCompleted,
+                    result.Outcome);
+                Assert.Equal([7_000L], gateway.Amounts);
+            }
+            else
+            {
+                await Assert.ThrowsAsync<
+                    CardJobPartialRefundAmountException>(() =>
+                    RunPartialAsync(command, gateway));
+                Assert.Empty(gateway.Amounts);
+            }
         }
         finally
         {
@@ -384,6 +568,81 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
         using var scope = _factory.Services.CreateScope();
         return await CreateService(scope.ServiceProvider, gateway)
             .ReturnAsync(command);
+    }
+
+    private async Task<CardJobSettlementReturnResult> RunPartialAsync(
+        CardJobPartialRefundCommand command,
+        ICsobGatewayClient gateway)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await CreateService(scope.ServiceProvider, gateway)
+            .PartialRefundAsync(command);
+    }
+
+    private async Task SeedPartialReturnAsync(
+        Scenario scenario,
+        long amountMinorUnits,
+        SettlementReturnState state)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var services = scope.ServiceProvider;
+        var returnRepository = services.GetRequiredService<
+            ISettlementReturnRepository>();
+        var attemptRepository = services.GetRequiredService<
+            ISettlementReturnProviderAttemptRepository>();
+        var transaction = services.GetRequiredService<IApplicationTransaction>();
+        var requestId = Guid.NewGuid();
+
+        await transaction.ExecuteAsync(async cancellationToken =>
+        {
+            var settlementReturn = new SettlementReturn(
+                Guid.NewGuid(),
+                requestId,
+                SettlementReturnKind.CardJob,
+                scenario.PaymentId,
+                scenario.JobId,
+                scenario.CustomerUserId,
+                Guid.NewGuid(),
+                new Money(amountMinorUnits),
+                "Seeded terminal partial refund",
+                TestTime.AddMinutes(-2));
+            settlementReturn.Begin(TestTime.AddMinutes(-1));
+            if (state == SettlementReturnState.Completed)
+            {
+                settlementReturn.Complete(TestTime);
+            }
+            else if (state == SettlementReturnState.Rejected)
+            {
+                settlementReturn.Reject(TestTime);
+            }
+            else
+            {
+                throw new ArgumentOutOfRangeException(nameof(state));
+            }
+
+            await returnRepository.AddAsync(
+                settlementReturn,
+                cancellationToken);
+            var attempt = new SettlementReturnProviderAttempt(
+                requestId,
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Refund,
+                scenario.PayId,
+                TestTime.AddMinutes(-2));
+            attempt.Begin(TestTime.AddMinutes(-1));
+            if (state == SettlementReturnState.Completed)
+            {
+                attempt.Confirm(TestTime);
+            }
+            else
+            {
+                attempt.Reject("Definitively rejected test refund", TestTime);
+            }
+
+            await attemptRepository.AddAsync(attempt, cancellationToken);
+            return true;
+        });
     }
 
     private static CsobCardJobSettlementReturnService CreateService(
@@ -796,6 +1055,145 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
                 AuthCode: "TEST",
                 StatusDetail: null));
         }
+
+        public Task<CsobEchoResult> EchoAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobEchoResult> EchoPostAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobPaymentInitResult> InitializeAsync(
+            CsobPaymentInit payment,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class PartialRefundGateway : ICsobGatewayClient
+    {
+        private readonly Exception? _refundException;
+        private readonly int _statusPaymentStatus;
+        private int _statusCalls;
+
+        public PartialRefundGateway(
+            Exception? refundException = null,
+            int statusPaymentStatus = 8)
+        {
+            _refundException = refundException;
+            _statusPaymentStatus = statusPaymentStatus;
+        }
+
+        public List<long> Amounts { get; } = [];
+
+        public int StatusCalls => Volatile.Read(ref _statusCalls);
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.True(amountMinorUnits.HasValue);
+            lock (Amounts)
+            {
+                Amounts.Add(amountMinorUnits.Value);
+            }
+
+            return _refundException is null
+                ? Task.FromResult(new CsobPaymentRefundResult(
+                    payId,
+                    0,
+                    "OK",
+                    10,
+                    AuthCode: "TEST",
+                    StatusDetail: null))
+                : Task.FromException<CsobPaymentRefundResult>(
+                    _refundException);
+        }
+
+        public Task<CsobPaymentStatusResult> GetStatusAsync(
+            string payId,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _statusCalls);
+            return Task.FromResult(new CsobPaymentStatusResult(
+                payId,
+                0,
+                "OK",
+                _statusPaymentStatus,
+                AuthCode: null,
+                StatusDetail: null));
+        }
+
+        public Task<CsobPaymentReverseResult> ReverseAsync(
+            string payId,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException(
+                "Partial refunds must not issue payment/reverse.");
+
+        public Task<CsobEchoResult> EchoAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobEchoResult> EchoPostAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobPaymentInitResult> InitializeAsync(
+            CsobPaymentInit payment,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class BlockingPartialRefundGateway : ICsobGatewayClient
+    {
+        private readonly TaskCompletionSource _refundStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseRefund =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _refundCalls;
+
+        public int RefundCalls => Volatile.Read(ref _refundCalls);
+
+        public Task WaitUntilRefundStartedAsync(
+            CancellationToken cancellationToken = default) =>
+            _refundStarted.Task.WaitAsync(
+                TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+        public void ReleaseRefund() => _releaseRefund.TrySetResult();
+
+        public async Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(1, Interlocked.Increment(ref _refundCalls));
+            Assert.Equal(7_000, amountMinorUnits);
+            _refundStarted.TrySetResult();
+            await _releaseRefund.Task.WaitAsync(
+                TimeSpan.FromSeconds(10),
+                cancellationToken);
+            return new CsobPaymentRefundResult(
+                payId,
+                0,
+                "OK",
+                10,
+                AuthCode: "TEST",
+                StatusDetail: null);
+        }
+
+        public Task<CsobPaymentStatusResult> GetStatusAsync(
+            string payId,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException(
+                "A new partial refund must not use status recovery.");
+
+        public Task<CsobPaymentReverseResult> ReverseAsync(
+            string payId,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException(
+                "Partial refunds must not issue payment/reverse.");
 
         public Task<CsobEchoResult> EchoAsync(
             CancellationToken cancellationToken = default) =>

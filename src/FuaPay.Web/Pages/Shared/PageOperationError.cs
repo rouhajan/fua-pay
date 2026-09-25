@@ -72,6 +72,7 @@ public static class PageOperationError
             BlockingJobPaymentAlreadyExistsException or
             CardJobSettlementReturnNotAvailableException or
             CardJobSettlementReturnNotAllowedException or
+            CardJobPartialRefundAmountException or
             CardJobSettlementReturnStateInconsistentException or
             CardJobSettlementReturnSafetyStateException or
             SettlementReturnRequestConflictException or
@@ -184,8 +185,9 @@ public static class PageOperationError
             CardJobSettlementReturnNotAvailableException =>
                 "Karetní vratky nyní nejsou dostupné.",
             CardJobSettlementReturnNotAllowedException or
+            CardJobPartialRefundAmountException or
             SettlementReturnProviderAttemptNotAllowedException =>
-                "Tuto karetní vratku nelze provést.",
+                "Požadovanou částku karetní vratky nelze bezpečně provést.",
             SettlementReturnRequestConflictException or
             SettlementReturnSourceConflictException or
             SettlementReturnProviderAttemptAlreadyActiveException or
