@@ -296,3 +296,49 @@ Pokus source A číst nebo měnit rezervaci source B se navenek chová jako
 `reservation_not_found`, aby neprozrazoval existenci cizí rezervace. Neočekávané
 chyby nejsou převáděny broad catchem na business 4xx; zůstávají standardní 500
 bez stack trace a citlivých detailů v response.
+
+
+## Handoff checkpoint po platební acceptance 2026-09-25
+
+Fresh ČSOB/payment acceptance release
+`e84d851a31083a67f947e4d83b1ff37d2e5871e6` neměnil PrintPayments API ani
+persistentní PrintCredentials kontrakt. Během celého payment okna zůstaly:
+
+```text
+PrintPayments__Enabled=false
+PrintCredentials__Enabled=false
+```
+
+FUA Pay strana Print kontraktu je tedy stále oddělená od právě dokončené ČSOB
+acceptance a nebyla jejím průchodem aktivována.
+
+Bezpečný handoff do samostatného FUA Print acceptance okna nastane až po
+kanonickém closeoutu payment okna:
+
+- `Pending=0`;
+- due ČSOB reconciliation `=0`;
+- aktivní staging env bitově vrácen na fail-closed baseline;
+- `fuapay-staging.service` zastavený a disabled;
+- dočasný UFW allow pro `:8443` odstraněný;
+- `127.0.0.1:5081` neposlouchá;
+- Production health/current/env/Nginx/301 guard beze změny.
+
+Poté se smí otevřít nový krátký izolovaný Print staging window nad stejným
+`fuapay_staging` a staging HTTPS edge. V něm se zapnou pouze potřebné
+PrintPayments/PrintCredentials flagy a secrets; ČSOB se kvůli Print acceptance
+nemusí zapínat.
+
+Cílový fresh end-to-end důkaz je:
+
+1. zákazník v FUA Pay nastaví trvalý šestimístný tiskový kód;
+2. FUA Print se autentizuje service bearer credentialem;
+3. held print job použije credential reserve cestu s aktuálním e-mailem + PIN;
+4. rezervace sníží disponibilní kredit, ale nevytvoří ledger debit;
+5. fyzický výsledek tisku vede právě jednou do `Capture`, `Release` nebo
+   `ResolutionRequired`;
+6. úspěšný fyzický tisk vytvoří právě jeden debit, žádný duplicate debit;
+7. ztracená/nejednoznačná odpověď se řeší read-only lookupem podle `jobUuid`
+   před případným replayem mutation.
+
+ČSOB acceptance sama o sobě není důkazem FUA Print end-to-end PASS; Print window
+má vlastní evidence a closeout.
