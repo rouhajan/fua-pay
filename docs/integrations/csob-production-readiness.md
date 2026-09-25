@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-24
+Status: 2026-09-25
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu až k bezpečné aktivaci produkčního ČSOB provozu. Není checklistem prvního
@@ -163,15 +163,16 @@ hardening z PR #44 byl po předchozím incidentu samostatně live-accepted
 uzavření byl aktivní `staging.env` vrácen na `Payments__Provider=None` a
 `Csob__Enabled=false`.
 
-Stage 3 ukládá `SettlementReturn` i Reverse attempt jako `InProgress` před
-externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy PUT
-mohl odejít, je každý replay/restart pouze statusový. Administrace pro recovery
-použije původní uložené request ID a po dokončení, zamítnutí nebo při
-nekonzistentním stavu nový reverse nenabídne. Přímá odpověď reverse rozlišuje
-`0/5`, dokumentované `150` s nereverzibilním stavem a všechny ostatní
-fail-closed kombinace; úspěšné statusové recovery `0/8`, `0/9` nebo `0/10`
-je samostatná autoritativní hranice. Živý reverse scénář byl na stagingu ověřen
-2026-09-12 výsledkem `0/5`.
+Stage 3 + R2 ukládá `SettlementReturn` i provider attempt jako `InProgress`
+před externím PUT a nepřenáší databázovou transakci přes HTTP. Po okamžiku, kdy
+Reverse nebo Refund PUT mohl odejít, je replay/restart pouze statusový a stejný
+externí PUT se automaticky neposílá podruhé. Přímé Reverse `0/5` vratku dokončí;
+přímé `150/8` nebo status-only `0/8` definitivně uzavře Reverse a po commitu
+spustí jeden plný Refund bez pole `amount`. Stav 9 nebo 10 zjištěný ještě před
+vlastním Refundem znamená attention/reconciliation bez Refund PUT. Přímé Refund
+`0/10` dokončí právě odeslaný plný refund, zatímco `0/9` zůstává processing a
+další průchod je status-only. Živý Reverse scénář byl na stagingu ověřen
+2026-09-12 výsledkem `0/5`; živý Refund scénář zatím ověřen nebyl.
 
 ### Rozhodnutí po production-hardening auditu 2026-09-23
 
@@ -366,9 +367,20 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
      fakt, že FUA Pay neukládá číslo karty ani CVC;
    - doplnit pouze oficiální schválená loga sjednaných platebních služeb/karetních
      schémat.
-3. Dokončit production-grade returns scope z
-   [payment-returns.md](../features/payment-returns.md), zejména refund a
-   CardTopUp návrat nevyčerpaného kreditu.
+3. Production-grade returns scope z
+   [payment-returns.md](../features/payment-returns.md):
+   - [x] R2 CardJob plná vratka Reverse → full Refund je implementovaná v
+     `58173deabc396a2d428d265a015477e22ac28195`. Přímé `150/8` nebo
+     status-only `0/8` vede po durabilním uzavření Reverse k jednomu plnému
+     `payment/refund` bez `amount`; nejasný výsledek se nereplayuje druhým PUT
+     a recovery je status-only. Před commitem prošel focused PostgreSQL gate
+     17/17, oba concurrency scénáře 20/20 + 20/20 a canonical
+     `scripts/verify.ps1 -RunDatabaseTests` včetně PostgreSQL 291/291. Živý
+     gateway Refund scénář zatím nebyl proveden a zůstává v kroku 7.
+   - [ ] R3: částečné a opakované CardJob refundy včetně kumulativního limitu a
+     odpovídající perzistence/recovery.
+   - [ ] R4: CardTopUp návrat nevyčerpaného kreditu na původní kartu s
+     `CreditReturnHold` a přesně-jednou consume/release lifecyclem.
 4. Doplnit samostatný účetní/reconciliation export pro párování s centrálním
    ČSOB výpisem. Minimální párovací pole: `orderNo`, `payId`, FUA payment ID,
    datum, částka, měna, účel, job number/service unit, finanční dokument a
@@ -428,6 +440,27 @@ Tento checkpoint nedokládá nový deployment ani nový live ČSOB test. Neměn�
 pořadí ani zbývající rozsah kroků 2–11 a není produkční GO. Issue #37 zůstává
 otevřené; refund, CardTopUp návrat kreditu, účetní export a zbývající acceptance
 se tímto dokumentačním krokem neoznačují jako hotové.
+
+### Repository checkpoint 2026-09-25 — R2 CardJob full Refund
+
+Commit `58173deabc396a2d428d265a015477e22ac28195` dokončuje pouze R2 plný
+CardJob tok Reverse → Refund. Před commitem byl finální patch nezávisle
+reviewovaný a staged obsah byl SHA-256 totožný s reviewovaným patchem
+`DF7CF2FDF56F4FFACF6604D25577C24BDEEEA013C3C99716E3732BEA08D780AD`.
+Focused PostgreSQL gate skončil 17/17, oba cílené concurrency soak scénáře
+20/20 + 20/20 a canonical `scripts/verify.ps1 -RunDatabaseTests` skončil
+`Ověření FUA Pay prošlo.` s PostgreSQL sadou 291/291.
+
+Během této implementace byl reprodukován timing-dependent same-attempt
+concurrency defekt v existující provider-attempt službě. Oprava sjednotila
+pre-check s existujícím replay chováním: stejný attempt ID se vrací jako replay,
+jiný aktivní attempt zůstává konflikt. Deterministický regresní test i reálný
+PostgreSQL concurrency soak po opravě prošly.
+
+Tento checkpoint neznamená deployment ani live ČSOB Refund PASS. R3
+částečné/opakované refundy, R4 CardTopUp návrat, veřejné právní stránky,
+účetní/reconciliation export, Entra logout, zbývající hardening a finální fresh
+staging acceptance zůstávají otevřené před produkčním GO.
 
 ## F. Historický přechodný staging release/deploy gate
 
