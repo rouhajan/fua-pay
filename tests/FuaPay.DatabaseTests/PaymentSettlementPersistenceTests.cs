@@ -15,6 +15,7 @@ using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Notifications.Application;
 using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Domain;
+using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
 using FuaPay.Web.Modules.ServiceUnits.Application;
 using FuaPay.Web.Modules.ServiceUnits.Domain;
 
@@ -706,6 +707,124 @@ public sealed class PaymentSettlementPersistenceTests :
     }
 
     [Fact]
+    public async Task ReconcileAlreadySucceededStatus7_DoesNotRepeatTopUpEffects()
+    {
+        var customerUserId = Guid.NewGuid();
+        var payment = CreateCsobTopUp(customerUserId);
+        var payId = Guid.NewGuid().ToString("N")[..15];
+
+        try
+        {
+            await AddCustomerAsync(customerUserId);
+            await AddCsobPaymentAsync(payment, payId);
+
+            using (var settlementScope = _factory.Services.CreateScope())
+            {
+                Assert.True(await settlementScope.ServiceProvider
+                    .GetRequiredService<IPaymentSettlementService>()
+                    .CompleteAsync(CreateConfirmation(payment)));
+            }
+
+            var movementsBefore = await CountCreditMovementsAsync(
+                customerUserId);
+            var documentsBefore = await CountDocumentsAsync(payment.Id);
+            var gateway = new StatusOnlyCsobGateway(payId, paymentStatus: 7);
+
+            CsobPaymentReconciliationResult result;
+            using (var reconciliationScope = _factory.Services.CreateScope())
+            {
+                result = await CreateReconciliationService(
+                    reconciliationScope.ServiceProvider,
+                    gateway).ReconcileAsync(payment.Id, payId);
+            }
+
+            Assert.Equal(PaymentStatus.Succeeded, result.PaymentStatus);
+            Assert.Equal(7, result.GatewayPaymentStatus);
+            Assert.False(result.StateChanged);
+            Assert.Equal(1, gateway.StatusCalls);
+            Assert.Equal(0, gateway.MutationCalls);
+            Assert.Equal(
+                movementsBefore,
+                await CountCreditMovementsAsync(customerUserId));
+            Assert.Equal(
+                documentsBefore,
+                await CountDocumentsAsync(payment.Id));
+            Assert.Equal(1, movementsBefore);
+            Assert.Equal(1, documentsBefore);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(
+                customerUserId,
+                payment.Id,
+                jobId: null);
+        }
+    }
+
+    [Fact]
+    public async Task ReconcileAlreadySucceededStatus8_DoesNotRepeatJobEffects()
+    {
+        var customerUserId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var serviceUnitId = Guid.NewGuid();
+        var payment = CreateCsobJobPayment(customerUserId, jobId);
+        var payId = Guid.NewGuid().ToString("N")[..15];
+
+        try
+        {
+            await AddCustomerAsync(customerUserId);
+            await AddServiceUnitAsync(serviceUnitId);
+            await AddPublishedJobAsync(
+                customerUserId,
+                jobId,
+                payment.Amount,
+                serviceUnitId);
+            await AddCsobPaymentAsync(payment, payId);
+
+            using (var settlementScope = _factory.Services.CreateScope())
+            {
+                Assert.True(await settlementScope.ServiceProvider
+                    .GetRequiredService<IPaymentSettlementService>()
+                    .CompleteAsync(CreateConfirmation(payment)));
+            }
+
+            var settledBefore = await FindJobAsync(jobId);
+            var documentsBefore = await CountDocumentsAsync(payment.Id);
+            var gateway = new StatusOnlyCsobGateway(payId, paymentStatus: 8);
+
+            CsobPaymentReconciliationResult result;
+            using (var reconciliationScope = _factory.Services.CreateScope())
+            {
+                result = await CreateReconciliationService(
+                    reconciliationScope.ServiceProvider,
+                    gateway).ReconcileAsync(payment.Id, payId);
+            }
+
+            var settledAfter = await FindJobAsync(jobId);
+            Assert.Equal(PaymentStatus.Succeeded, result.PaymentStatus);
+            Assert.Equal(8, result.GatewayPaymentStatus);
+            Assert.False(result.StateChanged);
+            Assert.Equal(1, gateway.StatusCalls);
+            Assert.Equal(0, gateway.MutationCalls);
+            Assert.Equal(JobPaymentStatus.Paid, settledAfter.PaymentStatus);
+            Assert.Equal(payment.Id, settledAfter.SettlementReferenceId);
+            Assert.Equal(settledBefore.SettledAt, settledAfter.SettledAt);
+            Assert.Equal(
+                documentsBefore,
+                await CountDocumentsAsync(payment.Id));
+            Assert.Equal(1, documentsBefore);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(
+                customerUserId,
+                payment.Id,
+                jobId,
+                serviceUnitId);
+        }
+    }
+
+    [Fact]
     public async Task CompleteAsync_ConcurrentCsobJobIssuesOneDocument()
     {
         var customerUserId = Guid.NewGuid();
@@ -1103,7 +1222,8 @@ public sealed class PaymentSettlementPersistenceTests :
 
     private async Task<long> AddCsobPaymentAsync(
         Payment payment,
-        bool initializeInitiation = true)
+        bool initializeInitiation = true,
+        string? providerReference = null)
     {
         using var scope = _factory.Services.CreateScope();
         var services = scope.ServiceProvider;
@@ -1126,12 +1246,35 @@ public sealed class PaymentSettlementPersistenceTests :
         var repository = services.GetRequiredService<IPaymentRepository>();
         await repository.AddPreparedAsync(payment, initiation);
         payment.MarkPending(
-            $"CSOB-SETTLEMENT-{Guid.NewGuid():N}",
+            providerReference ?? $"CSOB-SETTLEMENT-{Guid.NewGuid():N}",
             TestTime.AddMinutes(3));
         await repository.SaveAsync(payment);
 
         return orderNumber;
     }
+
+    private Task<long> AddCsobPaymentAsync(
+        Payment payment,
+        string providerReference) =>
+        AddCsobPaymentAsync(
+            payment,
+            initializeInitiation: true,
+            providerReference);
+
+    private static CsobPaymentReconciliationService
+        CreateReconciliationService(
+            IServiceProvider services,
+            ICsobGatewayClient gateway) =>
+        new(
+            gateway,
+            services.GetRequiredService<IPaymentRepository>(),
+            services.GetRequiredService<IPaymentInitiationRepository>(),
+            services.GetRequiredService<ICsobVerifiedReturnEvidenceReader>(),
+            services.GetRequiredService<ICsobExpiryCorrectionGuard>(),
+            services.GetRequiredService<IPaymentSettlementService>(),
+            services.GetRequiredService<IApplicationTransaction>(),
+            services.GetRequiredService<TimeProvider>(),
+            services.GetRequiredService<IAuditTrail>());
 
     private async Task AddServiceUnitAsync(
         Guid serviceUnitId,
@@ -1335,6 +1478,33 @@ public sealed class PaymentSettlementPersistenceTests :
             .SingleAsync();
     }
 
+    private async Task<int> CountCreditMovementsAsync(Guid customerUserId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+
+        return await dbContext.Database.SqlQuery<int>(
+                $"""
+                SELECT count(*)::int AS "Value"
+                FROM credits.movements
+                WHERE account_id IN
+                (
+                    SELECT id FROM credits.accounts
+                    WHERE owner_id = {customerUserId}
+                )
+                """)
+            .SingleAsync();
+    }
+
+    private async Task<Job> FindJobAsync(Guid jobId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return Assert.IsType<Job>(await scope.ServiceProvider
+            .GetRequiredService<IJobRepository>()
+            .FindByIdAsync(jobId, CancellationToken.None));
+    }
+
     private async Task<long> GetFinancialDocumentCounterTotalAsync()
     {
         using var scope = _factory.Services.CreateScope();
@@ -1521,6 +1691,73 @@ public sealed class PaymentSettlementPersistenceTests :
         {
             return _utcNow;
         }
+    }
+
+    private sealed class StatusOnlyCsobGateway : ICsobGatewayClient
+    {
+        private readonly string _payId;
+        private readonly int _paymentStatus;
+
+        public StatusOnlyCsobGateway(string payId, int paymentStatus)
+        {
+            _payId = payId;
+            _paymentStatus = paymentStatus;
+        }
+
+        public int StatusCalls { get; private set; }
+
+        public int MutationCalls { get; private set; }
+
+        public Task<CsobPaymentStatusResult> GetStatusAsync(
+            string payId,
+            CancellationToken cancellationToken = default)
+        {
+            StatusCalls++;
+            Assert.Equal(_payId, payId);
+            return Task.FromResult(new CsobPaymentStatusResult(
+                payId,
+                ResultCode: 0,
+                ResultMessage: "OK",
+                _paymentStatus,
+                AuthCode: "TEST",
+                StatusDetail: null));
+        }
+
+        public Task<CsobPaymentInitResult> InitializeAsync(
+            CsobPaymentInit payment,
+            CancellationToken cancellationToken = default)
+        {
+            MutationCalls++;
+            throw new InvalidOperationException(
+                "Status reconciliation must not initialize a payment.");
+        }
+
+        public Task<CsobPaymentReverseResult> ReverseAsync(
+            string payId,
+            CancellationToken cancellationToken = default)
+        {
+            MutationCalls++;
+            throw new InvalidOperationException(
+                "Status reconciliation must not reverse a payment.");
+        }
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default)
+        {
+            MutationCalls++;
+            throw new InvalidOperationException(
+                "Status reconciliation must not refund a payment.");
+        }
+
+        public Task<CsobEchoResult> EchoAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobEchoResult> EchoPostAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class ThrowingSavePaymentRepository :
