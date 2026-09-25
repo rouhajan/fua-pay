@@ -370,11 +370,12 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
    reklamace/vratky a bezpečné karetní zpracování bez ukládání PAN/CVC.
    Nadále platí:
    - `poverenec@tul.cz` ponechat jako DPO/GDPR kontakt TUL;
-   - provozní/platební kontakt FUA Pay má být `fuapay@tul.cz`, ale před
-     zveřejněním se musí potvrdit, že alias/mailbox skutečně existuje a je
-     monitorovaný;
-   - mailbox `fuapay@tul.cz` nebyl potvrzen, proto nebyl publikován a stávající
-     pravdivý kontakt zůstal zachován;
+   - provozní/platební kontakt FUA Pay je potvrzený a funkční
+     `fuapay@tul.cz`;
+   - aktuální release `e84d851...` má v `/Privacy` stále osobní provozní
+     kontakt `jan.rouha@tul.cz`; před veřejným produkčním spuštěním karet se
+     má tento zdrojový text změnit na potvrzený `fuapay@tul.cz`; `/Terms`
+     odkazuje na `/Privacy` a samostatný provozní kontakt v něm není nutný;
    - schválené platební/karetní logo nebylo v repozitáři doloženo, proto nebylo
      přidáno a tento externí bod zůstává otevřený.
 3. Production-grade returns scope z
