@@ -21,7 +21,7 @@ Historický SafeQ report obsahuje:
 Tento report není finanční autoritou pro aktuální kredit. Historické ceny tisku
 se nesmějí použít jako částka k migraci.
 
-Samostatný pracovní balance export použitý pro návrh procesu obsahuje:
+Jediný finální a neměnný balance export obsahuje:
 
 - 835 řádků a 835 unikátních SafeQ user ID;
 - 834 unikátních loginů;
@@ -36,28 +36,22 @@ SHA-256 tohoto pracovního balance exportu je:
 
 `5305EEFCFE4B2D6DAF86DF11897626B5F2819FE422F33463D9AA53DD5072F6FA`
 
-Tento export je plánovací podklad, nikoli finální produkční finanční autorita.
+Legacy SafeQ je již trvale vypnuté. Tento export je proto jediný finální
+immutable snapshot a finanční autorita pro později samostatně schválené převody.
+Nový freeze ani nový balance export se nevytváří.
 
 Historických 628 SafeQ ID je podmnožinou balance exportu. Balance export navíc
 obsahuje 207 účtů bez nalezené tiskové historie. Migrace proto vychází z
 finálního balance snapshotu, nikoli pouze z historického reportu.
 
-## Finální SafeQ freeze a autoritativní snapshot
+## Autoritativní snapshot
 
-Bezprostředně před produkční migrací musí vzniknout nový finální snapshot:
-
-1. provozně uzavřít používání legacy SafeQ kreditu;
-2. zastavit možnost starý kredit běžně utrácet nebo dobíjet;
-3. až potom vytvořit čerstvý balance export;
-4. spočítat jeho SHA-256;
-5. uložit tento hash jako součást migrační evidence;
-6. všechny skutečné převody provádět výhradně podle tohoto immutable snapshotu.
-
-Pracovní snapshot z vývoje se nesmí bez nového freeze/exportu prohlásit za
-finální produkční autoritu.
-
-Pokud SafeQ nelze během vytvoření snapshotu zmrazit, jednoduchý jednorázový
-cutover nestačí a musí být navržena samostatná delta reconciliation.
+Legacy SafeQ je trvale mrtvé/vypnuté a jeho kredit již nelze utrácet ani dobíjet.
+Žádný budoucí freeze se proto neprovádí a žádný nový export nebude vytvořen.
+Všechny případné skutečné převody musí používat výhradně existující finální
+immutable snapshot se SHA-256
+`5305EEFCFE4B2D6DAF86DF11897626B5F2819FE422F33463D9AA53DD5072F6FA`.
+Tato skutečnost sama o sobě neschvaluje žádný převod ani párování uživatele.
 
 ## Identita a párování
 
@@ -205,20 +199,19 @@ Doporučený postup:
 1. připravit čistou produkční FUA Pay databázi;
 2. otevřít produkci a nechat studenty legitimně vytvářet interní FUA Pay
    Customer identity prvním přihlášením přes Entra;
-3. před finálním SafeQ freeze provádět nanejvýš read-only přípravu kandidátů a
-   párování, bez finančního efektu;
-4. provést finální SafeQ freeze;
-5. vytvořit jediný finální immutable balance snapshot a zaznamenat jeho SHA-256;
-6. pro všechny skutečné převody tohoto cutoveru používat výhradně tento stejný
+3. provádět read-only přípravu kandidátů a párování bez finančního efektu;
+4. ověřit použití jediného existujícího finálního immutable snapshotu a jeho
+   SHA-256 uvedeného výše;
+5. pro všechny skutečné převody tohoto cutoveru používat výhradně tento stejný
    finální snapshot;
-7. administrátor každý konkrétní pár explicitně potvrdí;
-8. nulové a záporné zůstatky se zpracují podle výše uvedené migrační politiky a
+6. administrátor každý konkrétní pár explicitně potvrdí;
+7. nulové a záporné zůstatky se zpracují podle výše uvedené migrační politiky a
    nevstoupí do automatického transferu;
-9. každý schválený kladný pár se provede přes
+8. každý schválený kladný pár se provede přes
    `LegacySafeQCreditTransfer`;
-10. po každém úspěšném převodu existuje durable SafeQ transfer record,
+9. po každém úspěšném převodu existuje durable SafeQ transfer record,
    canonical credit movement a audit;
-11. provedené převody se reconciliují proti schválené pracovní evidenci a
+10. provedené převody se reconciliují proti schválené pracovní evidenci a
     finálnímu snapshotu.
 
 Uživatel, který se ještě nepřihlásil do čisté produkční FUA Pay, se finančně
@@ -296,9 +289,8 @@ Výsledek:
 Před prvním skutečným SafeQ převodem musí být ještě prokázáno:
 
 - čistá produkční databáze a správná produkční konfigurace;
-- finální SafeQ freeze;
-- nový finální balance export;
-- SHA-256 finálního exportu;
+- ověření, že se používá jediný existující finální immutable snapshot s přesným
+  SHA-256 uvedeným v tomto dokumentu;
 - review nulových, záporných a nestandardních položek;
 - explicitní lidské párování SafeQ ID na existující FUA Pay `UserId`;
 - schválený operátorský způsob spuštění transferu;

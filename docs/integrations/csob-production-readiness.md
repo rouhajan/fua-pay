@@ -365,17 +365,18 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
    negativní cross-environment a URI-boundary testy a zpřesnění dokumentace;
    key/fingerprint preflight a fresh signed echo zůstávají samostatnou
    deployment/activation hranicí.
-2. Dokončit veřejné anonymní stránky `/Privacy` a `/Terms` bez nové zbytečné
-   právní stránky:
+2. Veřejné anonymní stránky `/Privacy` a `/Terms` obsahují zdrojově podložený
+   kontext TUL/FUA, CZK, charakter a způsob poskytnutí fakultních služeb,
+   reklamace/vratky a bezpečné karetní zpracování bez ukládání PAN/CVC.
+   Nadále platí:
    - `poverenec@tul.cz` ponechat jako DPO/GDPR kontakt TUL;
    - provozní/platební kontakt FUA Pay má být `fuapay@tul.cz`, ale před
      zveřejněním se musí potvrdit, že alias/mailbox skutečně existuje a je
      monitorovaný;
-   - Terms musí výslovně pokrýt provozovatele, CZK, charakter fakultních služeb,
-     reklamace/vratky, způsob poskytnutí služby, bezpečné karetní zpracování a
-     fakt, že FUA Pay neukládá číslo karty ani CVC;
-   - doplnit pouze oficiální schválená loga sjednaných platebních služeb/karetních
-     schémat.
+   - mailbox `fuapay@tul.cz` nebyl potvrzen, proto nebyl publikován a stávající
+     pravdivý kontakt zůstal zachován;
+   - schválené platební/karetní logo nebylo v repozitáři doloženo, proto nebylo
+     přidáno a tento externí bod zůstává otevřený.
 3. Production-grade returns scope z
    [payment-returns.md](../features/payment-returns.md):
    - [x] R2 CardJob plná vratka Reverse → full Refund je implementovaná v
@@ -390,13 +391,13 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
      kumulativního limitu, per-return persistence, souběžné rezervace a
      status-only recovery. Živý ČSOB partial Refund scénář zůstává otevřený v
      kroku 7 a není tímto označen PASS.
-   - [ ] R4: CardTopUp návrat nevyčerpaného kreditu na původní kartu s
-     `CreditReturnHold` a přesně-jednou životním cyklem consume/release.
-4. Doplnit samostatný účetní/reconciliation export pro párování s centrálním
-   ČSOB výpisem. Minimální párovací pole: `orderNo`, `payId`, FUA payment ID,
-   datum, částka, měna, účel, job number/service unit, finanční dokument a
-   reverse/refund stav/částka/čas. Osobní údaje pouze pokud je účetní proces
-   skutečně potřebuje.
+   - [x] R4: administrační plná CardTopUp vratka používá autoritativní původní
+     platbu, credit-account-first lock, `CreditReturnHold`, durabilní attempt před
+     PUT a atomický přesně-jednou debit/consume/complete. Živý gateway scénář
+     zůstává v kroku 7.
+4. [x] Samostatný účetní/reconciliation CSV export páruje `orderNo`, `payId`, FUA
+   payment ID, finanční pole, job/pracoviště, dokument a každou vratku/provider
+   attempt na vlastním deterministickém řádku. Neobsahuje jméno ani e-mail.
 5. Entra logout neobcházet cookie-only hackem. Nejprve znovu urgovat tenant
    správce, aby app registration správně obsahovala samostatný
    `/signout-callback-oidc`; známý stav je popsán v
@@ -409,8 +410,12 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
      [evidence a výsledky](../testing/card-job-concurrent-creation-verification-2026-09-23.md).
      Nejde o živý ČSOB double-click test ani počítání provider HTTP init callů;
      příslušný live scénář v kroku 7 zůstává otevřený.
-   - [ ] Celá `Succeeded + nový status 7/8` reconciliation cesta.
-   - [ ] HTTP-level object-isolation probe.
+   - [x] Aplikační regression test pokrývá `Succeeded + nový status 7/8` přes
+     settlement boundary; PostgreSQL exactly-once settlement testy dál dokazují
+     jediný credit movement/dokument/job settlement.
+   - [x] HTTP/WebApplicationFactory negativní test pokrývá owner-scoped payment
+     status s cizím ID; existující aplikační testy pokrývají receipt/document a
+     Admin-only mutation/export hranice bez provider efektu.
 7. Z jednoho clean commitu/release artefaktu udělat izolovaný staging deploy a
    v jediném souvislém testovacím okně zopakovat:
    - fresh GET echo a POST echo;

@@ -12,7 +12,10 @@ i opakované částečné refundy; každý refund má vlastní `SettlementReturn
 vždy určuje server z autoritativních dat. `RequestId` zajišťuje trvalou
 idempotenci a jeho opakování s jinou částkou nebo jiným payloadem je konflikt.
 Filtrovaná unikátnost dál dovolí nejvýše jednu `CreditJob` vratku na zakázku a
-nejvýše jednu budoucí `CardTopUp` vratku na původní platbu.
+nejvýše jednu `CardTopUp` vratku na původní platbu. CardTopUp vratka je pouze
+administrační a vždy vrací celou serverem odvozenou částku původního úspěšného
+ČSOB dobití; částečný CardTopUp refund ani hotovostní/bankovní alternativa
+neexistují.
 
 ## Aktuálně implementovaný tok
 
@@ -114,11 +117,33 @@ pak pouze `payment/status`. Samotný status 10 při recovery konkrétní partial
 částku nedokazuje a vratku automaticky nedokončí. Definitivně `Rejected` částka
 se do rezervace nepočítá, ostatní stavy ano.
 
-## Cílový rozsah před aktivací produkčních karetních plateb
+### CardTopUp plná vratka
+
+Před prvním provider PUT se jako první zdrojový zámek zamkne kreditní účet.
+Ve stejné transakci se vytvoří nebo bezpečně replayuje jediný `SettlementReturn`,
+aktivní `CreditReturnHold` celé původní částky a zahájený provider attempt. Teprve
+po commitu může následovat Reverse a případně full Refund bez `amount`.
+
+Aktivní hold vstupuje do sdíleného výpočtu disponibilního kreditu. Replay při
+vlastním existujícím holdu používá explicitní výpočet, který vyloučí právě tento
+hold, nikoli ruční aritmetickou zkratku. Nedostatečný kredit skončí před provider
+mutací.
+
+Přímo potvrzený Reverse `0/5` nebo přímo potvrzený full Refund `0/10` v jediné
+lokální transakci odečte přesně původní částku s operation ID
+`SettlementReturn.Id`, spotřebuje hold, potvrdí attempt, dokončí vratku a zapíše
+audit. Nejasný/maybe-sent výsledek nechává hold aktivní a další průchod je pouze
+statusový. Samotný pozdější status 10 není důkazem konkrétní částky a lokální
+debit automaticky nedokončí.
+Pokud je provider attempt i `SettlementReturn` definitivně `Rejected`, replay
+uvolní dosud aktivní hold idempotentně; nejasný nebo možná odeslaný pokus tuto
+větev nikdy nepoužije.
+
+## Rozsah před aktivací produkčních karetních plateb
 
 Produktové rozhodnutí 2026-09-23 je podporovat od začátku běžné bezpečné vratky,
-nikoli odkládat refund na neurčito. CardJob úplné i částečné vratky jsou nyní
-implementované; CardTopUp a další výstupy níže zůstávají cílovým stavem.
+nikoli odkládat refund na neurčito. CardJob úplné i částečné vratky a plná
+CardTopUp vratka jsou implementované; živá staging acceptance zůstává otevřená.
 
 Požadovaný cílový tok:
 
@@ -161,5 +186,4 @@ FUA Pay částky jsou výrazně nižší.
 
 - automatické potvrzení konkrétní částečné vratky pouze ze status-only odpovědi
   10 bez publikovaného strojově čitelného důkazu;
-- CardTopUp návrat nevyčerpaného kreditu na kartu;
 - PDF nebo samostatné potvrzení o vratce.
