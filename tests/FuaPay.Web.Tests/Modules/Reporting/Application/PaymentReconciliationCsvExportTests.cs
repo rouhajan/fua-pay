@@ -52,6 +52,7 @@ public sealed class PaymentReconciliationCsvExportTests
         Assert.Contains("\"orderNo\";\"payId\";\"FUA Payment ID\"", csv);
         Assert.Contains(firstReturnId.ToString(), csv);
         Assert.Contains(secondReturnId.ToString(), csv);
+        Assert.Contains(rows[0].ProviderAttemptId!.Value.ToString(), csv);
         Assert.Contains("\"'=Injected unit\"", csv);
         Assert.DoesNotContain("E-mail", csv, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Customer name", csv, StringComparison.OrdinalIgnoreCase);
@@ -116,6 +117,7 @@ public sealed class PaymentReconciliationCsvExportTests
             returnId,
             2_500,
             SettlementReturnState.Completed,
+            Guid.NewGuid(),
             operation,
             attemptState,
             Now.AddDays(-1),

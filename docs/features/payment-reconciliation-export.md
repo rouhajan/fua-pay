@@ -23,4 +23,4 @@ a ID.
 Model proto neztrácí opakované partial refundy ani historii Reverse → Refund.
 Pole zahrnují `orderNo`, `payId`, FUA Payment ID, finanční časy, částku a měnu,
 účel, číslo zakázky a pracoviště, finanční dokument a kompletní identitu/stav/časy
-vratky a provider attemptu.
+vratky a provider attemptu včetně stabilního `Provider-attempt ID`.

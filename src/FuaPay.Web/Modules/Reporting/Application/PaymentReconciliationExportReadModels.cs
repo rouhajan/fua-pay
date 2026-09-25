@@ -20,6 +20,7 @@ public sealed record PaymentReconciliationExportRow(
     Guid? SettlementReturnId,
     long? ReturnAmountMinorUnits,
     SettlementReturnState? ReturnState,
+    Guid? ProviderAttemptId,
     SettlementReturnProviderOperation? ProviderOperation,
     SettlementReturnProviderAttemptState? ProviderAttemptState,
     DateTimeOffset? ReturnRequestedAt,

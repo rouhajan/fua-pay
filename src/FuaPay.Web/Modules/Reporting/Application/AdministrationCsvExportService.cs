@@ -24,7 +24,7 @@ public sealed class AdministrationCsvExportService
     private readonly IPaymentQueries _paymentQueries;
     private readonly IAccessUserQueries _accessUserQueries;
     private readonly IServiceUnitQueries _serviceUnitQueries;
-    private readonly IPaymentReconciliationExportQueries?
+    private readonly IPaymentReconciliationExportQueries
         _reconciliationExportQueries;
     private readonly TimeProvider _timeProvider;
     private readonly IAuditTrail _auditTrail;
@@ -37,7 +37,7 @@ public sealed class AdministrationCsvExportService
         IServiceUnitQueries serviceUnitQueries,
         TimeProvider timeProvider,
         IAuditTrail auditTrail,
-        IPaymentReconciliationExportQueries? reconciliationExportQueries = null)
+        IPaymentReconciliationExportQueries reconciliationExportQueries)
     {
         ArgumentNullException.ThrowIfNull(jobQueries);
         ArgumentNullException.ThrowIfNull(creditQueries);
@@ -46,6 +46,7 @@ public sealed class AdministrationCsvExportService
         ArgumentNullException.ThrowIfNull(serviceUnitQueries);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(auditTrail);
+        ArgumentNullException.ThrowIfNull(reconciliationExportQueries);
 
         _jobQueries = jobQueries;
         _creditQueries = creditQueries;
@@ -290,11 +291,8 @@ public sealed class AdministrationCsvExportService
         CancellationToken cancellationToken = default)
     {
         ValidateAdministrator(administratorUserId);
-        var queries = _reconciliationExportQueries
-            ?? throw new InvalidOperationException(
-                "Payment reconciliation export queries are unavailable.");
         var range = CreateUtcRange(from, to);
-        var items = await queries.ListAsync(
+        var items = await _reconciliationExportQueries.ListAsync(
             range.From,
             range.ToExclusive,
             MaximumRows,
@@ -321,6 +319,7 @@ public sealed class AdministrationCsvExportService
                 "SettlementReturn ID",
                 "Return amount CZK",
                 "Return state",
+                "Provider-attempt ID",
                 "Provider operation",
                 "Provider-attempt state",
                 "Return requested",
@@ -353,6 +352,7 @@ public sealed class AdministrationCsvExportService
                     ? FormatMoney(item.ReturnAmountMinorUnits.Value)
                     : null,
                 item.ReturnState?.ToString(),
+                item.ProviderAttemptId?.ToString(),
                 item.ProviderOperation?.ToString(),
                 item.ProviderAttemptState?.ToString(),
                 FormatTimestamp(item.ReturnRequestedAt),

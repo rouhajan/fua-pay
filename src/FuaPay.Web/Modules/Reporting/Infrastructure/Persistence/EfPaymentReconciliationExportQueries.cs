@@ -211,6 +211,7 @@ internal sealed class EfPaymentReconciliationExportQueries :
             settlementReturn is null
                 ? null
                 : (SettlementReturnState)settlementReturn.State,
+            attempt?.Id,
             attempt is null
                 ? null
                 : (SettlementReturnProviderOperation)attempt.Operation,
