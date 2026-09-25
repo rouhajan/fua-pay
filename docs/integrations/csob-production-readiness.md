@@ -607,12 +607,26 @@ přepisovány jen kvůli dosažení nuly; před bankovním GO se nejprve read-on
 identifikují a zdokumentuje se, zda jde o historickou testovací evidenci nebo
 aktuální operátorský problém.
 
-Finální staging closeout po tomto checkpointu ještě nebyl označen jako hotový.
-Je nutné vrátit aktivní staging env přesně na fail-closed SHA-256
-`3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4`,
-zastavit/disable `fuapay-staging.service`, odstranit dočasné UFW allow pro
-`:8443`, ověřit nepřítomnost listeneru `127.0.0.1:5081` a znovu provést
-Production guard.
+Finální staging closeout je PASS. Aktivní staging env byl vrácen přesně na
+fail-closed SHA-256
+`3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4`;
+`Payments__Provider=None`, `Csob__Enabled=false`,
+`PrintPayments__Enabled=false` a `PrintCredentials__Enabled=false`.
+`fuapay-staging.service` je `inactive/disabled`, dočasné UFW allow pro
+`:8443` bylo odstraněno, `127.0.0.1:5081` neposlouchá a dočasné acceptance
+runnery byly odstraněny. Staging current zůstává na
+`e84d851a31083a67f947e4d83b1ff37d2e5871e6`.
+
+Final Production guard po shutdownu: `/health/ready=Healthy`, current release
+`774b324c48d8f874db21f115479f3b317c2a73d0`, production env SHA-256
+`a2c615cec52e9f9f3498b01212c0d12a38057619dd9676049746a4ca73f9dba5`,
+Nginx site SHA-256
+`491a7228c460ce5c8674a98e6c4c0d0433e0b4fd990360f29cf2d9c9280a91d9`
+a alias `fuapay.fa.tul.cz:443` zůstává HTTP 301 na
+`https://fuapay.tul.cz/`.
+
+Tři durable `RequiresAttention` řádky zůstávají otevřené pouze k read-only
+klasifikaci před bankovním GO; runtime kvůli nim nemusí být otevřený.
 
 ### Bankovní submission po tomto runu
 
