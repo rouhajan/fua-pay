@@ -1,6 +1,6 @@
 # Fresh ČSOB staging acceptance checkpoint – 2026-09-25
 
-Status: acceptance scenarios PASS; final staging closeout is not yet complete.
+Status: acceptance scenarios PASS; final staging closeout PASS.
 
 This document is the operational handoff/checkpoint for the isolated FUA Pay staging
 acceptance performed on 2026-09-25. It records only directly observed evidence and
@@ -389,30 +389,50 @@ WHERE r.state = 3
 ORDER BY r.updated_at, r.payment_id;
 ```
 
-## Closeout still required
+## Final staging closeout PASS
 
-This checkpoint was taken before the final staging shutdown. Do not leave the
-passwordless test-identity staging window open merely because evidence review is
-unfinished. The safe order is:
+The payment acceptance window was closed on 2026-09-25 after one final read-only
+gate.
 
-1. re-confirm `Pending=0` and due reconciliation `=0`;
-2. restore active `/etc/fuapay-staging/staging.env` exactly from
-   `/etc/fuapay-staging/staging.env.pre-csob-20260925T163512Z`;
-3. verify restored SHA-256
-   `3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4`;
-4. stop `fuapay-staging.service` and leave it disabled;
-5. remove the temporary UFW `8443/tcp` allow for `147.230.72.120`;
-6. verify no listener on `127.0.0.1:5081`;
-7. remove only precisely identified temporary acceptance runners/artifacts that
-   are no longer needed;
-8. re-run Production health/current/env/Nginx/301 guard.
+Observed before shutdown:
 
-The three existing `RequiresAttention` rows are durable DB evidence and can be
-classified read-only after the runtime is safely stopped. They must be classified
-before bank GO, but they are not a reason to leave staging reachable overnight.
+- `Pending=0`;
+- due reconciliation `=0`;
+- durable `RequiresAttention=3` rows remain for later read-only classification.
 
-The staging current symlink should remain on release `e84d851...` while the
-service is stopped.
+The fail-closed staging environment was restored exactly:
+
+- active file: `/etc/fuapay-staging/staging.env`;
+- SHA-256:
+  `3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4`;
+- `Payments__Provider=None`;
+- `Csob__Enabled=false`;
+- `PrintPayments__Enabled=false`;
+- `PrintCredentials__Enabled=false`.
+
+Runtime/network closeout:
+
+- `fuapay-staging.service = inactive + disabled`;
+- temporary UFW `8443/tcp` allow removed;
+- no listener on `127.0.0.1:5081`;
+- temporary ČSOB echo/status acceptance runners removed;
+- staging current release intentionally remains
+  `/opt/fuapay-staging/releases/e84d851a31083a67f947e4d83b1ff37d2e5871e6`.
+
+Final Production guard after shutdown:
+
+- `/health/ready = Healthy`;
+- `/opt/fuapay/current -> /opt/fuapay/releases/774b324c48d8f874db21f115479f3b317c2a73d0`;
+- Production env SHA-256
+  `a2c615cec52e9f9f3498b01212c0d12a38057619dd9676049746a4ca73f9dba5`;
+- Production Nginx site SHA-256
+  `491a7228c460ce5c8674a98e6c4c0d0433e0b4fd990360f29cf2d9c9280a91d9`;
+- `https://fuapay.fa.tul.cz/` remains HTTP 301 to
+  `https://fuapay.tul.cz/`.
+
+The three durable `RequiresAttention` rows are not a reason to reopen the web
+runtime. They must be classified read-only before bank GO and must not be deleted
+or rewritten merely to make their count zero.
 
 ## Bank activation status
 
@@ -503,15 +523,20 @@ The next session should start from this document, not from memory.
 
 Order:
 
-1. complete payment-window closeout and record final closed-state evidence;
-2. inspect/classify the 3 durable `RequiresAttention` reconciliation rows
+1. inspect/classify the 3 durable `RequiresAttention` reconciliation rows
    read-only while staging remains stopped;
-3. hand the closed-state evidence to the FUA Print workstream;
-4. open a narrow Print staging window and run the print-code/PIN + actual
+2. change the public FUA Pay operational contact in `/Privacy` from
+   `jan.rouha@tul.cz` to the already confirmed and functional
+   `fuapay@tul.cz`; do not lose the separate DPO contact
+   `poverenec@tul.cz`;
+3. finish the remaining public payment-presentation item (official
+   Visa/Mastercard acceptance marks) before public production-card launch;
+4. hand the closed-state evidence to the FUA Print workstream;
+5. open a narrow Print staging window and run the print-code/PIN + actual
    print-for-credit acceptance;
-5. before the later bank submission, reopen a fresh payment acceptance window
-   only if needed, repeat the official bank scenarios on the same unchanged
+6. before the later bank submission, reopen a fresh payment acceptance window
+   only if needed, repeat the official bank scenarios on the final unchanged
    payment release/config, close it cleanly and submit via POS Merchant/central
    TUL operational owner;
-6. after ČSOB production activation, install production credentials/config and
+7. after ČSOB production activation, install production credentials/config and
    perform one controlled small real production payment before general enablement.
