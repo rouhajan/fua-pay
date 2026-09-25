@@ -393,11 +393,16 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
      kroku 7 a není tímto označen PASS.
    - [x] R4: administrační plná CardTopUp vratka používá autoritativní původní
      platbu, credit-account-first lock, `CreditReturnHold`, durabilní attempt před
-     PUT a atomický přesně-jednou debit/consume/complete. Živý gateway scénář
+     PUT a atomický přesně-jednou debit/consume/complete. Admin read model
+     rozlišuje dokončený Reverse/Refund, zpracovávaný Refund, status-only recovery
+     a definitivně zamítnutou vratku s uvolněným holdem. Živý gateway scénář
      zůstává v kroku 7.
 4. [x] Samostatný účetní/reconciliation CSV export páruje `orderNo`, `payId`, FUA
    payment ID, finanční pole, job/pracoviště, dokument a každou vratku/provider
-   attempt na vlastním deterministickém řádku. Neobsahuje jméno ani e-mail.
+   attempt včetně stabilního attempt ID na vlastním deterministickém řádku.
+   Neobsahuje jméno ani e-mail. PostgreSQL test nad reálnou EF query ověřuje
+   payment-only řádek, opakované partial vratky, CardTopUp Reverse → Refund
+   historii, autoritativní původ polí, řazení a limit po one-to-many expanzi.
 5. Entra logout neobcházet cookie-only hackem. Nejprve znovu urgovat tenant
    správce, aby app registration správně obsahovala samostatný
    `/signout-callback-oidc`; známý stav je popsán v
@@ -410,12 +415,16 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
      [evidence a výsledky](../testing/card-job-concurrent-creation-verification-2026-09-23.md).
      Nejde o živý ČSOB double-click test ani počítání provider HTTP init callů;
      příslušný live scénář v kroku 7 zůstává otevřený.
-   - [x] Aplikační regression test pokrývá `Succeeded + nový status 7/8` přes
-     settlement boundary; PostgreSQL exactly-once settlement testy dál dokazují
-     jediný credit movement/dokument/job settlement.
-   - [x] HTTP/WebApplicationFactory negativní test pokrývá owner-scoped payment
-     status s cizím ID; existující aplikační testy pokrývají receipt/document a
-     Admin-only mutation/export hranice bez provider efektu.
+   - [x] PostgreSQL integration test vede nový status 7/8 nad již `Succeeded`
+     platbou skutečnou reconciliation/settlement cestou. CardTopUp zachová právě
+     jeden credit movement a dokument, CardJob právě jedno vypořádání a dokument;
+     výsledek hlásí `StateChanged=false` a fake gateway zaznamená pouze read-only
+     status call, žádnou mutaci.
+   - [x] HTTP/WebApplicationFactory negativní testy pokrývají cizí payment detail
+     a status, PDF finančního dokumentu, PDF legacy receiptu, customer job detail
+     a requester job detail omezený na přiřazená pracoviště. Všechny crafted URL
+     končí chráněným 404 bez settlement efektu. Admin-only mutation/export a
+     antiforgery hranice zůstávají pokryté samostatnými perimeter testy.
 7. Z jednoho clean commitu/release artefaktu udělat izolovaný staging deploy a
    v jediném souvislém testovacím okně zopakovat:
    - fresh GET echo a POST echo;

@@ -292,10 +292,11 @@ session umožnila další kartu. Opakovaný provider `payment/status` nad již
 `Succeeded` platbou se také uměle nevynucoval, protože nasazená aplikace nemá
 veřejný/operator endpoint pro takový probe; ruční DB zápis ani testovací bypass
 se kvůli acceptance nepřidával. Finanční exactly-once hranice je však přímo
-krytá implementací: `PaymentSettlementService.CompleteAsync()` nad již
-`Succeeded` platbou vrací `false` před novým efektem a PostgreSQL testy pokrývají
-opakovaný i concurrent ČSOB settlement s právě jedním pohybem/dokumentem nebo
-job settlementem. Tato evidence nenahrazuje chybějící fresh live provider replay.
+krytá implementací a PostgreSQL integration testem celé
+reconciliation/settlement cesty: stav 7/8 nad již `Succeeded` platbou vrátí
+`StateChanged=false`, provede pouze read-only status call a zachová právě jeden
+pohyb/dokument nebo job settlement. Tato evidence nenahrazuje chybějící fresh
+live provider replay.
 
 Plný i částečný/opakovaný CardJob Refund a plná CardTopUp vratka jsou
 implementované v aplikaci včetně
