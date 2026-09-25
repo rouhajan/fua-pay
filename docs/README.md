@@ -10,6 +10,7 @@ Aktuální dokumentace je záměrně malá:
 - [ruční dobití kreditu](features/manual-credit-topups.md);
 - [finanční doklady](features/financial-documents.md);
 - [PDF potvrzení o úhradě](features/payment-receipts.md);
+- [účetní export plateb a vratek](features/payment-reconciliation-export.md);
 - [PostgreSQL, EF migrace a testy](development/database.md);
 - [produkční konfigurace a provoz](deployment/production-configuration.md);
 - [čistý produkční cutover](deployment/production-cutover-plan.md);

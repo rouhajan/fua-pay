@@ -41,7 +41,8 @@ public sealed class AdminPaymentReturnPageTests
             new EmptyAccessUserQueries(),
             new EmptyReconciliationQueries(),
             new EmptySettlementReturnQueries(),
-            service);
+            service,
+            new RecordingCardTopUpSettlementReturnService());
         var administratorId = Guid.NewGuid();
         var httpContext = new DefaultHttpContext
         {
@@ -90,7 +91,8 @@ public sealed class AdminPaymentReturnPageTests
             new EmptyAccessUserQueries(),
             new EmptyReconciliationQueries(),
             new EmptySettlementReturnQueries(),
-            service);
+            service,
+            new RecordingCardTopUpSettlementReturnService());
         var administratorId = Guid.NewGuid();
         var httpContext = new DefaultHttpContext
         {
@@ -139,7 +141,8 @@ public sealed class AdminPaymentReturnPageTests
             new EmptyAccessUserQueries(),
             new EmptyReconciliationQueries(),
             new EmptySettlementReturnQueries(),
-            service);
+            service,
+            new RecordingCardTopUpSettlementReturnService());
         var administratorId = Guid.NewGuid();
         var httpContext = new DefaultHttpContext
         {
@@ -184,7 +187,8 @@ public sealed class AdminPaymentReturnPageTests
             new EmptyAccessUserQueries(),
             new EmptyReconciliationQueries(),
             new EmptySettlementReturnQueries(),
-            service)
+            service,
+            new RecordingCardTopUpSettlementReturnService())
         {
             PageContext = new PageContext
             {
@@ -202,6 +206,49 @@ public sealed class AdminPaymentReturnPageTests
         Assert.False(model.ModelState.IsValid);
         Assert.True(model.ModelState.ContainsKey("amount"));
         Assert.Null(service.PartialCommand);
+    }
+
+    [Fact]
+    public async Task CardTopUpRejectedPostReportsReleasedCreditReservation()
+    {
+        var topUpService = new RecordingCardTopUpSettlementReturnService(
+            CardTopUpSettlementReturnOutcome.Rejected);
+        var model = new IndexModel(
+            new EmptyPaymentQueries(),
+            new EmptyAccessUserQueries(),
+            new EmptyReconciliationQueries(),
+            new EmptySettlementReturnQueries(),
+            new RecordingCardJobSettlementReturnService(),
+            topUpService);
+        var administratorId = Guid.NewGuid();
+        var httpContext = new DefaultHttpContext
+        {
+            User = AccessClaimsPrincipalFactory.Create(
+                new AccessSessionSnapshot(
+                    administratorId,
+                    "Administrator",
+                    "admin@example.cz",
+                    AccessUserStatus.Active,
+                    [AccessRole.Admin]),
+                "Test")
+        };
+        model.PageContext = new PageContext { HttpContext = httpContext };
+        model.TempData = new TempDataDictionary(
+            httpContext,
+            new MemoryTempDataProvider());
+
+        var response = await model.OnPostReturnTopUpAsync(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "Rejected return");
+
+        Assert.IsType<RedirectToPageResult>(response);
+        var message = Assert.IsType<string>(model.TempData["StatusMessage"]);
+        Assert.Contains("zamítnuta", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("uvolněna", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("nejasný", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("zůstává rezervován", message, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(topUpService.Command);
     }
 
     private sealed class RecordingCardJobSettlementReturnService :
@@ -243,6 +290,34 @@ public sealed class AdminPaymentReturnPageTests
                 _outcome,
                 ReverseRequestSent: false,
                 RefundRequestSent: true));
+        }
+    }
+
+    private sealed class RecordingCardTopUpSettlementReturnService :
+        ICardTopUpSettlementReturnService
+    {
+        private readonly CardTopUpSettlementReturnOutcome _outcome;
+
+        public RecordingCardTopUpSettlementReturnService(
+            CardTopUpSettlementReturnOutcome outcome =
+                CardTopUpSettlementReturnOutcome.ReverseCompleted)
+        {
+            _outcome = outcome;
+        }
+
+        public CardTopUpSettlementReturnCommand? Command { get; private set; }
+
+        public Task<CardTopUpSettlementReturnResult> ReturnAsync(
+            CardTopUpSettlementReturnCommand command,
+            CancellationToken cancellationToken = default)
+        {
+            Command = command;
+            return Task.FromResult(new CardTopUpSettlementReturnResult(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                _outcome,
+                ReverseRequestSent: false,
+                RefundRequestSent: false));
         }
     }
 

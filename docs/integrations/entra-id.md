@@ -82,6 +82,12 @@ cookie-only workaround, který by ponechal Entra SSO session aktivní. Před
 jakýmkoli aplikačním fallbackem se správce tenantu znovu kontaktuje a stav obou
 URI se ověří.
 
+Aplikační kontrakt je automaticky ověřen: POST odhlašuje současně lokální cookie
+i Entra OIDC scheme, `SignedOutCallbackPath` zůstává
+`/signout-callback-oidc` a post-logout redirect míří na kořen aplikace. V kódu
+nebyla prokázána vada; otevřeným předpokladem zůstává registrace samostatné
+signed-out callback URI správcem TUL Entra tenantu.
+
 Provozní pravidla zůstávají:
 
 - client secret patří mimo Git/release a musí se řízeně rotovat;

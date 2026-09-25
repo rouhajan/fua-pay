@@ -1,5 +1,8 @@
 using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Auditing;
+using FuaPay.Web.BuildingBlocks.Domain;
+using FuaPay.Web.Modules.Credits.Application;
+using FuaPay.Web.Modules.Credits.Domain;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
@@ -8,7 +11,8 @@ using FuaPay.Web.Modules.Payments.Domain;
 namespace FuaPay.Web.Modules.Payments.Infrastructure.Csob;
 
 public sealed class CsobCardJobSettlementReturnService :
-    ICardJobSettlementReturnService
+    ICardJobSettlementReturnService,
+    ICardTopUpSettlementReturnService
 {
     internal const string ReverseAmbiguousDiagnostic =
         "CSOB reverse outcome requires signed status recovery.";
@@ -37,6 +41,9 @@ public sealed class CsobCardJobSettlementReturnService :
 
     private readonly IJobRepository _jobRepository;
     private readonly IJobPaymentCoordination _jobPaymentCoordination;
+    private readonly ICreditAccountRepository _creditAccountRepository;
+    private readonly ICreditReturnHoldRepository _creditReturnHoldRepository;
+    private readonly CreditAvailabilityService _creditAvailabilityService;
     private readonly IPaymentRepository _paymentRepository;
     private readonly ISettlementReturnRepository _returnRepository;
     private readonly ISettlementReturnProviderAttemptRepository
@@ -52,6 +59,9 @@ public sealed class CsobCardJobSettlementReturnService :
     public CsobCardJobSettlementReturnService(
         IJobRepository jobRepository,
         IJobPaymentCoordination jobPaymentCoordination,
+        ICreditAccountRepository creditAccountRepository,
+        ICreditReturnHoldRepository creditReturnHoldRepository,
+        CreditAvailabilityService creditAvailabilityService,
         IPaymentRepository paymentRepository,
         ISettlementReturnRepository returnRepository,
         ISettlementReturnProviderAttemptRepository attemptRepository,
@@ -64,6 +74,9 @@ public sealed class CsobCardJobSettlementReturnService :
     {
         ArgumentNullException.ThrowIfNull(jobRepository);
         ArgumentNullException.ThrowIfNull(jobPaymentCoordination);
+        ArgumentNullException.ThrowIfNull(creditAccountRepository);
+        ArgumentNullException.ThrowIfNull(creditReturnHoldRepository);
+        ArgumentNullException.ThrowIfNull(creditAvailabilityService);
         ArgumentNullException.ThrowIfNull(paymentRepository);
         ArgumentNullException.ThrowIfNull(returnRepository);
         ArgumentNullException.ThrowIfNull(attemptRepository);
@@ -76,6 +89,9 @@ public sealed class CsobCardJobSettlementReturnService :
 
         _jobRepository = jobRepository;
         _jobPaymentCoordination = jobPaymentCoordination;
+        _creditAccountRepository = creditAccountRepository;
+        _creditReturnHoldRepository = creditReturnHoldRepository;
+        _creditAvailabilityService = creditAvailabilityService;
         _paymentRepository = paymentRepository;
         _returnRepository = returnRepository;
         _attemptRepository = attemptRepository;
@@ -141,6 +157,247 @@ public sealed class CsobCardJobSettlementReturnService :
             command.OperationId,
             preparation,
             cancellationToken);
+    }
+
+    async Task<CardTopUpSettlementReturnResult>
+        ICardTopUpSettlementReturnService.ReturnAsync(
+            CardTopUpSettlementReturnCommand command,
+            CancellationToken cancellationToken)
+    {
+        ValidateTopUpCommand(command);
+
+        Preparation preparation;
+        try
+        {
+            preparation = await _transaction.ExecuteAsync(
+                ct => PrepareTopUpAsync(command, ct),
+                cancellationToken);
+        }
+        catch (Exception exception) when (
+            exception is SettlementReturnConcurrencyException or
+                SettlementReturnProviderAttemptConcurrencyException or
+                CreditReturnHoldAlreadyExistsException or
+                CreditReturnHoldConcurrencyException or
+                CreditAccountConcurrencyException)
+        {
+            preparation = await _transaction.ExecuteAsync(
+                ct => PrepareTopUpAsync(command, ct),
+                cancellationToken);
+        }
+
+        try
+        {
+            var result = await ContinueAsync(
+                command.RequestId,
+                preparation,
+                cancellationToken);
+            return ToTopUpResult(result);
+        }
+        catch (CardJobSettlementReturnSafetyStateException exception)
+        {
+            throw new CardTopUpSettlementReturnSafetyStateException(
+                command.RequestId,
+                exception);
+        }
+        catch (CardJobSettlementReturnStateInconsistentException exception)
+        {
+            throw new CardTopUpSettlementReturnStateInconsistentException(
+                command.RequestId,
+                exception.Message);
+        }
+    }
+
+    private async Task<Preparation> PrepareTopUpAsync(
+        CardTopUpSettlementReturnCommand command,
+        CancellationToken cancellationToken)
+    {
+        var payment = await _paymentRepository.FindByIdAsync(
+            command.OriginalPaymentId,
+            cancellationToken)
+            ?? throw TopUpNotAllowed(
+                command.OriginalPaymentId,
+                "the authoritative original payment does not exist");
+        ValidateTopUpPayment(payment);
+
+        // Credit-account locking is the first source lock. It serializes the
+        // hold reservation with every spend/debit using the shared credit
+        // availability model.
+        var account = await _creditAccountRepository
+            .FindByOwnerIdForUpdateAsync(
+                payment.CustomerUserId,
+                cancellationToken)
+            ?? throw new CreditAccountNotFoundException(
+                payment.CustomerUserId);
+
+        var candidate = new SettlementReturn(
+            Guid.NewGuid(),
+            command.RequestId,
+            SettlementReturnKind.CardTopUp,
+            payment.Id,
+            jobId: null,
+            payment.CustomerUserId,
+            command.AdministratorUserId,
+            payment.Amount,
+            command.Reason,
+            _timeProvider.GetUtcNow());
+        var registration = await _registrationService.RegisterAsync(
+            candidate,
+            cancellationToken);
+        var settlementReturn = registration.SettlementReturn;
+        ValidateTopUpReturn(payment, settlementReturn);
+
+        var hold = await _creditReturnHoldRepository
+            .FindBySettlementReturnIdForUpdateAsync(
+                settlementReturn.Id,
+                cancellationToken);
+        if (hold is null)
+        {
+            var available = await _creditAvailabilityService.GetAvailableAsync(
+                account,
+                cancellationToken);
+            if (payment.Amount.MinorUnits > available.MinorUnits)
+            {
+                throw new InsufficientAvailableCreditForReturnHoldException(
+                    payment.CustomerUserId,
+                    payment.Amount,
+                    available);
+            }
+
+            hold = new CreditReturnHold(
+                settlementReturn.Id,
+                account.Id,
+                payment.Amount,
+                _timeProvider.GetUtcNow());
+            await _creditReturnHoldRepository.AddAsync(
+                hold,
+                cancellationToken);
+        }
+        else
+        {
+            ValidateTopUpHold(account, settlementReturn, hold);
+            if (hold.State == CreditReturnHoldState.Active)
+            {
+                var available = await _creditAvailabilityService
+                    .GetAvailableExcludingAsync(
+                        account,
+                        hold.Amount,
+                        cancellationToken);
+                if (payment.Amount.MinorUnits > available.MinorUnits)
+                {
+                    throw new InsufficientAvailableCreditForReturnHoldException(
+                        payment.CustomerUserId,
+                        payment.Amount,
+                        available);
+                }
+            }
+        }
+
+        var history = await _attemptRepository.ListBySettlementReturnIdAsync(
+            settlementReturn.Id,
+            cancellationToken);
+        if (history.Count == 0)
+        {
+            if (settlementReturn.State != SettlementReturnState.Requested ||
+                hold.State != CreditReturnHoldState.Active)
+            {
+                throw TopUpInconsistent(
+                    command.RequestId,
+                    "an unresolved return has no provider-attempt history or active hold");
+            }
+
+            var created = await _attemptService.CreateAsync(
+                new CreateSettlementReturnProviderAttemptCommand(
+                    command.RequestId,
+                    settlementReturn.Id,
+                    SettlementReturnProviderOperation.Reverse),
+                cancellationToken);
+            history = [created.Attempt];
+        }
+
+        ValidateHistory(settlementReturn, payment, history);
+
+        var confirmed = history.SingleOrDefault(attempt =>
+            attempt.State == SettlementReturnProviderAttemptState.Confirmed);
+        if (confirmed is not null)
+        {
+            if (settlementReturn.State != SettlementReturnState.Completed ||
+                hold.State != CreditReturnHoldState.Consumed)
+            {
+                throw TopUpInconsistent(
+                    command.RequestId,
+                    "confirmed provider evidence is not matched by a completed debit and consumed hold");
+            }
+
+            return Preparation.For(
+                settlementReturn,
+                confirmed,
+                command.AdministratorUserId,
+                confirmed.Operation == SettlementReturnProviderOperation.Reverse
+                    ? Disposition.ReverseCompleted
+                    : Disposition.RefundCompleted);
+        }
+
+        if (settlementReturn.State == SettlementReturnState.Rejected)
+        {
+            if (hold.State == CreditReturnHoldState.Active)
+            {
+                hold.Release(_timeProvider.GetUtcNow());
+                await _creditReturnHoldRepository.SaveAsync(
+                    hold,
+                    cancellationToken);
+            }
+
+            if (hold.State != CreditReturnHoldState.Released)
+            {
+                throw TopUpInconsistent(
+                    command.RequestId,
+                    "a rejected return must have a released hold");
+            }
+
+            return Preparation.For(
+                settlementReturn,
+                history[^1],
+                command.AdministratorUserId,
+                Disposition.RefundRejected);
+        }
+
+        if (hold.State != CreditReturnHoldState.Active)
+        {
+            throw TopUpInconsistent(
+                command.RequestId,
+                "an unresolved return must retain its active hold");
+        }
+
+        var active = history.SingleOrDefault(attempt => attempt.IsActive);
+        if (active is not null)
+        {
+            return await ResolveActiveAsync(
+                settlementReturn,
+                active,
+                command.AdministratorUserId,
+                cancellationToken);
+        }
+
+        var rejected = history
+            .Where(attempt => attempt.State ==
+                SettlementReturnProviderAttemptState.Rejected)
+            .OrderByDescending(attempt => attempt.CreatedAt)
+            .ThenByDescending(attempt => attempt.Id)
+            .FirstOrDefault();
+        if (settlementReturn.State == SettlementReturnState.RequiresAttention)
+        {
+            return Preparation.For(
+                settlementReturn,
+                rejected ?? history[^1],
+                command.AdministratorUserId,
+                IsPreExistingRefund(rejected?.Diagnostic)
+                    ? Disposition.PreExistingProviderRefund
+                    : Disposition.RequiresAttention);
+        }
+
+        throw TopUpInconsistent(
+            command.RequestId,
+            "the return has no resumable provider attempt");
     }
 
     private async Task<Preparation> PreparePartialAsync(
@@ -900,9 +1157,9 @@ public sealed class CsobCardJobSettlementReturnService :
         bool reverseSent,
         CancellationToken cancellationToken)
     {
-        await LockJobOrThrowAsync(
+        await LockSourceOrThrowAsync(
             operationId,
-            reverse.JobId,
+            reverse,
             cancellationToken);
         var settlementReturn = await RequireReturnAsync(
             operationId,
@@ -1041,9 +1298,9 @@ public sealed class CsobCardJobSettlementReturnService :
             bool reverseSent,
             CancellationToken cancellationToken)
     {
-        await LockJobOrThrowAsync(
+        await LockSourceOrThrowAsync(
             operationId,
-            preparation.JobId,
+            preparation,
             cancellationToken);
         var settlementReturn = await RequireReturnAsync(
             operationId,
@@ -1172,9 +1429,9 @@ public sealed class CsobCardJobSettlementReturnService :
         bool refundSent,
         CancellationToken cancellationToken)
     {
-        await LockJobOrThrowAsync(
+        var lockedAccount = await LockSourceOrThrowAsync(
             operationId,
-            preparation.JobId,
+            preparation,
             cancellationToken);
         var settlementReturn = await RequireReturnAsync(
             operationId,
@@ -1202,6 +1459,48 @@ public sealed class CsobCardJobSettlementReturnService :
             attempt,
             preparation.Operation);
         var changedAt = _timeProvider.GetUtcNow();
+        CreditReturnHold? topUpHold = null;
+        if (settlementReturn.Kind == SettlementReturnKind.CardTopUp)
+        {
+            var account = lockedAccount
+                ?? throw TopUpInconsistent(
+                    operationId,
+                    "the locked credit account is unavailable during confirmation");
+            topUpHold = await _creditReturnHoldRepository
+                .FindBySettlementReturnIdForUpdateAsync(
+                    settlementReturn.Id,
+                    cancellationToken)
+                ?? throw TopUpInconsistent(
+                    operationId,
+                    "the credit return hold no longer exists");
+            ValidateTopUpHold(account, settlementReturn, topUpHold);
+            if (topUpHold.State != CreditReturnHoldState.Active)
+            {
+                throw TopUpInconsistent(
+                    operationId,
+                    "an unresolved provider confirmation requires an active hold");
+            }
+
+            var available = await _creditAvailabilityService
+                .GetAvailableExcludingAsync(
+                    account,
+                    topUpHold.Amount,
+                    cancellationToken);
+            account.Debit(
+                settlementReturn.Id,
+                settlementReturn.Amount,
+                available,
+                changedAt,
+                $"Vrácení karetního dobití {settlementReturn.OriginalPaymentId}");
+            topUpHold.Consume(changedAt);
+            await _creditAccountRepository.SaveAsync(
+                account,
+                cancellationToken);
+            await _creditReturnHoldRepository.SaveAsync(
+                topUpHold,
+                cancellationToken);
+        }
+
         settlementReturn.Complete(changedAt);
         _auditTrail.Stage(CreateAudit(
             settlementReturn,
@@ -1253,9 +1552,9 @@ public sealed class CsobCardJobSettlementReturnService :
             bool refundSent,
             CancellationToken cancellationToken)
     {
-        await LockJobOrThrowAsync(
+        await LockSourceOrThrowAsync(
             operationId,
-            preparation.JobId,
+            preparation,
             cancellationToken);
         var settlementReturn = await RequireReturnAsync(
             operationId,
@@ -1346,9 +1645,9 @@ public sealed class CsobCardJobSettlementReturnService :
         bool refundSent,
         CancellationToken cancellationToken)
     {
-        await LockJobOrThrowAsync(
+        await LockSourceOrThrowAsync(
             operationId,
-            preparation.JobId,
+            preparation,
             cancellationToken);
         var settlementReturn = await RequireReturnAsync(
             operationId,
@@ -1527,6 +1826,36 @@ public sealed class CsobCardJobSettlementReturnService :
         }
     }
 
+    private async Task<CreditAccount?> LockSourceOrThrowAsync(
+        Guid operationId,
+        Preparation preparation,
+        CancellationToken cancellationToken)
+    {
+        if (preparation.Kind == SettlementReturnKind.CardTopUp)
+        {
+            return await _creditAccountRepository
+                .FindByOwnerIdForUpdateAsync(
+                    preparation.CustomerUserId,
+                    cancellationToken)
+                ?? throw TopUpInconsistent(
+                    operationId,
+                    "the authoritative credit account disappeared while resolving the return");
+        }
+
+        if (!preparation.JobId.HasValue)
+        {
+            throw Inconsistent(
+                operationId,
+                "the CardJob source no longer identifies a job");
+        }
+
+        await LockJobOrThrowAsync(
+            operationId,
+            preparation.JobId.Value,
+            cancellationToken);
+        return null;
+    }
+
     private async Task<SettlementReturn> RequireReturnAsync(
         Guid operationId,
         Preparation preparation,
@@ -1541,7 +1870,8 @@ public sealed class CsobCardJobSettlementReturnService :
         if (
             settlementReturn.RequestId != operationId ||
             settlementReturn.JobId != preparation.JobId ||
-            settlementReturn.Kind != SettlementReturnKind.CardJob)
+            settlementReturn.Kind != preparation.Kind ||
+            settlementReturn.CustomerUserId != preparation.CustomerUserId)
         {
             throw Inconsistent(
                 operationId,
@@ -1578,18 +1908,29 @@ public sealed class CsobCardJobSettlementReturnService :
                 operationId,
                 "the authoritative original payment disappeared");
 
+        var sourceMatches = settlementReturn.Kind switch
+        {
+            SettlementReturnKind.CardJob =>
+                payment.PurposeType == PaymentPurposeType.Job &&
+                payment.JobId == settlementReturn.JobId &&
+                (stalePreparation.IsPartialRefund
+                    ? settlementReturn.Amount.MinorUnits > 0 &&
+                      settlementReturn.Amount.MinorUnits <
+                        payment.Amount.MinorUnits
+                    : payment.Amount == settlementReturn.Amount),
+            SettlementReturnKind.CardTopUp =>
+                payment.PurposeType == PaymentPurposeType.CreditTopUp &&
+                payment.JobId is null &&
+                payment.Amount == settlementReturn.Amount &&
+                !stalePreparation.IsPartialRefund,
+            _ => false
+        };
         if (
             payment.Provider != PaymentProvider.Csob ||
-            payment.PurposeType != PaymentPurposeType.Job ||
             payment.Status != PaymentStatus.Succeeded ||
             payment.ProviderReference is null ||
-            payment.JobId != settlementReturn.JobId ||
             payment.CustomerUserId != settlementReturn.CustomerUserId ||
-            (stalePreparation.IsPartialRefund
-                ? settlementReturn.Amount.MinorUnits <= 0 ||
-                  settlementReturn.Amount.MinorUnits >=
-                    payment.Amount.MinorUnits
-                : payment.Amount != settlementReturn.Amount) ||
+            !sourceMatches ||
             !string.Equals(
                 payment.ProviderReference,
                 stalePreparation.ProviderReference,
@@ -1610,6 +1951,23 @@ public sealed class CsobCardJobSettlementReturnService :
         else
         {
             ValidateHistory(settlementReturn, payment, history);
+        }
+
+        if (settlementReturn.Kind == SettlementReturnKind.CardTopUp)
+        {
+            var hold = await _creditReturnHoldRepository
+                .FindBySettlementReturnIdForUpdateAsync(
+                    settlementReturn.Id,
+                    cancellationToken)
+                ?? throw TopUpInconsistent(
+                    operationId,
+                    "the completed return has no credit hold");
+            if (hold.State != CreditReturnHoldState.Consumed)
+            {
+                throw TopUpInconsistent(
+                    operationId,
+                    "the completed return does not have a consumed credit hold");
+            }
         }
 
         var confirmed = history.SingleOrDefault(attempt =>
@@ -1975,6 +2333,55 @@ public sealed class CsobCardJobSettlementReturnService :
         }
     }
 
+    private static void ValidateTopUpPayment(Payment payment)
+    {
+        if (
+            payment.Provider != PaymentProvider.Csob ||
+            payment.PurposeType != PaymentPurposeType.CreditTopUp ||
+            payment.JobId.HasValue ||
+            payment.Status != PaymentStatus.Succeeded ||
+            payment.ProviderReference is null)
+        {
+            throw TopUpNotAllowed(
+                payment.Id,
+                "only a successfully settled CSOB CreditTopUp payment with a provider reference is supported");
+        }
+    }
+
+    private static void ValidateTopUpReturn(
+        Payment payment,
+        SettlementReturn settlementReturn)
+    {
+        if (
+            settlementReturn.Kind != SettlementReturnKind.CardTopUp ||
+            settlementReturn.OriginalPaymentId != payment.Id ||
+            settlementReturn.JobId.HasValue ||
+            settlementReturn.CustomerUserId != payment.CustomerUserId ||
+            settlementReturn.Amount != payment.Amount)
+        {
+            throw TopUpInconsistent(
+                settlementReturn.RequestId,
+                "the SettlementReturn does not match its authoritative top-up payment");
+        }
+    }
+
+    private static void ValidateTopUpHold(
+        CreditAccount account,
+        SettlementReturn settlementReturn,
+        CreditReturnHold hold)
+    {
+        if (
+            hold.SettlementReturnId != settlementReturn.Id ||
+            hold.CreditAccountId != account.Id ||
+            account.OwnerId != settlementReturn.CustomerUserId ||
+            hold.Amount != settlementReturn.Amount)
+        {
+            throw TopUpInconsistent(
+                settlementReturn.RequestId,
+                "the credit return hold does not match the authoritative return and account");
+        }
+    }
+
     private static bool IsPreExistingRefund(string? diagnostic) =>
         string.Equals(
             diagnostic,
@@ -1996,6 +2403,28 @@ public sealed class CsobCardJobSettlementReturnService :
             outcome,
             reverseSent || preparation.ReverseSent,
             refundSent);
+
+    private static CardTopUpSettlementReturnResult ToTopUpResult(
+        CardJobSettlementReturnResult result) =>
+        new(
+            result.SettlementReturnId,
+            result.ProviderAttemptId,
+            result.Outcome switch
+            {
+                CardJobSettlementReturnOutcome.ReverseCompleted =>
+                    CardTopUpSettlementReturnOutcome.ReverseCompleted,
+                CardJobSettlementReturnOutcome.RefundProcessing =>
+                    CardTopUpSettlementReturnOutcome.RefundProcessing,
+                CardJobSettlementReturnOutcome.RefundCompleted =>
+                    CardTopUpSettlementReturnOutcome.RefundCompleted,
+                CardJobSettlementReturnOutcome.PreExistingProviderRefund =>
+                    CardTopUpSettlementReturnOutcome.PreExistingProviderRefund,
+                CardJobSettlementReturnOutcome.PartialRefundRejected =>
+                    CardTopUpSettlementReturnOutcome.Rejected,
+                _ => CardTopUpSettlementReturnOutcome.RequiresAttention
+            },
+            result.ReverseRequestSent,
+            result.RefundRequestSent);
 
     private static CardJobSettlementReturnOutcome CompletedOutcome(
         SettlementReturnProviderOperation operation,
@@ -2029,10 +2458,19 @@ public sealed class CsobCardJobSettlementReturnService :
         DateTimeOffset occurredAt) =>
         AuditEntry.ForUser(
             actorId,
-            action,
+            settlementReturn.Kind == SettlementReturnKind.CardTopUp
+                ? action.Replace(
+                    "settlement-return.card-job.",
+                    "settlement-return.card-top-up.",
+                    StringComparison.Ordinal)
+                : action,
             "settlement-return",
             settlementReturn.Id.ToString(),
-            $"CardJob {settlementReturn.JobId}; payment " +
+            $"{settlementReturn.Kind} " +
+            (settlementReturn.JobId.HasValue
+                ? $"job {settlementReturn.JobId}; "
+                : string.Empty) +
+            "payment " +
             $"{settlementReturn.OriginalPaymentId}; customer " +
             $"{settlementReturn.CustomerUserId}; " +
             $"{settlementReturn.Amount.MinorUnits} CZK minor units. " +
@@ -2051,6 +2489,32 @@ public sealed class CsobCardJobSettlementReturnService :
             command.AdministratorUserId,
             nameof(command.AdministratorUserId));
 
+        if (string.IsNullOrWhiteSpace(command.Reason))
+        {
+            throw new ArgumentException(
+                "Settlement return reason must not be blank.",
+                nameof(command));
+        }
+
+        if (command.Reason.Trim().Length > SettlementReturn.MaximumReasonLength)
+        {
+            throw new ArgumentException(
+                "Settlement return reason is too long.",
+                nameof(command));
+        }
+    }
+
+    private static void ValidateTopUpCommand(
+        CardTopUpSettlementReturnCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ValidateId(command.RequestId, nameof(command.RequestId));
+        ValidateId(
+            command.OriginalPaymentId,
+            nameof(command.OriginalPaymentId));
+        ValidateId(
+            command.AdministratorUserId,
+            nameof(command.AdministratorUserId));
         if (string.IsNullOrWhiteSpace(command.Reason))
         {
             throw new ArgumentException(
@@ -2115,6 +2579,14 @@ public sealed class CsobCardJobSettlementReturnService :
         string reason) =>
         new(paymentId, reason);
 
+    private static CardTopUpSettlementReturnNotAllowedException
+        TopUpNotAllowed(Guid paymentId, string reason) =>
+        new(paymentId, reason);
+
+    private static CardTopUpSettlementReturnStateInconsistentException
+        TopUpInconsistent(Guid requestId, string reason) =>
+        new(requestId, reason);
+
     private static CardJobSettlementReturnStateInconsistentException
         Inconsistent(Guid operationId, string reason) =>
         new(operationId, reason);
@@ -2135,7 +2607,9 @@ public sealed class CsobCardJobSettlementReturnService :
 
     private sealed record Preparation(
         Guid SettlementReturnId,
-        Guid JobId,
+        SettlementReturnKind Kind,
+        Guid CustomerUserId,
+        Guid? JobId,
         Guid ProviderAttemptId,
         SettlementReturnProviderOperation Operation,
         string ProviderReference,
@@ -2155,7 +2629,9 @@ public sealed class CsobCardJobSettlementReturnService :
             long? refundAmountMinorUnits = null) =>
             new(
                 settlementReturn.Id,
-                settlementReturn.JobId!.Value,
+                settlementReturn.Kind,
+                settlementReturn.CustomerUserId,
+                settlementReturn.JobId,
                 attempt.Id,
                 attempt.Operation,
                 attempt.ProviderReference,
@@ -2164,4 +2640,5 @@ public sealed class CsobCardJobSettlementReturnService :
                 reverseSent,
                 refundAmountMinorUnits);
     }
+
 }

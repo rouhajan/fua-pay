@@ -20,19 +20,23 @@ public sealed class IndexModel : PageModel
     private readonly ISettlementReturnQueries _settlementReturnQueries;
     private readonly ICardJobSettlementReturnService
         _cardJobSettlementReturnService;
+    private readonly ICardTopUpSettlementReturnService
+        _cardTopUpSettlementReturnService;
 
     public IndexModel(
         IPaymentQueries paymentQueries,
         IAccessUserQueries accessUserQueries,
         IPaymentReconciliationQueries reconciliationQueries,
         ISettlementReturnQueries settlementReturnQueries,
-        ICardJobSettlementReturnService cardJobSettlementReturnService)
+        ICardJobSettlementReturnService cardJobSettlementReturnService,
+        ICardTopUpSettlementReturnService cardTopUpSettlementReturnService)
     {
         ArgumentNullException.ThrowIfNull(paymentQueries);
         ArgumentNullException.ThrowIfNull(accessUserQueries);
         ArgumentNullException.ThrowIfNull(reconciliationQueries);
         ArgumentNullException.ThrowIfNull(settlementReturnQueries);
         ArgumentNullException.ThrowIfNull(cardJobSettlementReturnService);
+        ArgumentNullException.ThrowIfNull(cardTopUpSettlementReturnService);
 
         _paymentQueries = paymentQueries;
         _accessUserQueries = accessUserQueries;
@@ -40,6 +44,7 @@ public sealed class IndexModel : PageModel
         _settlementReturnQueries = settlementReturnQueries;
         _cardJobSettlementReturnService =
             cardJobSettlementReturnService;
+        _cardTopUpSettlementReturnService = cardTopUpSettlementReturnService;
     }
 
     public PaymentPage Payments { get; private set; } =
@@ -306,6 +311,88 @@ public sealed class IndexModel : PageModel
                 search: null,
                 offset: 0,
                 cancellationToken);
+            return Page();
+        }
+    }
+
+    public async Task<IActionResult> OnPostReturnTopUpAsync(
+        Guid requestId,
+        Guid originalPaymentId,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        if (requestId == Guid.Empty)
+        {
+            ModelState.AddModelError(
+                nameof(requestId),
+                "Identifikátor vratky není platný.");
+        }
+
+        if (originalPaymentId == Guid.Empty)
+        {
+            ModelState.AddModelError(
+                nameof(originalPaymentId),
+                "Identifikátor platby není platný.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            ModelState.AddModelError(
+                nameof(reason),
+                "Důvod vratky je povinný.");
+        }
+        else if (reason.Trim().Length > SettlementReturn.MaximumReasonLength)
+        {
+            ModelState.AddModelError(
+                nameof(reason),
+                "Důvod vratky je příliš dlouhý.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            await LoadAsync(null, null, null, 0, cancellationToken);
+            return Page();
+        }
+
+        try
+        {
+            var result = await _cardTopUpSettlementReturnService.ReturnAsync(
+                new CardTopUpSettlementReturnCommand(
+                    requestId,
+                    originalPaymentId,
+                    User.FindAccessUserId()
+                        ?? throw new InvalidOperationException(
+                            "Administrátor nemá interní ID."),
+                    reason),
+                cancellationToken);
+
+            TempData["StatusMessage"] = result.Outcome switch
+            {
+                CardTopUpSettlementReturnOutcome.ReverseCompleted =>
+                    "Celé karetní dobití bylo vráceno a kredit odečten.",
+                CardTopUpSettlementReturnOutcome.RefundCompleted =>
+                    "Full refund dobití byl ověřen a kredit odečten.",
+                CardTopUpSettlementReturnOutcome.RefundProcessing =>
+                    "Refund dobití se zpracovává; kredit zůstává rezervován.",
+                CardTopUpSettlementReturnOutcome.PreExistingProviderRefund =>
+                    "Poskytovatel již eviduje refund mimo tento tok; kredit zůstává rezervován a vratka vyžaduje kontrolu.",
+                CardTopUpSettlementReturnOutcome.Rejected =>
+                    "Vratka karetního dobití byla zamítnuta; rezervace kreditu byla uvolněna.",
+                _ =>
+                    "Výsledek vratky dobití je nejasný; kredit zůstává rezervován a providerový PUT se neopakuje."
+            };
+
+            return RedirectToPage(new { view = "admin" });
+        }
+        catch (Exception exception) when (
+            PageOperationError.IsExpected(exception))
+        {
+            PageOperationError.Add(
+                this,
+                exception,
+                "settlement-return.card-top-up",
+                "Vratku karetního dobití se nepodařilo bezpečně zpracovat.");
+            await LoadAsync(null, null, null, 0, cancellationToken);
             return Page();
         }
     }

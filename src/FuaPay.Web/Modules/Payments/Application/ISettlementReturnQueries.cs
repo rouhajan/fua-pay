@@ -24,8 +24,12 @@ public sealed record SettlementReturnAdministrationItem(
         (ProviderOperation != SettlementReturnProviderOperation.Reverse ||
          ProviderAttemptId == RequestId);
 
+    private bool UsesCsobReturnLifecycle =>
+        Kind is SettlementReturnKind.CardJob or
+            SettlementReturnKind.CardTopUp;
+
     public bool CanRecoverProviderAttempt =>
-        Kind == SettlementReturnKind.CardJob &&
+        UsesCsobReturnLifecycle &&
         HasExpectedProviderAttempt &&
         (State is
             SettlementReturnState.InProgress or
@@ -35,7 +39,7 @@ public sealed record SettlementReturnAdministrationItem(
             SettlementReturnProviderAttemptState.Uncertain);
 
     public bool IsCompletedReverse =>
-        Kind == SettlementReturnKind.CardJob &&
+        UsesCsobReturnLifecycle &&
         HasExpectedProviderAttempt &&
         State == SettlementReturnState.Completed &&
         ProviderOperation == SettlementReturnProviderOperation.Reverse &&
@@ -43,7 +47,7 @@ public sealed record SettlementReturnAdministrationItem(
             SettlementReturnProviderAttemptState.Confirmed;
 
     public bool IsCompletedRefund =>
-        Kind == SettlementReturnKind.CardJob &&
+        UsesCsobReturnLifecycle &&
         HasExpectedProviderAttempt &&
         State == SettlementReturnState.Completed &&
         ProviderOperation == SettlementReturnProviderOperation.Refund &&
@@ -51,7 +55,7 @@ public sealed record SettlementReturnAdministrationItem(
             SettlementReturnProviderAttemptState.Confirmed;
 
     public bool IsRefundProcessing =>
-        Kind == SettlementReturnKind.CardJob &&
+        UsesCsobReturnLifecycle &&
         HasExpectedProviderAttempt &&
         ProviderOperation == SettlementReturnProviderOperation.Refund &&
         State is
@@ -65,10 +69,18 @@ public sealed record SettlementReturnAdministrationItem(
                ProviderAttemptDiagnostic,
                CardJobSettlementReturnDiagnostics.RefundProcessing,
                StringComparison.Ordinal) ||
-           string.Equals(
-               ProviderAttemptDiagnostic,
-               CardJobSettlementReturnDiagnostics.PartialRefundProcessing,
-               StringComparison.Ordinal))));
+           (Kind == SettlementReturnKind.CardJob &&
+            string.Equals(
+                ProviderAttemptDiagnostic,
+                CardJobSettlementReturnDiagnostics.PartialRefundProcessing,
+                StringComparison.Ordinal)))));
+
+    public bool IsRejected =>
+        Kind == SettlementReturnKind.CardTopUp &&
+        HasExpectedProviderAttempt &&
+        State == SettlementReturnState.Rejected &&
+        ProviderAttemptState ==
+            SettlementReturnProviderAttemptState.Rejected;
 
     public bool IsPreExistingProviderRefund =>
         Kind == SettlementReturnKind.CardJob &&

@@ -46,6 +46,32 @@ public sealed class CsobPaymentReconciliationServiceTests
     }
 
     [Theory]
+    [InlineData(7)]
+    [InlineData(8)]
+    public async Task ReconcileAsync_AlreadySucceededPaidStatus_HasNoSecondEffect(
+        int gatewayPaymentStatus)
+    {
+        var payment = CreatePendingPayment();
+        payment.Complete(ReconciledAt.AddSeconds(-1));
+        var repository = new StubPaymentRepository(payment);
+        var settlement = new RecordingSettlementService(changed: false);
+        var service = CreateService(
+            repository,
+            GatewayStatus(gatewayPaymentStatus),
+            settlement);
+
+        var result = await service.ReconcileAsync(
+            payment.Id,
+            payment.ProviderReference!);
+
+        Assert.Equal(PaymentStatus.Succeeded, result.PaymentStatus);
+        Assert.Equal(gatewayPaymentStatus, result.GatewayPaymentStatus);
+        Assert.False(result.StateChanged);
+        Assert.Equal(0, repository.SaveCalls);
+        Assert.NotNull(settlement.Confirmation);
+    }
+
+    [Theory]
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(4)]

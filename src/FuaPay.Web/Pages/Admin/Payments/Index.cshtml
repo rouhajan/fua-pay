@@ -288,6 +288,97 @@
                                         </small>
                                     }
                                 }
+                                else if (
+                                    payment.Provider == PaymentProvider.Csob &&
+                                    payment.PurposeType == PaymentPurposeType.CreditTopUp &&
+                                    payment.Status == PaymentStatus.Succeeded)
+                                {
+                                    var topUpReturn = settlementReturns.SingleOrDefault();
+                                    if (topUpReturn is not null)
+                                    {
+                                        <div class="return-history" data-return-history>
+                                            <div class="return-history-item"
+                                                 data-return-id="@topUpReturn.SettlementReturnId">
+                                                <strong>
+                                                    Celé původní dobití:
+                                                    @DashboardDisplay.FormatMoney(topUpReturn.AmountMinorUnits)
+                                                </strong>
+                                                <small>@topUpReturn.Reason</small>
+                                                @if (topUpReturn.IsCompletedReverse || topUpReturn.IsCompletedRefund)
+                                                {
+                                                    <span class="status-badge is-completed"
+                                                          data-return-state="completed">
+                                                        Vráceno; kredit byl odečten
+                                                    </span>
+                                                }
+                                                else if (topUpReturn.IsRefundProcessing)
+                                                {
+                                                    <span class="status-badge is-progress"
+                                                          data-return-state="refund-processing">
+                                                        Zpracovává se; kredit zůstává rezervován
+                                                    </span>
+                                                }
+                                                else if (topUpReturn.IsRejected)
+                                                {
+                                                    <span class="status-badge is-failed"
+                                                          data-return-state="rejected">
+                                                        Zamítnuto; rezervace kreditu byla uvolněna
+                                                    </span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="status-badge is-failed"
+                                                          data-return-state="attention">
+                                                        Vyžaduje kontrolu; kredit zůstává rezervován
+                                                    </span>
+                                                }
+
+                                                @if (topUpReturn.CanRecoverProviderAttempt)
+                                                {
+                                                    <form method="post"
+                                                          asp-page-handler="ReturnTopUp"
+                                                          class="compact-action-form"
+                                                          data-return-action="recover-top-up">
+                                                        <input type="hidden" name="requestId" value="@topUpReturn.RequestId" />
+                                                        <input type="hidden" name="originalPaymentId" value="@payment.Id" />
+                                                        <input type="hidden" name="reason" value="@topUpReturn.Reason" />
+                                                        <button type="submit" class="secondary-button">
+                                                            Ověřit stav vratky
+                                                        </button>
+                                                    </form>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        var requestId = Guid.NewGuid();
+                                        <p>
+                                            Vrací se vždy celé původní karetní dobití
+                                            <strong>@DashboardDisplay.FormatMoney(payment.AmountMinorUnits)</strong>.
+                                            Částka je určena serverem a akce se zablokuje, pokud není celý kredit bezpečně dostupný.
+                                        </p>
+                                        <form method="post"
+                                              asp-page-handler="ReturnTopUp"
+                                              class="compact-action-form"
+                                              data-return-action="new-top-up"
+                                              data-return-operation-id="@requestId">
+                                            <input type="hidden" name="requestId" value="@requestId" />
+                                            <input type="hidden" name="originalPaymentId" value="@payment.Id" />
+                                            <label>
+                                                <span>Důvod</span>
+                                                <input type="text"
+                                                       name="reason"
+                                                       maxlength="@SettlementReturn.MaximumReasonLength"
+                                                       required
+                                                       placeholder="Důvod vrácení celého dobití" />
+                                            </label>
+                                            <button type="submit" class="danger-button">
+                                                Vrátit celé původní dobití
+                                            </button>
+                                        </form>
+                                    }
+                                }
                                 else
                                 {
                                     <span aria-hidden="true">—</span>

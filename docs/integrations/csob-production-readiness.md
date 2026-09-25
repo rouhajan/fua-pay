@@ -365,17 +365,18 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
    negativní cross-environment a URI-boundary testy a zpřesnění dokumentace;
    key/fingerprint preflight a fresh signed echo zůstávají samostatnou
    deployment/activation hranicí.
-2. Dokončit veřejné anonymní stránky `/Privacy` a `/Terms` bez nové zbytečné
-   právní stránky:
+2. Veřejné anonymní stránky `/Privacy` a `/Terms` obsahují zdrojově podložený
+   kontext TUL/FUA, CZK, charakter a způsob poskytnutí fakultních služeb,
+   reklamace/vratky a bezpečné karetní zpracování bez ukládání PAN/CVC.
+   Nadále platí:
    - `poverenec@tul.cz` ponechat jako DPO/GDPR kontakt TUL;
    - provozní/platební kontakt FUA Pay má být `fuapay@tul.cz`, ale před
      zveřejněním se musí potvrdit, že alias/mailbox skutečně existuje a je
      monitorovaný;
-   - Terms musí výslovně pokrýt provozovatele, CZK, charakter fakultních služeb,
-     reklamace/vratky, způsob poskytnutí služby, bezpečné karetní zpracování a
-     fakt, že FUA Pay neukládá číslo karty ani CVC;
-   - doplnit pouze oficiální schválená loga sjednaných platebních služeb/karetních
-     schémat.
+   - mailbox `fuapay@tul.cz` nebyl potvrzen, proto nebyl publikován a stávající
+     pravdivý kontakt zůstal zachován;
+   - schválené platební/karetní logo nebylo v repozitáři doloženo, proto nebylo
+     přidáno a tento externí bod zůstává otevřený.
 3. Production-grade returns scope z
    [payment-returns.md](../features/payment-returns.md):
    - [x] R2 CardJob plná vratka Reverse → full Refund je implementovaná v
@@ -390,13 +391,18 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
      kumulativního limitu, per-return persistence, souběžné rezervace a
      status-only recovery. Živý ČSOB partial Refund scénář zůstává otevřený v
      kroku 7 a není tímto označen PASS.
-   - [ ] R4: CardTopUp návrat nevyčerpaného kreditu na původní kartu s
-     `CreditReturnHold` a přesně-jednou životním cyklem consume/release.
-4. Doplnit samostatný účetní/reconciliation export pro párování s centrálním
-   ČSOB výpisem. Minimální párovací pole: `orderNo`, `payId`, FUA payment ID,
-   datum, částka, měna, účel, job number/service unit, finanční dokument a
-   reverse/refund stav/částka/čas. Osobní údaje pouze pokud je účetní proces
-   skutečně potřebuje.
+   - [x] R4: administrační plná CardTopUp vratka používá autoritativní původní
+     platbu, credit-account-first lock, `CreditReturnHold`, durabilní attempt před
+     PUT a atomický přesně-jednou debit/consume/complete. Admin read model
+     rozlišuje dokončený Reverse/Refund, zpracovávaný Refund, status-only recovery
+     a definitivně zamítnutou vratku s uvolněným holdem. Živý gateway scénář
+     zůstává v kroku 7.
+4. [x] Samostatný účetní/reconciliation CSV export páruje `orderNo`, `payId`, FUA
+   payment ID, finanční pole, job/pracoviště, dokument a každou vratku/provider
+   attempt včetně stabilního attempt ID na vlastním deterministickém řádku.
+   Neobsahuje jméno ani e-mail. PostgreSQL test nad reálnou EF query ověřuje
+   payment-only řádek, opakované partial vratky, CardTopUp Reverse → Refund
+   historii, autoritativní původ polí, řazení a limit po one-to-many expanzi.
 5. Entra logout neobcházet cookie-only hackem. Nejprve znovu urgovat tenant
    správce, aby app registration správně obsahovala samostatný
    `/signout-callback-oidc`; známý stav je popsán v
@@ -409,8 +415,16 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
      [evidence a výsledky](../testing/card-job-concurrent-creation-verification-2026-09-23.md).
      Nejde o živý ČSOB double-click test ani počítání provider HTTP init callů;
      příslušný live scénář v kroku 7 zůstává otevřený.
-   - [ ] Celá `Succeeded + nový status 7/8` reconciliation cesta.
-   - [ ] HTTP-level object-isolation probe.
+   - [x] PostgreSQL integration test vede nový status 7/8 nad již `Succeeded`
+     platbou skutečnou reconciliation/settlement cestou. CardTopUp zachová právě
+     jeden credit movement a dokument, CardJob právě jedno vypořádání a dokument;
+     výsledek hlásí `StateChanged=false` a fake gateway zaznamená pouze read-only
+     status call, žádnou mutaci.
+   - [x] HTTP/WebApplicationFactory negativní testy pokrývají cizí payment detail
+     a status, PDF finančního dokumentu, PDF legacy receiptu, customer job detail
+     a requester job detail omezený na přiřazená pracoviště. Všechny crafted URL
+     končí chráněným 404 bez settlement efektu. Admin-only mutation/export a
+     antiforgery hranice zůstávají pokryté samostatnými perimeter testy.
 7. Z jednoho clean commitu/release artefaktu udělat izolovaný staging deploy a
    v jediném souvislém testovacím okně zopakovat:
    - fresh GET echo a POST echo;

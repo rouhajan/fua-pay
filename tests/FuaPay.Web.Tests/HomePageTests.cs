@@ -36,4 +36,35 @@ public sealed class HomePageTests :
         Assert.DoesNotContain("type=\"email\"", content);
         Assert.DoesNotContain("type=\"password\"", content);
     }
+
+    [Theory]
+    [InlineData("/Privacy")]
+    [InlineData("/Terms")]
+    public async Task PublicPaymentInformation_IsAnonymousAndDoesNotPublishUnverifiedMailbox(
+        string path)
+    {
+        using var client = _factory.CreateClient(
+            new WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false,
+                BaseAddress = new Uri("https://localhost")
+            });
+
+        using var response = await client.GetAsync(path);
+        var content = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("FUA Pay", content);
+        Assert.DoesNotContain("fuapay@tul.cz", content);
+        if (path == "/Privacy")
+        {
+            Assert.Contains("poverenec@tul.cz", content);
+            Assert.Contains("CVC/CVV", content);
+        }
+        else
+        {
+            Assert.Contains("CZK", content);
+            Assert.Contains("platební brány ČSOB", content);
+        }
+    }
 }

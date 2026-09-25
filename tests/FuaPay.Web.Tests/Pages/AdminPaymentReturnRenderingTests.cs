@@ -250,6 +250,106 @@ public sealed class AdminPaymentReturnRenderingTests :
             StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(SettlementReturnProviderOperation.Reverse)]
+    [InlineData(SettlementReturnProviderOperation.Refund)]
+    public async Task CardTopUpCompletedReturnRendersAsCompleted(
+        SettlementReturnProviderOperation operation)
+    {
+        var html = await RenderAsync(ReturnItem(
+            Guid.NewGuid(),
+            SettlementReturnState.Completed,
+            SettlementReturnProviderAttemptState.Confirmed,
+            operation,
+            attemptId: operation == SettlementReturnProviderOperation.Reverse
+                ? null
+                : Guid.NewGuid(),
+            kind: SettlementReturnKind.CardTopUp));
+
+        Assert.Contains(
+            "data-return-state=\"completed\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "data-return-action=\"recover-top-up\"",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CardTopUpRefundProcessingIsDistinctAndRecoverable()
+    {
+        var html = await RenderAsync(ReturnItem(
+            Guid.NewGuid(),
+            SettlementReturnState.RequiresAttention,
+            SettlementReturnProviderAttemptState.Uncertain,
+            SettlementReturnProviderOperation.Refund,
+            CardJobSettlementReturnDiagnostics.RefundProcessing,
+            attemptId: Guid.NewGuid(),
+            kind: SettlementReturnKind.CardTopUp));
+
+        Assert.Contains(
+            "data-return-state=\"refund-processing\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "data-return-action=\"recover-top-up\"",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CardTopUpActiveAttemptOffersStatusOnlyRecovery()
+    {
+        var requestId = Guid.NewGuid();
+        var html = await RenderAsync(ReturnItem(
+            requestId,
+            SettlementReturnState.RequiresAttention,
+            SettlementReturnProviderAttemptState.Uncertain,
+            kind: SettlementReturnKind.CardTopUp));
+
+        Assert.Contains(
+            "data-return-state=\"attention\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "data-return-action=\"recover-top-up\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(requestId.ToString(), html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "data-return-action=\"new-top-up\"",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CardTopUpRejectedRendersReleasedCreditReservation()
+    {
+        var html = await RenderAsync(ReturnItem(
+            Guid.NewGuid(),
+            SettlementReturnState.Rejected,
+            SettlementReturnProviderAttemptState.Rejected,
+            kind: SettlementReturnKind.CardTopUp));
+
+        Assert.Contains(
+            "data-return-state=\"rejected\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "rezervace kreditu byla uvolněna",
+            html,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "data-return-action=\"recover-top-up\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "kredit zůstává rezervován",
+            html,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task PaginationSearch_DoesNotRenderExecutableHtml()
     {
@@ -359,11 +459,12 @@ public sealed class AdminPaymentReturnRenderingTests :
             SettlementReturnProviderOperation.Reverse,
         string? diagnostic = null,
         Guid? attemptId = null,
-        long amountMinorUnits = 12_500) =>
+        long amountMinorUnits = 12_500,
+        SettlementReturnKind kind = SettlementReturnKind.CardJob) =>
         new(
             Guid.NewGuid(),
             requestId,
-            SettlementReturnKind.CardJob,
+            kind,
             PaymentId,
             amountMinorUnits,
             returnState,
@@ -401,8 +502,14 @@ public sealed class AdminPaymentReturnRenderingTests :
                 [new PaymentListItem(
                     PaymentId,
                     Guid.NewGuid(),
-                    PaymentPurposeType.Job,
-                    Guid.NewGuid(),
+                    _returns.Any(item =>
+                        item.Kind == SettlementReturnKind.CardTopUp)
+                        ? PaymentPurposeType.CreditTopUp
+                        : PaymentPurposeType.Job,
+                    _returns.Any(item =>
+                        item.Kind == SettlementReturnKind.CardTopUp)
+                        ? null
+                        : Guid.NewGuid(),
                     12_500,
                     PaymentProvider.Csob,
                     PaymentStatus.Succeeded,

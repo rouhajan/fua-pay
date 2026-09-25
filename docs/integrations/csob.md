@@ -206,8 +206,9 @@ Administrátor může z přehledu plateb spustit plnou nebo částečnou vratku 
 ČSOB platby zakázky. POST s antiforgery předá idempotentní operation ID,
 identifikátor vybírané platby, důvod a u partial refundu částku. Zákazníka,
 zakázku, měnu, provider, `payId` a vratný limit služba vždy znovu odvodí z
-autoritativní uložené platby a vypořádání zakázky. CardTopUp ani kreditní zakázka
-touto cestou podporovány nejsou.
+autoritativní uložené platby a vypořádání zakázky. Samostatná CardTopUp cesta
+používá stejný providerový stavový automat, ale navíc před PUT rezervuje celý
+původní top-up přes `CreditReturnHold` a při potvrzení jej přesně jednou odečte.
 
 `SettlementReturn` a jeho Reverse provider attempt se nejdřív v jedné databázové
 transakci uloží jako `InProgress`. Teprve po commitu smí první oprávněný request
@@ -272,11 +273,11 @@ stejným HTTP, RSA/SHA-256, freshness a fail-closed ověřením jako ostatní
 gateway operace a vrací strukturovaný protokolový výsledek včetně volitelných
 `authCode` a `statusDetail`.
 
-CardJob aplikační orchestrace tuto hranici používá pro výše popsaný plný refund
+CardJob i CardTopUp aplikační orchestrace tuto hranici používají pro výše popsaný plný refund
 po bezpečně prokázaném stavu 8 i pro přímo zahájené partial refundy s částkou.
 Samotný HTTP 200 není autorita; služba pracuje jen s výsledkem po RSA/SHA-256,
-freshness a `payId` ověření. CardTopUp návrat a automatické rozlišení konkrétního
-plného/částečného návratu při status-only recovery zůstávají neimplementované.
+freshness a `payId` ověření. Status-only recovery 10 nadále automaticky
+nerozlišuje ani nepotvrzuje konkrétní plný/částečný návrat.
 
 ## Známé implementační mezery před production readiness
 
@@ -291,16 +292,17 @@ session umožnila další kartu. Opakovaný provider `payment/status` nad již
 `Succeeded` platbou se také uměle nevynucoval, protože nasazená aplikace nemá
 veřejný/operator endpoint pro takový probe; ruční DB zápis ani testovací bypass
 se kvůli acceptance nepřidával. Finanční exactly-once hranice je však přímo
-krytá implementací: `PaymentSettlementService.CompleteAsync()` nad již
-`Succeeded` platbou vrací `false` před novým efektem a PostgreSQL testy pokrývají
-opakovaný i concurrent ČSOB settlement s právě jedním pohybem/dokumentem nebo
-job settlementem. Tato evidence nenahrazuje chybějící fresh live provider replay.
+krytá implementací a PostgreSQL integration testem celé
+reconciliation/settlement cesty: stav 7/8 nad již `Succeeded` platbou vrátí
+`StateChanged=false`, provede pouze read-only status call a zachová právě jeden
+pohyb/dokument nebo job settlement. Tato evidence nenahrazuje chybějící fresh
+live provider replay.
 
-Plný i částečný/opakovaný CardJob Refund je implementovaný v aplikaci včetně
-durabilního attemptu, kumulativní rezervace, status-only recovery, auditu a admin
-UI, ale nebyl ověřen živým gateway testem. CardTopUp návrat a jednoznačná
-recovery konkrétního refundu ze samotného statusu 10 zůstávají samostatnými
-mezerami. Refund navíc není
+Plný i částečný/opakovaný CardJob Refund a plná CardTopUp vratka jsou
+implementované v aplikaci včetně
+durabilního attemptu, rezervace, status-only recovery, auditu a admin UI, ale
+nebyly ověřeny živým gateway testem. Jednoznačná recovery konkrétního refundu ze
+samotného statusu 10 zůstává záměrně fail-closed. Refund navíc není
 součástí povinného ČSOB production-activation checklistu; tento lokálně
 otestovaný slice proto sám o sobě nedokládá production readiness ani bankovní
 acceptance.
