@@ -60,7 +60,9 @@ internal sealed class EfSettlementReturnRepository :
         var entity = await _dbContext.SettlementReturns
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                item => item.OriginalPaymentId == originalPaymentId,
+                item =>
+                    item.OriginalPaymentId == originalPaymentId &&
+                    item.Kind == (int)SettlementReturnKind.CardTopUp,
                 cancellationToken);
 
         return RestoreAndRemember(entity);
@@ -75,10 +77,31 @@ internal sealed class EfSettlementReturnRepository :
         var entity = await _dbContext.SettlementReturns
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                item => item.JobId == jobId,
+                item =>
+                    item.JobId == jobId &&
+                    item.Kind == (int)SettlementReturnKind.CreditJob,
                 cancellationToken);
 
         return RestoreAndRemember(entity);
+    }
+
+    public async Task<IReadOnlyList<SettlementReturn>>
+        ListByOriginalPaymentIdAsync(
+            Guid originalPaymentId,
+            CancellationToken cancellationToken = default)
+    {
+        ValidateId(originalPaymentId, nameof(originalPaymentId));
+
+        var entities = await _dbContext.SettlementReturns
+            .AsNoTracking()
+            .Where(item => item.OriginalPaymentId == originalPaymentId)
+            .OrderBy(item => item.RequestedAt)
+            .ThenBy(item => item.Id)
+            .ToArrayAsync(cancellationToken);
+
+        return entities
+            .Select(entity => RestoreAndRemember(entity)!)
+            .ToArray();
     }
 
     public async Task AddAsync(

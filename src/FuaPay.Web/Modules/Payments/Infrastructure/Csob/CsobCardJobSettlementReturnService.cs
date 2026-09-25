@@ -28,6 +28,12 @@ public sealed class CsobCardJobSettlementReturnService :
         CardJobSettlementReturnDiagnostics.RefundProcessing;
     internal const string RefundReturnedWithoutFullProofDiagnostic =
         "Signed CSOB status 10 lacks documented machine-readable full-refund proof.";
+    internal const string PartialRefundAmbiguousDiagnostic =
+        "CSOB partial-refund outcome requires signed status recovery.";
+    internal const string PartialRefundStatusAmbiguousDiagnostic =
+        "CSOB status cannot prove the outcome of this partial-refund amount.";
+    internal const string PartialRefundReturnedWithoutProofDiagnostic =
+        "Signed CSOB status 10 cannot prove this specific partial-refund amount.";
 
     private readonly IJobRepository _jobRepository;
     private readonly IJobPaymentCoordination _jobPaymentCoordination;
@@ -109,6 +115,165 @@ public sealed class CsobCardJobSettlementReturnService :
             cancellationToken);
     }
 
+    public async Task<CardJobSettlementReturnResult> PartialRefundAsync(
+        CardJobPartialRefundCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        ValidatePartialCommand(command);
+
+        Preparation preparation;
+        try
+        {
+            preparation = await _transaction.ExecuteAsync(
+                ct => PreparePartialAsync(command, ct),
+                cancellationToken);
+        }
+        catch (Exception exception) when (
+            exception is SettlementReturnConcurrencyException or
+                SettlementReturnProviderAttemptConcurrencyException)
+        {
+            preparation = await _transaction.ExecuteAsync(
+                ct => PreparePartialAsync(command, ct),
+                cancellationToken);
+        }
+
+        return await ContinueAsync(
+            command.OperationId,
+            preparation,
+            cancellationToken);
+    }
+
+    private async Task<Preparation> PreparePartialAsync(
+        CardJobPartialRefundCommand command,
+        CancellationToken cancellationToken)
+    {
+        var payment = await _paymentRepository.FindByIdAsync(
+            command.OriginalPaymentId,
+            cancellationToken)
+            ?? throw NotAllowed(
+                command.OriginalPaymentId,
+                "the authoritative original payment does not exist");
+        ValidatePayment(payment);
+
+        var jobId = payment.JobId!.Value;
+        await LockJobOrThrowAsync(
+            command.OperationId,
+            jobId,
+            cancellationToken);
+        var job = await _jobRepository.FindByIdAsync(
+            jobId,
+            cancellationToken)
+            ?? throw NotAllowed(
+                payment.Id,
+                "the authoritative job does not exist");
+        ValidateJob(payment, job);
+
+        var candidate = new SettlementReturn(
+            Guid.NewGuid(),
+            command.OperationId,
+            SettlementReturnKind.CardJob,
+            payment.Id,
+            job.Id,
+            payment.CustomerUserId,
+            command.AdministratorUserId,
+            new Money(command.AmountMinorUnits),
+            command.Reason,
+            _timeProvider.GetUtcNow());
+        var existing = await _returnRepository.FindByRequestIdAsync(
+            command.OperationId,
+            cancellationToken);
+
+        SettlementReturn settlementReturn;
+        if (existing is null)
+        {
+            var returns = await _returnRepository
+                .ListByOriginalPaymentIdAsync(
+                    payment.Id,
+                    cancellationToken);
+            var reservedMinorUnits = SumReservedMinorUnits(returns);
+            var remainingMinorUnits = checked(
+                payment.Amount.MinorUnits - reservedMinorUnits);
+
+            if (remainingMinorUnits <= 0 ||
+                command.AmountMinorUnits >= remainingMinorUnits)
+            {
+                throw new CardJobPartialRefundAmountException(
+                    payment.Id,
+                    command.AmountMinorUnits,
+                    Math.Max(0, remainingMinorUnits),
+                    command.AmountMinorUnits == remainingMinorUnits
+                        ? "CSOB documents amount equal to the remaining " +
+                          "balance as a full refund, which is not safely " +
+                          "available after partial refunds"
+                        : "the amount is not below the safely available " +
+                          "partial-refund ceiling");
+            }
+
+            settlementReturn = (await _registrationService.RegisterAsync(
+                candidate,
+                cancellationToken)).SettlementReturn;
+        }
+        else
+        {
+            settlementReturn = (await _registrationService.RegisterAsync(
+                candidate,
+                cancellationToken)).SettlementReturn;
+        }
+
+        ValidatePartialReturn(payment, job, settlementReturn);
+        var history = await _attemptRepository.ListBySettlementReturnIdAsync(
+            settlementReturn.Id,
+            cancellationToken);
+
+        if (history.Count == 0)
+        {
+            if (settlementReturn.State != SettlementReturnState.Requested)
+            {
+                throw Inconsistent(
+                    command.OperationId,
+                    "an unresolved partial refund has no provider attempt");
+            }
+
+            var created = await _attemptService.CreateAsync(
+                new CreateSettlementReturnProviderAttemptCommand(
+                    command.OperationId,
+                    settlementReturn.Id,
+                    SettlementReturnProviderOperation.Refund),
+                cancellationToken);
+            history = [created.Attempt];
+        }
+
+        ValidatePartialHistory(settlementReturn, payment, history);
+        var attempt = history.Single();
+
+        if (settlementReturn.State == SettlementReturnState.Completed)
+        {
+            return Preparation.For(
+                settlementReturn,
+                attempt,
+                command.AdministratorUserId,
+                Disposition.RefundCompleted,
+                refundAmountMinorUnits: settlementReturn.Amount.MinorUnits);
+        }
+
+        if (settlementReturn.State == SettlementReturnState.Rejected)
+        {
+            return Preparation.For(
+                settlementReturn,
+                attempt,
+                command.AdministratorUserId,
+                Disposition.RefundRejected,
+                refundAmountMinorUnits: settlementReturn.Amount.MinorUnits);
+        }
+
+        return await ResolveActiveAsync(
+            settlementReturn,
+            attempt,
+            command.AdministratorUserId,
+            cancellationToken,
+            settlementReturn.Amount.MinorUnits);
+    }
+
     private Task<Preparation> PrepareTransactionAsync(
         CardJobSettlementReturnCommand command,
         CancellationToken cancellationToken) =>
@@ -154,6 +319,30 @@ public sealed class CsobCardJobSettlementReturnService :
                 payment.Id,
                 "the authoritative job does not exist");
         ValidateJob(payment, job);
+
+        existingReturn = await _returnRepository.FindByRequestIdAsync(
+            command.OperationId,
+            cancellationToken);
+        if (
+            existingReturn is not null &&
+            existingReturn.OriginalPaymentId != command.OriginalPaymentId)
+        {
+            throw new SettlementReturnRequestConflictException(
+                command.OperationId);
+        }
+
+        var otherReservedReturns = await _returnRepository
+            .ListByOriginalPaymentIdAsync(payment.Id, cancellationToken);
+        if (otherReservedReturns.Any(item =>
+                item.Id != existingReturn?.Id &&
+                item.Kind == SettlementReturnKind.CardJob &&
+                item.State != SettlementReturnState.Rejected))
+        {
+            throw NotAllowed(
+                payment.Id,
+                "a full refund cannot be sent after another CardJob refund " +
+                "has reserved or returned part of the payment");
+        }
 
         SettlementReturn settlementReturn;
         if (existingReturn is null)
@@ -262,7 +451,8 @@ public sealed class CsobCardJobSettlementReturnService :
         SettlementReturn settlementReturn,
         SettlementReturnProviderAttempt attempt,
         Guid actorId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? refundAmountMinorUnits = null)
     {
         if (
             attempt.State == SettlementReturnProviderAttemptState.Prepared &&
@@ -290,7 +480,9 @@ public sealed class CsobCardJobSettlementReturnService :
                 attempt.Operation ==
                     SettlementReturnProviderOperation.Reverse
                     ? "CSOB reverse became eligible after durable InProgress persistence."
-                    : "CSOB full refund became eligible after durable InProgress persistence.",
+                    : refundAmountMinorUnits.HasValue
+                        ? "CSOB partial refund became eligible after durable InProgress persistence."
+                        : "CSOB full refund became eligible after durable InProgress persistence.",
                 changedAt));
             attempt = await _attemptService.BeginAsync(
                 attempt.Id,
@@ -306,7 +498,8 @@ public sealed class CsobCardJobSettlementReturnService :
                 attempt.Operation ==
                     SettlementReturnProviderOperation.Reverse
                     ? Disposition.SendReverse
-                    : Disposition.SendRefund);
+                    : Disposition.SendRefund,
+                refundAmountMinorUnits: refundAmountMinorUnits);
         }
 
         if (
@@ -335,7 +528,8 @@ public sealed class CsobCardJobSettlementReturnService :
                 attempt.Operation ==
                     SettlementReturnProviderOperation.Reverse
                     ? Disposition.RecoverReverse
-                    : Disposition.RecoverRefund);
+                    : Disposition.RecoverRefund,
+                refundAmountMinorUnits: refundAmountMinorUnits);
         }
 
         throw Inconsistent(
@@ -371,7 +565,12 @@ public sealed class CsobCardJobSettlementReturnService :
                 CardJobSettlementReturnOutcome.ReverseCompleted),
             Disposition.RefundCompleted => Result(
                 preparation,
-                CardJobSettlementReturnOutcome.RefundCompleted),
+                preparation.IsPartialRefund
+                    ? CardJobSettlementReturnOutcome.PartialRefundCompleted
+                    : CardJobSettlementReturnOutcome.RefundCompleted),
+            Disposition.RefundRejected => Result(
+                preparation,
+                CardJobSettlementReturnOutcome.PartialRefundRejected),
             Disposition.PreExistingProviderRefund => Result(
                 preparation,
                 CardJobSettlementReturnOutcome.PreExistingProviderRefund),
@@ -563,7 +762,7 @@ public sealed class CsobCardJobSettlementReturnService :
         {
             var response = await _gatewayClient.RefundAsync(
                 preparation.ProviderReference,
-                amountMinorUnits: null,
+                preparation.RefundAmountMinorUnits,
                 cancellationToken);
 
             if (response.ResultCode == 0 && response.PaymentStatus == 10)
@@ -589,7 +788,9 @@ public sealed class CsobCardJobSettlementReturnService :
             return await MarkUncertainAsync(
                 operationId,
                 preparation,
-                RefundAmbiguousDiagnostic,
+                preparation.IsPartialRefund
+                    ? PartialRefundAmbiguousDiagnostic
+                    : RefundAmbiguousDiagnostic,
                 preparation.ReverseSent,
                 refundSent: true,
                 cancellationToken);
@@ -599,7 +800,9 @@ public sealed class CsobCardJobSettlementReturnService :
             await PersistSafetyOrThrowAsync(
                 operationId,
                 preparation,
-                RefundAmbiguousDiagnostic,
+                preparation.IsPartialRefund
+                    ? PartialRefundAmbiguousDiagnostic
+                    : RefundAmbiguousDiagnostic,
                 preparation.ReverseSent,
                 refundSent: true,
                 exception);
@@ -610,7 +813,9 @@ public sealed class CsobCardJobSettlementReturnService :
             return await PersistSafetyOrThrowAsync(
                 operationId,
                 preparation,
-                RefundAmbiguousDiagnostic,
+                preparation.IsPartialRefund
+                    ? PartialRefundAmbiguousDiagnostic
+                    : RefundAmbiguousDiagnostic,
                 preparation.ReverseSent,
                 refundSent: true,
                 exception);
@@ -665,8 +870,12 @@ public sealed class CsobCardJobSettlementReturnService :
             operationId,
             preparation,
             status.ResultCode == 0 && status.PaymentStatus == 10
-                ? RefundReturnedWithoutFullProofDiagnostic
-                : RefundStatusAmbiguousDiagnostic,
+                ? preparation.IsPartialRefund
+                    ? PartialRefundReturnedWithoutProofDiagnostic
+                    : RefundReturnedWithoutFullProofDiagnostic
+                : preparation.IsPartialRefund
+                    ? PartialRefundStatusAmbiguousDiagnostic
+                    : RefundStatusAmbiguousDiagnostic,
             reverseSent: false,
             refundSent: false,
             cancellationToken);
@@ -1001,7 +1210,9 @@ public sealed class CsobCardJobSettlementReturnService :
             preparation.Operation ==
                 SettlementReturnProviderOperation.Reverse
                 ? "Signed CSOB evidence confirmed resultCode 0 and paymentStatus 5."
-                : "The direct signed CSOB full-refund response confirmed resultCode 0 and paymentStatus 10.",
+                : preparation.IsPartialRefund
+                    ? "The direct signed CSOB partial-refund response confirmed resultCode 0 and paymentStatus 10 for the requested amount."
+                    : "The direct signed CSOB full-refund response confirmed resultCode 0 and paymentStatus 10.",
             changedAt));
         await _attemptService.ConfirmAsync(
             attempt.Id,
@@ -1012,7 +1223,9 @@ public sealed class CsobCardJobSettlementReturnService :
 
         return Result(
             preparation,
-            CompletedOutcome(preparation.Operation),
+            CompletedOutcome(
+                preparation.Operation,
+                preparation.IsPartialRefund),
             reverseSent,
             refundSent);
     }
@@ -1084,7 +1297,10 @@ public sealed class CsobCardJobSettlementReturnService :
         {
             await _attemptService.UpdateUncertainAsync(
                 attempt.Id,
-                RefundProcessingDiagnostic,
+                preparation.IsPartialRefund
+                    ? CardJobSettlementReturnDiagnostics
+                        .PartialRefundProcessing
+                    : RefundProcessingDiagnostic,
                 cancellationToken);
         }
 
@@ -1098,7 +1314,9 @@ public sealed class CsobCardJobSettlementReturnService :
             cancellationToken);
         return Result(
             preparation,
-            CardJobSettlementReturnOutcome.RefundProcessing,
+            preparation.IsPartialRefund
+                ? CardJobSettlementReturnOutcome.PartialRefundProcessing
+                : CardJobSettlementReturnOutcome.RefundProcessing,
             reverseSent,
             refundSent);
     }
@@ -1231,7 +1449,9 @@ public sealed class CsobCardJobSettlementReturnService :
                 preparation.Operation ==
                     SettlementReturnProviderOperation.Reverse
                     ? "CSOB reverse outcome is ambiguous; all future automatic recovery is status-only."
-                    : "CSOB full-refund outcome is unresolved; all future automatic recovery is status-only and no second refund PUT is allowed.",
+                    : preparation.IsPartialRefund
+                        ? "CSOB partial-refund outcome is unresolved; all future automatic recovery is status-only and no second refund PUT is allowed."
+                        : "CSOB full-refund outcome is unresolved; all future automatic recovery is status-only and no second refund PUT is allowed.",
                 changedAt),
             cancellationToken);
         return Result(
@@ -1365,7 +1585,11 @@ public sealed class CsobCardJobSettlementReturnService :
             payment.ProviderReference is null ||
             payment.JobId != settlementReturn.JobId ||
             payment.CustomerUserId != settlementReturn.CustomerUserId ||
-            payment.Amount != settlementReturn.Amount ||
+            (stalePreparation.IsPartialRefund
+                ? settlementReturn.Amount.MinorUnits <= 0 ||
+                  settlementReturn.Amount.MinorUnits >=
+                    payment.Amount.MinorUnits
+                : payment.Amount != settlementReturn.Amount) ||
             !string.Equals(
                 payment.ProviderReference,
                 stalePreparation.ProviderReference,
@@ -1379,7 +1603,14 @@ public sealed class CsobCardJobSettlementReturnService :
         var history = await _attemptRepository.ListBySettlementReturnIdAsync(
             settlementReturn.Id,
             cancellationToken);
-        ValidateHistory(settlementReturn, payment, history);
+        if (stalePreparation.IsPartialRefund)
+        {
+            ValidatePartialHistory(settlementReturn, payment, history);
+        }
+        else
+        {
+            ValidateHistory(settlementReturn, payment, history);
+        }
 
         var confirmed = history.SingleOrDefault(attempt =>
             attempt.State == SettlementReturnProviderAttemptState.Confirmed)
@@ -1394,7 +1625,8 @@ public sealed class CsobCardJobSettlementReturnService :
             confirmed.Operation == SettlementReturnProviderOperation.Reverse
                 ? Disposition.ReverseCompleted
                 : Disposition.RefundCompleted,
-            stalePreparation.ReverseSent);
+            stalePreparation.ReverseSent,
+            stalePreparation.RefundAmountMinorUnits);
     }
 
     private async Task<CardJobSettlementReturnResult>
@@ -1414,7 +1646,9 @@ public sealed class CsobCardJobSettlementReturnService :
 
         return Result(
             completed,
-            CompletedOutcome(completed.Operation),
+            CompletedOutcome(
+                completed.Operation,
+                completed.IsPartialRefund),
             reverseSent,
             refundSent);
     }
@@ -1465,6 +1699,92 @@ public sealed class CsobCardJobSettlementReturnService :
             throw Inconsistent(
                 operationId,
                 "signed gateway evidence cannot resolve the current states");
+        }
+    }
+
+    private static long SumReservedMinorUnits(
+        IEnumerable<SettlementReturn> settlementReturns)
+    {
+        long reserved = 0;
+        foreach (var settlementReturn in settlementReturns)
+        {
+            if (
+                settlementReturn.Kind == SettlementReturnKind.CardJob &&
+                settlementReturn.State != SettlementReturnState.Rejected)
+            {
+                reserved = checked(
+                    reserved + settlementReturn.Amount.MinorUnits);
+            }
+        }
+
+        return reserved;
+    }
+
+    private static void ValidatePartialReturn(
+        Payment payment,
+        Job job,
+        SettlementReturn settlementReturn)
+    {
+        if (
+            settlementReturn.Kind != SettlementReturnKind.CardJob ||
+            settlementReturn.OriginalPaymentId != payment.Id ||
+            settlementReturn.JobId != job.Id ||
+            settlementReturn.CustomerUserId != payment.CustomerUserId ||
+            settlementReturn.Amount.MinorUnits <= 0 ||
+            settlementReturn.Amount.MinorUnits >= payment.Amount.MinorUnits)
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "the partial SettlementReturn does not match its " +
+                "authoritative payment, job, and partial amount ceiling");
+        }
+    }
+
+    private static void ValidatePartialHistory(
+        SettlementReturn settlementReturn,
+        Payment payment,
+        IReadOnlyList<SettlementReturnProviderAttempt> history)
+    {
+        if (history.Count != 1)
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "a partial CardJob refund must have exactly one provider attempt");
+        }
+
+        var attempt = history[0];
+        if (
+            attempt.Id != settlementReturn.RequestId ||
+            attempt.SettlementReturnId != settlementReturn.Id ||
+            attempt.Provider != PaymentProvider.Csob ||
+            attempt.Operation != SettlementReturnProviderOperation.Refund ||
+            !string.Equals(
+                attempt.ProviderReference,
+                payment.ProviderReference,
+                StringComparison.Ordinal))
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "the partial-refund attempt does not match its request and payment");
+        }
+
+        var terminalShape = settlementReturn.State switch
+        {
+            SettlementReturnState.Completed =>
+                attempt.State ==
+                    SettlementReturnProviderAttemptState.Confirmed,
+            SettlementReturnState.Rejected =>
+                attempt.State ==
+                    SettlementReturnProviderAttemptState.Rejected,
+            _ => attempt.State is not
+                SettlementReturnProviderAttemptState.Confirmed and not
+                SettlementReturnProviderAttemptState.Rejected
+        };
+        if (!terminalShape)
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "the partial-refund return and attempt terminal states disagree");
         }
     }
 
@@ -1678,10 +1998,13 @@ public sealed class CsobCardJobSettlementReturnService :
             refundSent);
 
     private static CardJobSettlementReturnOutcome CompletedOutcome(
-        SettlementReturnProviderOperation operation) =>
+        SettlementReturnProviderOperation operation,
+        bool isPartialRefund = false) =>
         operation == SettlementReturnProviderOperation.Reverse
             ? CardJobSettlementReturnOutcome.ReverseCompleted
-            : CardJobSettlementReturnOutcome.RefundCompleted;
+            : isPartialRefund
+                ? CardJobSettlementReturnOutcome.PartialRefundCompleted
+                : CardJobSettlementReturnOutcome.RefundCompleted;
 
     private static CardJobSettlementReturnOutcome ActiveRefundOutcome(
         SettlementReturnProviderAttempt attempt) =>
@@ -1743,6 +2066,40 @@ public sealed class CsobCardJobSettlementReturnService :
         }
     }
 
+    private static void ValidatePartialCommand(
+        CardJobPartialRefundCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ValidateId(command.OperationId, nameof(command.OperationId));
+        ValidateId(
+            command.OriginalPaymentId,
+            nameof(command.OriginalPaymentId));
+        ValidateId(
+            command.AdministratorUserId,
+            nameof(command.AdministratorUserId));
+
+        if (command.AmountMinorUnits <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(command),
+                "Partial refund amount must be positive.");
+        }
+
+        if (string.IsNullOrWhiteSpace(command.Reason))
+        {
+            throw new ArgumentException(
+                "Settlement return reason must not be blank.",
+                nameof(command));
+        }
+
+        if (command.Reason.Trim().Length > SettlementReturn.MaximumReasonLength)
+        {
+            throw new ArgumentException(
+                "Settlement return reason is too long.",
+                nameof(command));
+        }
+    }
+
     private static void ValidateId(Guid value, string parameterName)
     {
         if (value == Guid.Empty)
@@ -1772,7 +2129,8 @@ public sealed class CsobCardJobSettlementReturnService :
         ReverseCompleted = 5,
         RefundCompleted = 6,
         PreExistingProviderRefund = 7,
-        RequiresAttention = 8
+        RequiresAttention = 8,
+        RefundRejected = 9
     }
 
     private sealed record Preparation(
@@ -1783,14 +2141,18 @@ public sealed class CsobCardJobSettlementReturnService :
         string ProviderReference,
         Guid AdministratorActorUserId,
         Disposition Next,
-        bool ReverseSent)
+        bool ReverseSent,
+        long? RefundAmountMinorUnits)
     {
+        public bool IsPartialRefund => RefundAmountMinorUnits.HasValue;
+
         public static Preparation For(
             SettlementReturn settlementReturn,
             SettlementReturnProviderAttempt attempt,
             Guid actorId,
             Disposition next,
-            bool reverseSent = false) =>
+            bool reverseSent = false,
+            long? refundAmountMinorUnits = null) =>
             new(
                 settlementReturn.Id,
                 settlementReturn.JobId!.Value,
@@ -1799,6 +2161,7 @@ public sealed class CsobCardJobSettlementReturnService :
                 attempt.ProviderReference,
                 actorId,
                 next,
-                reverseSent);
+                reverseSent,
+                refundAmountMinorUnits);
     }
 }

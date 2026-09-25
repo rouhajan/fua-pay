@@ -93,6 +93,12 @@ public sealed class SettlementReturnPersistenceTests :
         Assert.Contains(
             "uq_payments_settlement_returns_job",
             indexes);
+        Assert.Contains(
+            "ix_payments_settlement_returns_card_job_payment",
+            indexes);
+        Assert.Contains(
+            "ix_payments_settlement_returns_card_job_job",
+            indexes);
     }
 
     [Fact]
@@ -179,6 +185,35 @@ public sealed class SettlementReturnPersistenceTests :
         finally
         {
             await transaction.RollbackAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Database_AllowsMultipleCardJobReturnsForSameSource()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider
+            .GetRequiredService<FuaPayDbContext>();
+        var payment = await AddSucceededPaymentAsync(scope.ServiceProvider);
+        var repository = scope.ServiceProvider
+            .GetRequiredService<ISettlementReturnRepository>();
+        await using var transaction =
+            await dbContext.Database.BeginTransactionAsync();
+        var jobId = Guid.NewGuid();
+
+        try
+        {
+            await repository.AddAsync(CreateCardJob(payment, jobId, 2_000));
+            await repository.AddAsync(CreateCardJob(payment, jobId, 3_000));
+
+            var returns = await repository.ListByOriginalPaymentIdAsync(
+                payment.Id);
+            Assert.Equal(2, returns.Count);
+        }
+        finally
+        {
+            await transaction.RollbackAsync();
+            await DeletePaymentsAsync(payment.Id);
         }
     }
 
@@ -547,6 +582,24 @@ public sealed class SettlementReturnPersistenceTests :
             Guid.NewGuid(),
             payment.Amount,
             "Administrative reason",
+            RequestedAt.AddMinutes(3));
+    }
+
+    private static SettlementReturn CreateCardJob(
+        Payment payment,
+        Guid jobId,
+        long amountMinorUnits)
+    {
+        return new SettlementReturn(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            SettlementReturnKind.CardJob,
+            payment.Id,
+            jobId,
+            payment.CustomerUserId,
+            Guid.NewGuid(),
+            new Money(amountMinorUnits),
+            "Partial CardJob return",
             RequestedAt.AddMinutes(3));
     }
 

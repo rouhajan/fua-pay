@@ -1,5 +1,6 @@
 @page
 @model FuaPay.Web.Pages.Admin.Payments.IndexModel
+@using System.Globalization
 @using FuaPay.Web.Modules.Payments.Domain
 @{
     ViewData["Title"] = "Platby";
@@ -99,8 +100,15 @@
                     @foreach (var payment in Model.Payments.Items)
                     {
                         var user = Model.Users.GetValueOrDefault(payment.CustomerUserId);
-                        var settlementReturn =
-                            Model.SettlementReturns.GetValueOrDefault(payment.Id);
+                        var settlementReturns =
+                            Model.SettlementReturns.GetValueOrDefault(payment.Id)
+                            ?? [];
+                        var reservedMinorUnits = settlementReturns
+                            .Where(item => item.State != SettlementReturnState.Rejected)
+                            .Sum(item => item.AmountMinorUnits);
+                        var remainingMinorUnits = Math.Max(
+                            0,
+                            payment.AmountMinorUnits - reservedMinorUnits);
                         <tr>
                             <td>@DashboardDisplay.FormatDate(payment.CreatedAt)</td>
                             <td>
@@ -121,22 +129,110 @@
                                     payment.PurposeType == PaymentPurposeType.Job &&
                                     payment.Status == PaymentStatus.Succeeded)
                                 {
-                                    if (settlementReturn is null)
+                                    if (settlementReturns.Count > 0)
                                     {
-                                        var operationId = Guid.NewGuid();
+                                        <div class="return-history" data-return-history>
+                                            @foreach (var settlementReturn in settlementReturns)
+                                            {
+                                                var isPartial =
+                                                    settlementReturn.AmountMinorUnits <
+                                                    payment.AmountMinorUnits;
+                                                <div class="return-history-item"
+                                                     data-return-id="@settlementReturn.SettlementReturnId">
+                                                    <strong>
+                                                        @DashboardDisplay.FormatMoney(settlementReturn.AmountMinorUnits)
+                                                    </strong>
+                                                    <small>@settlementReturn.Reason</small>
+                                                    @if (settlementReturn.IsRefundProcessing)
+                                                    {
+                                                        <span class="status-badge is-progress"
+                                                              data-return-state="refund-processing">
+                                                            Refund čeká na stavové ověření
+                                                        </span>
+                                                    }
+                                                    else if (settlementReturn.IsCompletedReverse)
+                                                    {
+                                                        <span class="status-badge is-completed"
+                                                              data-return-state="reverse-completed">
+                                                            Vráceno přes reverse
+                                                        </span>
+                                                    }
+                                                    else if (settlementReturn.IsCompletedRefund)
+                                                    {
+                                                        <span class="status-badge is-completed"
+                                                              data-return-state="refund-completed">
+                                                            @(isPartial ? "Partial refund dokončen" : "Vráceno přes full refund")
+                                                        </span>
+                                                    }
+                                                    else if (settlementReturn.IsPreExistingProviderRefund)
+                                                    {
+                                                        <span class="status-badge is-failed"
+                                                              data-return-state="provider-refund-pre-existing">
+                                                            ČSOB již eviduje jiný refund; nutná kontrola
+                                                        </span>
+                                                    }
+                                                    else if (settlementReturn.State == SettlementReturnState.Rejected)
+                                                    {
+                                                        <span class="status-badge is-failed"
+                                                              data-return-state="rejected">
+                                                            Zamítnuto
+                                                        </span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="status-badge is-progress"
+                                                              data-return-state="attention">
+                                                            Vratka vyžaduje pozornost
+                                                        </span>
+                                                    }
+
+                                                    @if (settlementReturn.CanRecoverProviderAttempt)
+                                                    {
+                                                        <form method="post"
+                                                              asp-page-handler="@(isPartial ? "PartialRefund" : "Reverse")"
+                                                              class="compact-action-form"
+                                                              data-return-action="recover"
+                                                              data-return-operation-id="@settlementReturn.RequestId">
+                                                            <input type="hidden" name="operationId" value="@settlementReturn.RequestId" />
+                                                            <input type="hidden" name="originalPaymentId" value="@settlementReturn.OriginalPaymentId" />
+                                                            <input type="hidden" name="reason" value="@settlementReturn.Reason" />
+                                                            @if (isPartial)
+                                                            {
+                                                                <input type="hidden"
+                                                                       name="amount"
+                                                                       value="@((settlementReturn.AmountMinorUnits / 100m).ToString("0.00", CultureInfo.InvariantCulture))" />
+                                                            }
+                                                            <button type="submit" class="secondary-button">
+                                                                Ověřit stav vratky
+                                                            </button>
+                                                        </form>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+
+                                    <p data-return-remaining>
+                                        Zbývá bezpečně rezervovat:
+                                        <strong>@DashboardDisplay.FormatMoney(remainingMinorUnits)</strong>
+                                    </p>
+
+                                    @if (reservedMinorUnits == 0)
+                                    {
+                                        var fullOperationId = Guid.NewGuid();
                                         <form method="post"
                                               asp-page-handler="Reverse"
                                               class="compact-action-form"
                                               data-return-action="new"
-                                              data-return-operation-id="@operationId">
+                                              data-return-operation-id="@fullOperationId">
                                             <input type="hidden"
                                                    name="operationId"
-                                                   value="@operationId" />
+                                                   value="@fullOperationId" />
                                             <input type="hidden"
                                                    name="originalPaymentId"
                                                    value="@payment.Id" />
                                             <label>
-                                                <span class="visually-hidden">Důvod vratky</span>
+                                                <span class="visually-hidden">Důvod plné vratky</span>
                                                 <input type="text"
                                                        name="reason"
                                                        maxlength="@SettlementReturn.MaximumReasonLength"
@@ -144,83 +240,52 @@
                                                        placeholder="Důvod plné vratky" />
                                             </label>
                                             <button type="submit" class="danger-button">
-                                                Vrátit kartou
+                                                Vrátit celou částku
                                             </button>
                                         </form>
                                     }
-                                    else if (settlementReturn.IsRefundProcessing)
+
+                                    @if (remainingMinorUnits > 1)
                                     {
-                                        <span class="status-badge is-progress"
-                                              data-return-state="refund-processing">
-                                            Refund čeká na stavové ověření
-                                        </span>
+                                        var partialOperationId = Guid.NewGuid();
                                         <form method="post"
-                                              asp-page-handler="Reverse"
+                                              asp-page-handler="PartialRefund"
                                               class="compact-action-form"
-                                              data-return-action="recover"
-                                              data-return-operation-id="@settlementReturn.RequestId">
+                                              data-return-action="new-partial"
+                                              data-return-operation-id="@partialOperationId">
                                             <input type="hidden"
                                                    name="operationId"
-                                                   value="@settlementReturn.RequestId" />
+                                                   value="@partialOperationId" />
                                             <input type="hidden"
                                                    name="originalPaymentId"
-                                                   value="@settlementReturn.OriginalPaymentId" />
-                                            <input type="hidden"
-                                                   name="reason"
-                                                   value="@settlementReturn.Reason" />
-                                            <button type="submit" class="secondary-button">
-                                                Ověřit stav refundu
+                                                   value="@payment.Id" />
+                                            <label>
+                                                <span>Částečná vratka (Kč)</span>
+                                                <input type="number"
+                                                       name="amount"
+                                                       min="0.01"
+                                                       max="@(((remainingMinorUnits - 1) / 100m).ToString("0.00", CultureInfo.InvariantCulture))"
+                                                       step="0.01"
+                                                       required />
+                                            </label>
+                                            <label>
+                                                <span>Důvod</span>
+                                                <input type="text"
+                                                       name="reason"
+                                                       maxlength="@SettlementReturn.MaximumReasonLength"
+                                                       required
+                                                       placeholder="Důvod částečné vratky" />
+                                            </label>
+                                            <button type="submit" class="danger-button">
+                                                Vrátit zadanou částku
                                             </button>
                                         </form>
                                     }
-                                    else if (settlementReturn.CanRecoverProviderAttempt)
+                                    else if (remainingMinorUnits == 1)
                                     {
-                                        <form method="post"
-                                              asp-page-handler="Reverse"
-                                              class="compact-action-form"
-                                              data-return-action="recover"
-                                              data-return-operation-id="@settlementReturn.RequestId">
-                                            <input type="hidden"
-                                                   name="operationId"
-                                                   value="@settlementReturn.RequestId" />
-                                            <input type="hidden"
-                                                   name="originalPaymentId"
-                                                   value="@settlementReturn.OriginalPaymentId" />
-                                            <input type="hidden"
-                                                   name="reason"
-                                                   value="@settlementReturn.Reason" />
-                                            <button type="submit" class="secondary-button">
-                                                Ověřit stav vratky
-                                            </button>
-                                        </form>
-                                    }
-                                    else if (settlementReturn.IsCompletedReverse)
-                                    {
-                                        <span class="status-badge is-completed"
-                                              data-return-state="reverse-completed">
-                                            Vráceno přes reverse
-                                        </span>
-                                    }
-                                    else if (settlementReturn.IsCompletedRefund)
-                                    {
-                                        <span class="status-badge is-completed"
-                                              data-return-state="refund-completed">
-                                            Vráceno přes full refund
-                                        </span>
-                                    }
-                                    else if (settlementReturn.IsPreExistingProviderRefund)
-                                    {
-                                        <span class="status-badge is-failed"
-                                              data-return-state="provider-refund-pre-existing">
-                                            ČSOB již eviduje jiný refund; nutná kontrola
-                                        </span>
-                                    }
-                                    else
-                                    {
-                                        <span class="status-badge is-progress"
-                                              data-return-state="attention">
-                                            Vratka vyžaduje pozornost
-                                        </span>
+                                        <small>
+                                            Zbývající 0,01 Kč nelze podle veřejného kontraktu poslat jako partial refund.
+                                        </small>
                                     }
                                 }
                                 else

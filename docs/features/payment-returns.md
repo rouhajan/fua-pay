@@ -6,10 +6,13 @@ neruší a nemaže. Zakázka zůstává historicky `Paid`, její původní typ, 
 a čas vypořádání se nemění. Výrobní lifecycle je nezávislý a vrácení jej nikdy
 nepřetáčí zpět.
 
-Podporované jsou pouze úplné vratky. Částku, zákazníka a zdroj určuje server z
-autoritativních uložených dat; volající je nemůže zvolit. `RequestId` zajišťuje
-trvalou idempotenci požadavku a unikátní vazba na zdroj dovolí pro jedno
-vypořádání nejvýše jednu vratku.
+Kreditní zakázky podporují jednu úplnou vratku. CardJob podporuje úplnou vratku
+i opakované částečné refundy; každý refund má vlastní `SettlementReturn`,
+`RequestId`, částku a provider attempt. Zákazníka, zdroj, měnu a horní limit
+vždy určuje server z autoritativních dat. `RequestId` zajišťuje trvalou
+idempotenci a jeho opakování s jinou částkou nebo jiným payloadem je konflikt.
+Filtrovaná unikátnost dál dovolí nejvýše jednu `CreditJob` vratku na zakázku a
+nejvýše jednu budoucí `CardTopUp` vratku na původní platbu.
 
 ## Aktuálně implementovaný tok
 
@@ -85,20 +88,45 @@ stav vyžadující pozornost včetně předem existující providerové vratky. 
 `InProgress` / `Uncertain` attempt nabízí jen statusové ověření se stejným
 uloženým operation ID; nový Reverse ani druhý Refund PUT nenabízí.
 
+### Částečné a opakované CardJob refundy
+
+Částečný refund vždy začíná přímo novým `Refund` attemptem a volá
+`RefundAsync(payId, amountMinorUnits)`. V transakci se nejprve zamkne řádek
+autoritativní zakázky, zkontroluje platba i settlement a sečtou všechny její
+`CardJob` vratky kromě definitivně `Rejected`. `Requested`, `InProgress`,
+`RequiresAttention` a `Completed` rezervují svou celou částku. Nový
+`SettlementReturn` i attempt se uloží jako `InProgress` před PUT; transakce se
+před HTTP ukončí. Stejný zámek serializuje souběžné požadavky, takže nemohou
+společně překročit původní částku.
+
+ČSOB veřejný kontrakt požaduje, aby hodnota `amount` byla kladná a přísně menší
+než zbývající rozdíl. Částečný požadavek rovný celému zbytku proto FUA Pay
+neodešle. Plná R2 cesta bez předchozí rezervované nebo provedené CardJob vratky
+dál používá Reverse → full Refund. Pokud už partial refund existuje, plný refund
+bez `amount` selže uzavřeně; veřejný kontrakt nedává bezpečný způsob, jak tímto
+voláním vrátit přesně zbytek bez rizika překročení.
+
+Přímá podepsaná a čerstvá odpověď `0/10` potvrzuje právě odeslaný PUT a jeho
+konkrétní částku. Přímé `0/9` a pozdější status 9 znamenají processing. Timeout,
+cancellation, transportní, podpisová, freshness, `payId` nebo persistencí
+způsobená nejasnost přejde do `Uncertain` / `RequiresAttention`; každý replay je
+pak pouze `payment/status`. Samotný status 10 při recovery konkrétní partial
+částku nedokazuje a vratku automaticky nedokončí. Definitivně `Rejected` částka
+se do rezervace nepočítá, ostatní stavy ano.
+
 ## Cílový rozsah před aktivací produkčních karetních plateb
 
 Produktové rozhodnutí 2026-09-23 je podporovat od začátku běžné bezpečné vratky,
-nikoli odkládat refund na neurčito. Aktuální implementovaný stav se tím nemění:
-dokud níže uvedené body nejsou implementované a otestované, nesmějí se v UI
-tvářit jako dostupné.
+nikoli odkládat refund na neurčito. CardJob úplné i částečné vratky jsou nyní
+implementované; CardTopUp a další výstupy níže zůstávají cílovým stavem.
 
 Požadovaný cílový tok:
 
 - CardJob plná vratka: pokud je původní transakce ještě v reversibilním stavu,
   použít stávající `payment/reverse`; pokud už je zúčtovaná, použít
   `payment/refund`.
-- CardJob částečná vratka: podporovat přes `payment/refund`, pokud to stav
-  původní platby dovoluje. Součet všech potvrzených refundů nikdy nesmí překročit
+- CardJob částečná vratka: implementována přes `payment/refund`; konzervativní
+  součet dokončených, rozpracovaných a nejasných vratek nikdy nesmí překročit
   původní zúčtovanou částku.
 - CardTopUp návrat na kartu: uživatelská/admin operace má podle
   autoritativního stavu původní ČSOB platby zvolit `payment/reverse`, pokud je
@@ -131,7 +159,7 @@ FUA Pay částky jsou výrazně nižší.
 
 ## Aktuálně ještě nepodporované
 
-- částečné a opakované ČSOB refundy včetně kumulativního limitu a recovery
-  jednoznačně rozlišujícího plný a částečný návrat;
+- automatické potvrzení konkrétní částečné vratky pouze ze status-only odpovědi
+  10 bez publikovaného strojově čitelného důkazu;
 - CardTopUp návrat nevyčerpaného kreditu na kartu;
 - PDF nebo samostatné potvrzení o vratce.

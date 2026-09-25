@@ -7,8 +7,10 @@ public sealed record SettlementReturnAdministrationItem(
     Guid RequestId,
     SettlementReturnKind Kind,
     Guid OriginalPaymentId,
+    long AmountMinorUnits,
     SettlementReturnState State,
     string Reason,
+    DateTimeOffset RequestedAt,
     Guid? ProviderAttemptId,
     PaymentProvider? Provider,
     SettlementReturnProviderOperation? ProviderOperation,
@@ -59,10 +61,14 @@ public sealed record SettlementReturnAdministrationItem(
             SettlementReturnProviderAttemptState.InProgress ||
          (ProviderAttemptState ==
             SettlementReturnProviderAttemptState.Uncertain &&
-          string.Equals(
-              ProviderAttemptDiagnostic,
-              CardJobSettlementReturnDiagnostics.RefundProcessing,
-              StringComparison.Ordinal)));
+          (string.Equals(
+               ProviderAttemptDiagnostic,
+               CardJobSettlementReturnDiagnostics.RefundProcessing,
+               StringComparison.Ordinal) ||
+           string.Equals(
+               ProviderAttemptDiagnostic,
+               CardJobSettlementReturnDiagnostics.PartialRefundProcessing,
+               StringComparison.Ordinal))));
 
     public bool IsPreExistingProviderRefund =>
         Kind == SettlementReturnKind.CardJob &&
@@ -83,7 +89,9 @@ public sealed record SettlementReturnAdministrationItem(
 
 public interface ISettlementReturnQueries
 {
-    Task<IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>>
+    Task<IReadOnlyDictionary<
+            Guid,
+            IReadOnlyList<SettlementReturnAdministrationItem>>>
         FindByOriginalPaymentIdsAsync(
             IEnumerable<Guid> originalPaymentIds,
             CancellationToken cancellationToken = default);

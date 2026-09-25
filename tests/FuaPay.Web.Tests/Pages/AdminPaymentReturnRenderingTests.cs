@@ -83,6 +83,45 @@ public sealed class AdminPaymentReturnRenderingTests :
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task MultiplePartialReturnsRenderHistoryAmountInputAndRemaining()
+    {
+        var first = ReturnItem(
+            Guid.NewGuid(),
+            SettlementReturnState.Completed,
+            SettlementReturnProviderAttemptState.Confirmed,
+            SettlementReturnProviderOperation.Refund,
+            attemptId: Guid.NewGuid(),
+            amountMinorUnits: 2_500) with
+        {
+            Reason = "First partial refund"
+        };
+        var second = ReturnItem(
+            Guid.NewGuid(),
+            SettlementReturnState.Completed,
+            SettlementReturnProviderAttemptState.Confirmed,
+            SettlementReturnProviderOperation.Refund,
+            attemptId: Guid.NewGuid(),
+            amountMinorUnits: 3_000) with
+        {
+            Reason = "Second partial refund"
+        };
+
+        var html = await RenderCoreAsync([first, second]);
+
+        Assert.Equal(
+            2,
+            html.Split(
+                "data-return-id=",
+                StringSplitOptions.None).Length - 1);
+        Assert.Contains("First partial refund", html, StringComparison.Ordinal);
+        Assert.Contains("Second partial refund", html, StringComparison.Ordinal);
+        Assert.Contains("data-return-remaining", html, StringComparison.Ordinal);
+        Assert.Contains("name=\"amount\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-return-action=\"new-partial\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-return-action=\"new\"", html, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(
         SettlementReturnState.Completed,
@@ -251,6 +290,16 @@ public sealed class AdminPaymentReturnRenderingTests :
         string requestPath = "/Admin/Payments?view=admin",
         long totalCount = 1)
     {
+        IReadOnlyList<SettlementReturnAdministrationItem> returns =
+            settlementReturn is null ? [] : [settlementReturn];
+        return await RenderCoreAsync(returns, requestPath, totalCount);
+    }
+
+    private async Task<string> RenderCoreAsync(
+        IReadOnlyList<SettlementReturnAdministrationItem> settlementReturns,
+        string requestPath = "/Admin/Payments?view=admin",
+        long totalCount = 1)
+    {
         var session = new AccessSessionSnapshot(
             Guid.NewGuid(),
             "Test administrator",
@@ -258,7 +307,7 @@ public sealed class AdminPaymentReturnRenderingTests :
             AccessUserStatus.Active,
             [AccessRole.Admin]);
         var queries = new AdminPageQueries(
-            settlementReturn,
+            settlementReturns,
             totalCount);
         using var configuredFactory = _factory.WithWebHostBuilder(
             builder => builder.ConfigureTestServices(services =>
@@ -309,14 +358,17 @@ public sealed class AdminPaymentReturnRenderingTests :
         SettlementReturnProviderOperation operation =
             SettlementReturnProviderOperation.Reverse,
         string? diagnostic = null,
-        Guid? attemptId = null) =>
+        Guid? attemptId = null,
+        long amountMinorUnits = 12_500) =>
         new(
             Guid.NewGuid(),
             requestId,
             SettlementReturnKind.CardJob,
             PaymentId,
+            amountMinorUnits,
             returnState,
             "Approved full return",
+            DateTimeOffset.UtcNow,
             attemptId ?? requestId,
             PaymentProvider.Csob,
             operation,
@@ -329,14 +381,15 @@ public sealed class AdminPaymentReturnRenderingTests :
         IPaymentReconciliationQueries,
         ISettlementReturnQueries
     {
-        private readonly SettlementReturnAdministrationItem? _return;
+        private readonly IReadOnlyList<SettlementReturnAdministrationItem>
+            _returns;
         private readonly long _totalCount;
 
         public AdminPageQueries(
-            SettlementReturnAdministrationItem? settlementReturn,
+            IReadOnlyList<SettlementReturnAdministrationItem> returns,
             long totalCount = 1)
         {
-            _return = settlementReturn;
+            _returns = returns;
             _totalCount = totalCount;
         }
 
@@ -363,22 +416,26 @@ public sealed class AdminPaymentReturnRenderingTests :
                 _totalCount));
 
         public Task<
-            IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>>
+            IReadOnlyDictionary<
+                Guid,
+                IReadOnlyList<SettlementReturnAdministrationItem>>>
             FindByOriginalPaymentIdsAsync(
                 IEnumerable<Guid> originalPaymentIds,
                 CancellationToken cancellationToken = default)
         {
             Assert.Contains(PaymentId, originalPaymentIds);
-            IReadOnlyDictionary<Guid, SettlementReturnAdministrationItem>
-                result = _return is null
+            IReadOnlyDictionary<
+                Guid,
+                IReadOnlyList<SettlementReturnAdministrationItem>>
+                result = _returns.Count == 0
                     ? new Dictionary<
                         Guid,
-                        SettlementReturnAdministrationItem>()
+                        IReadOnlyList<SettlementReturnAdministrationItem>>()
                     : new Dictionary<
                         Guid,
-                        SettlementReturnAdministrationItem>
+                        IReadOnlyList<SettlementReturnAdministrationItem>>
                     {
-                        [PaymentId] = _return
+                        [PaymentId] = _returns
                     };
             return Task.FromResult(result);
         }
