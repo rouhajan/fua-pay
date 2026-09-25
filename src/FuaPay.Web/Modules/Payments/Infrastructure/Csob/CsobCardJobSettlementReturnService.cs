@@ -372,6 +372,14 @@ public sealed class CsobCardJobSettlementReturnService :
 
         if (settlementReturn.State == SettlementReturnState.Rejected)
         {
+            if (hold.State == CreditReturnHoldState.Active)
+            {
+                hold.Release(_timeProvider.GetUtcNow());
+                await _creditReturnHoldRepository.SaveAsync(
+                    hold,
+                    cancellationToken);
+            }
+
             if (hold.State != CreditReturnHoldState.Released)
             {
                 throw TopUpInconsistent(

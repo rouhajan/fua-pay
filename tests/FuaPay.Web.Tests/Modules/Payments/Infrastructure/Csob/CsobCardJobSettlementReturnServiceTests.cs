@@ -179,6 +179,53 @@ public sealed class CsobCardJobSettlementReturnServiceTests
     }
 
     [Fact]
+    public async Task TopUpReturn_DefinitiveRejectedStateReleasesHoldIdempotently()
+    {
+        var fixture = new Fixture(PaymentPurposeType.CreditTopUp);
+        var command = fixture.TopUpCommand();
+        var settlementReturn = new SettlementReturn(
+            Guid.NewGuid(),
+            command.RequestId,
+            SettlementReturnKind.CardTopUp,
+            fixture.Payment.Id,
+            jobId: null,
+            fixture.Payment.CustomerUserId,
+            command.AdministratorUserId,
+            fixture.Payment.Amount,
+            command.Reason,
+            Now.AddMinutes(-5));
+        settlementReturn.Begin(Now.AddMinutes(-4));
+        settlementReturn.Reject(Now.AddMinutes(-3));
+        fixture.ReturnRepository.Stored.Add(settlementReturn);
+        fixture.CreditHolds.Stored.Add(new CreditReturnHold(
+            settlementReturn.Id,
+            fixture.CreditAccount.Id,
+            fixture.Payment.Amount,
+            Now.AddMinutes(-5)));
+        var attempt = new SettlementReturnProviderAttempt(
+            command.RequestId,
+            settlementReturn.Id,
+            PaymentProvider.Csob,
+            SettlementReturnProviderOperation.Reverse,
+            PayId,
+            Now.AddMinutes(-5));
+        attempt.Begin(Now.AddMinutes(-4));
+        attempt.Reject("Definitively rejected", Now.AddMinutes(-3));
+        fixture.AttemptRepository.Stored.Add(attempt);
+        var service = (ICardTopUpSettlementReturnService)fixture.Service;
+
+        var first = await service.ReturnAsync(command);
+        var replay = await service.ReturnAsync(command);
+
+        Assert.Equal(CardTopUpSettlementReturnOutcome.Rejected, first.Outcome);
+        Assert.Equal(first.SettlementReturnId, replay.SettlementReturnId);
+        Assert.Equal(
+            CreditReturnHoldState.Released,
+            Assert.Single(fixture.CreditHolds.Stored).State);
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+    }
+
+    [Fact]
     public async Task PartialRefundAsync_RejectsNonPositiveAmountBeforeGateway()
     {
         var fixture = new Fixture();
