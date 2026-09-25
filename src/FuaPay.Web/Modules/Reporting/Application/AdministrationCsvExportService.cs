@@ -24,6 +24,8 @@ public sealed class AdministrationCsvExportService
     private readonly IPaymentQueries _paymentQueries;
     private readonly IAccessUserQueries _accessUserQueries;
     private readonly IServiceUnitQueries _serviceUnitQueries;
+    private readonly IPaymentReconciliationExportQueries?
+        _reconciliationExportQueries;
     private readonly TimeProvider _timeProvider;
     private readonly IAuditTrail _auditTrail;
 
@@ -34,7 +36,8 @@ public sealed class AdministrationCsvExportService
         IAccessUserQueries accessUserQueries,
         IServiceUnitQueries serviceUnitQueries,
         TimeProvider timeProvider,
-        IAuditTrail auditTrail)
+        IAuditTrail auditTrail,
+        IPaymentReconciliationExportQueries? reconciliationExportQueries = null)
     {
         ArgumentNullException.ThrowIfNull(jobQueries);
         ArgumentNullException.ThrowIfNull(creditQueries);
@@ -51,6 +54,7 @@ public sealed class AdministrationCsvExportService
         _serviceUnitQueries = serviceUnitQueries;
         _timeProvider = timeProvider;
         _auditTrail = auditTrail;
+        _reconciliationExportQueries = reconciliationExportQueries;
     }
 
     public async Task<CsvExportFile> ExportJobsAsync(
@@ -273,6 +277,95 @@ public sealed class AdministrationCsvExportService
         await WriteExportAuditAsync(
             administratorUserId,
             "export.payments",
+            file,
+            items.Count,
+            cancellationToken);
+        return file;
+    }
+
+    public async Task<CsvExportFile> ExportPaymentReconciliationAsync(
+        Guid administratorUserId,
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateAdministrator(administratorUserId);
+        var queries = _reconciliationExportQueries
+            ?? throw new InvalidOperationException(
+                "Payment reconciliation export queries are unavailable.");
+        var range = CreateUtcRange(from, to);
+        var items = await queries.ListAsync(
+            range.From,
+            range.ToExclusive,
+            MaximumRows,
+            cancellationToken);
+
+        var rows = new List<IReadOnlyList<string?>>
+        {
+            new[]
+            {
+                "orderNo",
+                "payId",
+                "FUA Payment ID",
+                "Payment created",
+                "Payment completed",
+                "Amount CZK",
+                "Currency",
+                "Payment purpose",
+                "Job number",
+                "Service unit",
+                "Financial document ID",
+                "Financial document number",
+                "Return kind",
+                "Return RequestId",
+                "SettlementReturn ID",
+                "Return amount CZK",
+                "Return state",
+                "Provider operation",
+                "Provider-attempt state",
+                "Return requested",
+                "Return updated",
+                "Provider attempt started",
+                "Provider attempt updated",
+                "Provider attempt finished"
+            }
+        };
+
+        rows.AddRange(items.Select(item =>
+            (IReadOnlyList<string?>)new[]
+            {
+                item.OrderNumber?.ToString(CultureInfo.InvariantCulture),
+                item.PayId,
+                item.PaymentId.ToString(),
+                FormatTimestamp(item.PaymentCreatedAt),
+                FormatTimestamp(item.PaymentCompletedAt),
+                FormatMoney(item.AmountMinorUnits),
+                item.Currency,
+                item.Purpose.ToString(),
+                item.JobNumber,
+                item.ServiceUnit,
+                item.FinancialDocumentId?.ToString(),
+                item.FinancialDocumentNumber,
+                item.ReturnKind?.ToString(),
+                item.ReturnRequestId?.ToString(),
+                item.SettlementReturnId?.ToString(),
+                item.ReturnAmountMinorUnits.HasValue
+                    ? FormatMoney(item.ReturnAmountMinorUnits.Value)
+                    : null,
+                item.ReturnState?.ToString(),
+                item.ProviderOperation?.ToString(),
+                item.ProviderAttemptState?.ToString(),
+                FormatTimestamp(item.ReturnRequestedAt),
+                FormatTimestamp(item.ReturnUpdatedAt),
+                FormatTimestamp(item.AttemptStartedAt),
+                FormatTimestamp(item.AttemptUpdatedAt),
+                FormatTimestamp(item.AttemptFinishedAt)
+            }));
+
+        var file = CreateFile("csob-reconciliation", rows);
+        await WriteExportAuditAsync(
+            administratorUserId,
+            "export.payment-reconciliation",
             file,
             items.Count,
             cancellationToken);

@@ -1,4 +1,5 @@
 using FuaPay.Web.Modules.Reporting.Application;
+using FuaPay.Web.Modules.Reporting.Infrastructure.Persistence;
 
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -13,6 +14,9 @@ public static class ReportingModule
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<AdministrationCsvExportService>();
+        services.AddScoped<
+            IPaymentReconciliationExportQueries,
+            EfPaymentReconciliationExportQueries>();
 
         return services;
     }

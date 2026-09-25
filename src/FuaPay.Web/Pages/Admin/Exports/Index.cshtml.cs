@@ -76,6 +76,19 @@ public sealed class IndexModel : PageModel
         return Csv(file);
     }
 
+    public async Task<FileContentResult> OnPostReconciliationAsync(
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken cancellationToken = default)
+    {
+        var file = await _exports.ExportPaymentReconciliationAsync(
+            RequireAdministratorUserId(),
+            from,
+            to,
+            cancellationToken);
+        return Csv(file);
+    }
+
     private static FileContentResult Csv(CsvExportFile file)
     {
         return new FileContentResult(
