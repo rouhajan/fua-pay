@@ -103,39 +103,6 @@ public sealed class CsobCardJobSettlementReturnService :
         _timeProvider = timeProvider;
     }
 
-    // Kept for focused CardJob unit tests and callers that exercise only the
-    // legacy job source. Runtime DI uses the complete constructor above.
-    public CsobCardJobSettlementReturnService(
-        IJobRepository jobRepository,
-        IJobPaymentCoordination jobPaymentCoordination,
-        IPaymentRepository paymentRepository,
-        ISettlementReturnRepository returnRepository,
-        ISettlementReturnProviderAttemptRepository attemptRepository,
-        SettlementReturnRegistrationService registrationService,
-        SettlementReturnProviderAttemptService attemptService,
-        IApplicationTransaction transaction,
-        IAuditTrail auditTrail,
-        ICsobGatewayClient gatewayClient,
-        TimeProvider timeProvider)
-        : this(
-            jobRepository,
-            jobPaymentCoordination,
-            UnavailableCreditAccountRepository.Instance,
-            UnavailableCreditReturnHoldRepository.Instance,
-            new CreditAvailabilityService(
-                UnavailableCreditAvailabilityRepository.Instance),
-            paymentRepository,
-            returnRepository,
-            attemptRepository,
-            registrationService,
-            attemptService,
-            transaction,
-            auditTrail,
-            gatewayClient,
-            timeProvider)
-    {
-    }
-
     public async Task<CardJobSettlementReturnResult> ReturnAsync(
         CardJobSettlementReturnCommand command,
         CancellationToken cancellationToken = default)
@@ -1524,7 +1491,7 @@ public sealed class CsobCardJobSettlementReturnService :
                 settlementReturn.Amount,
                 available,
                 changedAt,
-                $"VrĂ¡cenĂ­ karetnĂ­ho dobitĂ­ {settlementReturn.OriginalPaymentId}");
+                $"Vrácení karetního dobití {settlementReturn.OriginalPaymentId}");
             topUpHold.Consume(changedAt);
             await _creditAccountRepository.SaveAsync(
                 account,
@@ -2674,74 +2641,4 @@ public sealed class CsobCardJobSettlementReturnService :
                 refundAmountMinorUnits);
     }
 
-    private sealed class UnavailableCreditAccountRepository :
-        ICreditAccountRepository
-    {
-        public static readonly UnavailableCreditAccountRepository Instance =
-            new();
-
-        public Task<CreditAccount?> FindByOwnerIdAsync(
-            Guid ownerId,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public Task<CreditAccount?> FindByOwnerIdForUpdateAsync(
-            Guid ownerId,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public Task LockOwnerForAccountCreationAsync(
-            Guid ownerId,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public Task AddAsync(
-            CreditAccount account,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public Task SaveAsync(
-            CreditAccount account,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-    }
-
-    private sealed class UnavailableCreditReturnHoldRepository :
-        ICreditReturnHoldRepository
-    {
-        public static readonly UnavailableCreditReturnHoldRepository Instance =
-            new();
-
-        public Task<CreditReturnHold?> FindBySettlementReturnIdAsync(
-            Guid settlementReturnId,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<CreditReturnHold?> FindBySettlementReturnIdForUpdateAsync(
-            Guid settlementReturnId,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task AddAsync(
-            CreditReturnHold hold,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task SaveAsync(
-            CreditReturnHold hold,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-    }
-
-    private sealed class UnavailableCreditAvailabilityRepository :
-        ICreditAvailabilityRepository
-    {
-        public static readonly UnavailableCreditAvailabilityRepository Instance =
-            new();
-
-        public Task<Money> GetTotalBlockingAmountAsync(
-            Guid creditAccountId,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-    }
 }

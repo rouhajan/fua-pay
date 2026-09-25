@@ -569,6 +569,7 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             accessQueries,
             reconciliationQueries,
             returnQueries,
+            fixture.Service,
             fixture.Service);
         var httpContext = new DefaultHttpContext
         {

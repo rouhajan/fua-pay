@@ -318,6 +318,13 @@
                                                         Zpracovává se; kredit zůstává rezervován
                                                     </span>
                                                 }
+                                                else if (topUpReturn.IsRejected)
+                                                {
+                                                    <span class="status-badge is-failed"
+                                                          data-return-state="rejected">
+                                                        Zamítnuto; rezervace kreditu byla uvolněna
+                                                    </span>
+                                                }
                                                 else
                                                 {
                                                     <span class="status-badge is-failed"

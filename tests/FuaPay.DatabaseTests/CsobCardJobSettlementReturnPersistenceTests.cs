@@ -2,6 +2,7 @@ using FuaPay.Web.BuildingBlocks.Application;
 using FuaPay.Web.BuildingBlocks.Auditing;
 using FuaPay.Web.BuildingBlocks.Domain;
 using FuaPay.Web.BuildingBlocks.Persistence;
+using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Jobs.Application;
 using FuaPay.Web.Modules.Jobs.Domain;
 using FuaPay.Web.Modules.Payments.Application;
@@ -660,6 +661,9 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
         return new CsobCardJobSettlementReturnService(
             services.GetRequiredService<IJobRepository>(),
             services.GetRequiredService<IJobPaymentCoordination>(),
+            services.GetRequiredService<ICreditAccountRepository>(),
+            services.GetRequiredService<ICreditReturnHoldRepository>(),
+            services.GetRequiredService<CreditAvailabilityService>(),
             paymentRepository,
             returnRepository,
             attemptRepository,

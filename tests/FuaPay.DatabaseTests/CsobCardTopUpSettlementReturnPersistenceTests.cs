@@ -58,6 +58,9 @@ public sealed class CsobCardTopUpSettlementReturnPersistenceTests :
                 account.Movements,
                 item => item.Type == CreditMovementType.Debit);
             Assert.Equal(first.SettlementReturnId, debit.OperationId);
+            Assert.Equal(
+                $"Vrácení karetního dobití {scenario.PaymentId}",
+                debit.Description);
 
             var settlementReturn = Assert.IsType<SettlementReturn>(
                 await services.GetRequiredService<ISettlementReturnRepository>()

@@ -29,13 +29,14 @@ public sealed class IndexModel : PageModel
         IPaymentReconciliationQueries reconciliationQueries,
         ISettlementReturnQueries settlementReturnQueries,
         ICardJobSettlementReturnService cardJobSettlementReturnService,
-        ICardTopUpSettlementReturnService? cardTopUpSettlementReturnService = null)
+        ICardTopUpSettlementReturnService cardTopUpSettlementReturnService)
     {
         ArgumentNullException.ThrowIfNull(paymentQueries);
         ArgumentNullException.ThrowIfNull(accessUserQueries);
         ArgumentNullException.ThrowIfNull(reconciliationQueries);
         ArgumentNullException.ThrowIfNull(settlementReturnQueries);
         ArgumentNullException.ThrowIfNull(cardJobSettlementReturnService);
+        ArgumentNullException.ThrowIfNull(cardTopUpSettlementReturnService);
 
         _paymentQueries = paymentQueries;
         _accessUserQueries = accessUserQueries;
@@ -43,9 +44,7 @@ public sealed class IndexModel : PageModel
         _settlementReturnQueries = settlementReturnQueries;
         _cardJobSettlementReturnService =
             cardJobSettlementReturnService;
-        _cardTopUpSettlementReturnService =
-            cardTopUpSettlementReturnService ??
-            new UnavailableCardTopUpSettlementReturnService();
+        _cardTopUpSettlementReturnService = cardTopUpSettlementReturnService;
     }
 
     public PaymentPage Payments { get; private set; } =
@@ -377,6 +376,8 @@ public sealed class IndexModel : PageModel
                     "Refund dobití se zpracovává; kredit zůstává rezervován.",
                 CardTopUpSettlementReturnOutcome.PreExistingProviderRefund =>
                     "Poskytovatel již eviduje refund mimo tento tok; kredit zůstává rezervován a vratka vyžaduje kontrolu.",
+                CardTopUpSettlementReturnOutcome.Rejected =>
+                    "Vratka karetního dobití byla zamítnuta; rezervace kreditu byla uvolněna.",
                 _ =>
                     "Výsledek vratky dobití je nejasný; kredit zůstává rezervován a providerový PUT se neopakuje."
             };
