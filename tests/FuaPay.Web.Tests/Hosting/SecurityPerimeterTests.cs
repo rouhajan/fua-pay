@@ -6,6 +6,7 @@ using FuaPay.Web.Modules.Access.Domain;
 using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.Credits.Application;
 using FuaPay.Web.Modules.Credits.Domain;
+using FuaPay.Web.Modules.Payments.Application;
 using FuaPay.Web.Modules.Payments.Infrastructure.Csob;
 using FuaPay.Web.Tests.Testing;
 
@@ -159,8 +160,11 @@ public sealed class SecurityPerimeterTests :
             response.StatusCode);
     }
 
-    [Fact]
-    public async Task AdministrationExportPost_WithoutAntiforgeryToken_ReturnsBadRequest()
+    [Theory]
+    [InlineData("Jobs")]
+    [InlineData("Reconciliation")]
+    public async Task AdministrationExportPost_WithoutAntiforgeryToken_ReturnsBadRequest(
+        string handler)
     {
         var session = new AccessSessionSnapshot(
             Guid.NewGuid(),
@@ -204,7 +208,7 @@ public sealed class SecurityPerimeterTests :
                 ["to"] = "2026-01-31"
             });
         using var response = await client.PostAsync(
-            "/Admin/Exports?handler=Jobs",
+            $"/Admin/Exports?handler={handler}",
             content);
 
         Assert.Equal(
@@ -214,8 +218,11 @@ public sealed class SecurityPerimeterTests :
         Assert.Equal(session.UserId, sessionQueries.LastUserId);
     }
 
-    [Fact]
-    public async Task CardJobReversePost_WithoutAntiforgeryToken_ReturnsBadRequest()
+    [Theory]
+    [InlineData("Reverse")]
+    [InlineData("ReturnTopUp")]
+    public async Task CardReturnPost_WithoutAntiforgeryToken_ReturnsBadRequest(
+        string handler)
     {
         var session = new AccessSessionSnapshot(
             Guid.NewGuid(),
@@ -254,11 +261,12 @@ public sealed class SecurityPerimeterTests :
             new Dictionary<string, string>
             {
                 ["operationId"] = Guid.NewGuid().ToString(),
+                ["requestId"] = Guid.NewGuid().ToString(),
                 ["originalPaymentId"] = Guid.NewGuid().ToString(),
                 ["reason"] = "Approved full return"
             });
         using var response = await client.PostAsync(
-            "/Admin/Payments?handler=Reverse",
+            $"/Admin/Payments?handler={handler}",
             content);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -313,6 +321,48 @@ public sealed class SecurityPerimeterTests :
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(1, sessionQueries.CallCount);
         Assert.Equal(session.UserId, sessionQueries.LastUserId);
+    }
+
+    [Fact]
+    public async Task CustomerPaymentStatus_CraftedForeignIdReturnsProtectedNotFound()
+    {
+        var session = new AccessSessionSnapshot(
+            Guid.NewGuid(),
+            "Customer A",
+            "customer-a@example.cz",
+            AccessUserStatus.Active,
+            [AccessRole.Customer]);
+        var sessionQueries = new RecordingAccessSessionQueries(session);
+        var paymentQueries = new RecordingPaymentQueries();
+        using var configuredFactory = _factory.WithWebHostBuilder(
+            builder => builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IAccessSessionQueries>();
+                services.AddSingleton<IAccessSessionQueries>(sessionQueries);
+                services.RemoveAll<IPaymentQueries>();
+                services.AddSingleton<IPaymentQueries>(paymentQueries);
+            }));
+        var cookieOptions = configuredFactory.Services
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var ticket = new AuthenticationTicket(
+            AccessClaimsPrincipalFactory.Create(
+                session,
+                CookieAuthenticationDefaults.AuthenticationScheme),
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        var foreignPaymentId = Guid.NewGuid();
+
+        using var client = CreateClient(configuredFactory);
+        client.DefaultRequestHeaders.Add(
+            "Cookie",
+            $"{cookieOptions.Cookie.Name}=" +
+            cookieOptions.TicketDataFormat.Protect(ticket));
+        using var response = await client.GetAsync(
+            $"/Customer/Payments/Details/{foreignPaymentId}?handler=Status");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(session.UserId, paymentQueries.CustomerUserId);
+        Assert.Equal(foreignPaymentId, paymentQueries.PaymentId);
     }
 
     [Fact]
@@ -1037,6 +1087,41 @@ public sealed class SecurityPerimeterTests :
             Interlocked.Increment(ref _callCount);
             return Task.FromResult(_snapshot);
         }
+    }
+
+    private sealed class RecordingPaymentQueries : IPaymentQueries
+    {
+        public Guid CustomerUserId { get; private set; }
+
+        public Guid PaymentId { get; private set; }
+
+        public Task<PaymentDetail?> FindForCustomerAsync(
+            Guid customerUserId,
+            Guid paymentId,
+            CancellationToken cancellationToken = default)
+        {
+            CustomerUserId = customerUserId;
+            PaymentId = paymentId;
+            return Task.FromResult<PaymentDetail?>(null);
+        }
+
+        public Task<PaymentDetail?> FindForAdministrationAsync(
+            Guid paymentId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PaymentPage> ListForCustomerAsync(
+            Guid customerUserId,
+            PaymentListFilter filter,
+            PaymentPageRequest page,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PaymentPage> ListForAdministrationAsync(
+            PaymentListFilter filter,
+            PaymentPageRequest page,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class CountingPrintCodeHasher : IPrintCodeHasher
