@@ -148,7 +148,32 @@
                                             </button>
                                         </form>
                                     }
-                                    else if (settlementReturn.CanRecoverReverse)
+                                    else if (settlementReturn.IsRefundProcessing)
+                                    {
+                                        <span class="status-badge is-progress"
+                                              data-return-state="refund-processing">
+                                            Refund čeká na stavové ověření
+                                        </span>
+                                        <form method="post"
+                                              asp-page-handler="Reverse"
+                                              class="compact-action-form"
+                                              data-return-action="recover"
+                                              data-return-operation-id="@settlementReturn.RequestId">
+                                            <input type="hidden"
+                                                   name="operationId"
+                                                   value="@settlementReturn.RequestId" />
+                                            <input type="hidden"
+                                                   name="originalPaymentId"
+                                                   value="@settlementReturn.OriginalPaymentId" />
+                                            <input type="hidden"
+                                                   name="reason"
+                                                   value="@settlementReturn.Reason" />
+                                            <button type="submit" class="secondary-button">
+                                                Ověřit stav refundu
+                                            </button>
+                                        </form>
+                                    }
+                                    else if (settlementReturn.CanRecoverProviderAttempt)
                                     {
                                         <form method="post"
                                               asp-page-handler="Reverse"
@@ -172,15 +197,22 @@
                                     else if (settlementReturn.IsCompletedReverse)
                                     {
                                         <span class="status-badge is-completed"
-                                              data-return-state="completed">
-                                            Vráceno
+                                              data-return-state="reverse-completed">
+                                            Vráceno přes reverse
                                         </span>
                                     }
-                                    else if (settlementReturn.IsRejectedReverse)
+                                    else if (settlementReturn.IsCompletedRefund)
+                                    {
+                                        <span class="status-badge is-completed"
+                                              data-return-state="refund-completed">
+                                            Vráceno přes full refund
+                                        </span>
+                                    }
+                                    else if (settlementReturn.IsPreExistingProviderRefund)
                                     {
                                         <span class="status-badge is-failed"
-                                              data-return-state="refund-needed">
-                                            Reverse zamítnut; nutné rozhodnutí o refundu
+                                              data-return-state="provider-refund-pre-existing">
+                                            ČSOB již eviduje jiný refund; nutná kontrola
                                         </span>
                                     }
                                     else

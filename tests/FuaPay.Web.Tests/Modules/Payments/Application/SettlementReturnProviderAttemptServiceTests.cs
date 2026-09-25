@@ -135,6 +135,28 @@ public sealed class SettlementReturnProviderAttemptServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_SameAttemptAtActivePrecheckIsReplayed()
+    {
+        var fixture = new Fixture();
+        var command = fixture.Command(
+            SettlementReturnProviderOperation.Refund);
+        var concurrent = new SettlementReturnProviderAttempt(
+            command.AttemptId,
+            fixture.SettlementReturn.Id,
+            fixture.Payment.Provider,
+            command.Operation,
+            fixture.Payment.ProviderReference!,
+            Now);
+        fixture.AttemptRepository.ActiveVisibleAfterIdLookup = concurrent;
+
+        var result = await fixture.Service.CreateAsync(command);
+
+        Assert.False(result.Created);
+        Assert.Same(concurrent, result.Attempt);
+        Assert.Empty(fixture.AttemptRepository.Stored);
+    }
+
+    [Fact]
     public async Task CreateAsync_UncertainAttemptBlocksAnotherAttempt()
     {
         var fixture = new Fixture();
@@ -355,6 +377,12 @@ public sealed class SettlementReturnProviderAttemptServiceTests
             set;
         }
 
+        public SettlementReturnProviderAttempt? ActiveVisibleAfterIdLookup
+        {
+            get;
+            set;
+        }
+
         public Task<SettlementReturnProviderAttempt?> FindByIdAsync(
             Guid attemptId,
             CancellationToken cancellationToken = default) =>
@@ -366,6 +394,15 @@ public sealed class SettlementReturnProviderAttemptServiceTests
                 Guid settlementReturnId,
                 CancellationToken cancellationToken = default)
         {
+            if (
+                ActiveVisibleAfterIdLookup is not null &&
+                ActiveVisibleAfterIdLookup.SettlementReturnId ==
+                    settlementReturnId)
+            {
+                return Task.FromResult<SettlementReturnProviderAttempt?>(
+                    ActiveVisibleAfterIdLookup);
+            }
+
             var stored = Stored.SingleOrDefault(item =>
                 item.SettlementReturnId == settlementReturnId &&
                 item.IsActive);

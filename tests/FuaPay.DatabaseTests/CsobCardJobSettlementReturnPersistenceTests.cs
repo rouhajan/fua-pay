@@ -51,7 +51,7 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
             Assert.All(
                 results,
                 result => Assert.Equal(
-                    CardJobSettlementReturnOutcome.Confirmed,
+                    CardJobSettlementReturnOutcome.ReverseCompleted,
                     result.Outcome));
             Assert.Equal(1, gateway.ReverseCalls);
             Assert.Equal(1, gateway.StatusCalls);
@@ -78,6 +78,175 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
             Assert.Equal(scenario.CustomerUserId, settlementReturn.CustomerUserId);
             Assert.Equal(scenario.Amount, settlementReturn.Amount);
             Assert.Equal(scenario.PayId, attempt.ProviderReference);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(scenario);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentSettledTransitionSendsOneFullRefundPut()
+    {
+        var scenario = await SeedScenarioAsync();
+        var gateway = new CoordinatedRefundGateway();
+        var command = new CardJobSettlementReturnCommand(
+            Guid.NewGuid(),
+            scenario.PaymentId,
+            Guid.NewGuid(),
+            "Concurrent settled CardJob full refund");
+
+        Task<CardJobSettlementReturnResult>? staleReverseTask = null;
+
+        try
+        {
+            staleReverseTask = RunAsync(command, gateway);
+            await gateway.WaitUntilReverseStartedAsync();
+
+            var recoveryResult = await RunAsync(command, gateway);
+            Assert.Equal(
+                CardJobSettlementReturnOutcome.RefundCompleted,
+                recoveryResult.Outcome);
+
+            gateway.ReleaseReverse();
+            var staleReverseResult = await staleReverseTask;
+            var results = new[] { recoveryResult, staleReverseResult };
+
+            Assert.All(
+                results,
+                result => Assert.Equal(
+                    CardJobSettlementReturnOutcome.RefundCompleted,
+                    result.Outcome));
+            Assert.Equal(1, gateway.ReverseCalls);
+            Assert.Equal(1, gateway.StatusCalls);
+            Assert.Equal(1, gateway.RefundCalls);
+            Assert.Null(gateway.RefundAmountMinorUnits);
+
+            using var verifyScope = _factory.Services.CreateScope();
+            var services = verifyScope.ServiceProvider;
+            var settlementReturn = Assert.IsType<SettlementReturn>(
+                await services.GetRequiredService<
+                        ISettlementReturnRepository>()
+                    .FindByRequestIdAsync(command.OperationId));
+            var attempts = await services.GetRequiredService<
+                    ISettlementReturnProviderAttemptRepository>()
+                .ListBySettlementReturnIdAsync(settlementReturn.Id);
+
+            Assert.Equal(SettlementReturnState.Completed, settlementReturn.State);
+            Assert.Equal(2, attempts.Count);
+            Assert.Equal(
+                SettlementReturnProviderAttemptState.Rejected,
+                attempts.Single(attempt =>
+                    attempt.Operation ==
+                        SettlementReturnProviderOperation.Reverse).State);
+            var confirmedRefund = attempts.Single(attempt =>
+                attempt.Operation ==
+                    SettlementReturnProviderOperation.Refund);
+            Assert.Equal(
+                SettlementReturnProviderAttemptState.Confirmed,
+                confirmedRefund.State);
+            Assert.All(
+                results,
+                result => Assert.Equal(
+                    confirmedRefund.Id,
+                    result.ProviderAttemptId));
+        }
+        finally
+        {
+            gateway.ReleaseReverse();
+
+            if (staleReverseTask is { IsCompleted: false })
+            {
+                try
+                {
+                    await staleReverseTask;
+                }
+                catch
+                {
+                    // Preserve the primary test failure while ensuring cleanup
+                    // does not race a still-running provider call.
+                }
+            }
+
+            await DeleteScenarioAsync(scenario);
+        }
+    }
+
+    [Fact]
+    public async Task RefundProcessingPersistsAuditEvent()
+    {
+        var scenario = await SeedScenarioAsync();
+        var gateway = new DirectRefundGateway(refundPaymentStatus: 9);
+        var command = new CardJobSettlementReturnCommand(
+            Guid.NewGuid(),
+            scenario.PaymentId,
+            Guid.NewGuid(),
+            "Persist refund processing audit");
+
+        try
+        {
+            var result = await RunAsync(command, gateway);
+
+            Assert.Equal(
+                CardJobSettlementReturnOutcome.RefundProcessing,
+                result.Outcome);
+            Assert.Equal(1, gateway.ReverseCalls);
+            Assert.Equal(1, gateway.RefundCalls);
+
+            using var verifyScope = _factory.Services.CreateScope();
+            var services = verifyScope.ServiceProvider;
+            var settlementReturn = Assert.IsType<SettlementReturn>(
+                await services.GetRequiredService<
+                        ISettlementReturnRepository>()
+                    .FindByRequestIdAsync(command.OperationId));
+            var auditCount = await CountAuditEventsAsync(
+                services,
+                settlementReturn.Id,
+                "settlement-return.card-job.refund-processing");
+
+            Assert.Equal(1, auditCount);
+        }
+        finally
+        {
+            await DeleteScenarioAsync(scenario);
+        }
+    }
+
+    [Fact]
+    public async Task AmbiguousRefundPersistsRequiresAttentionAuditEvent()
+    {
+        var scenario = await SeedScenarioAsync();
+        var gateway = new DirectRefundGateway(
+            refundException: new HttpRequestException(
+                "simulated ambiguous refund transport failure"));
+        var command = new CardJobSettlementReturnCommand(
+            Guid.NewGuid(),
+            scenario.PaymentId,
+            Guid.NewGuid(),
+            "Persist ambiguous refund audit");
+
+        try
+        {
+            var result = await RunAsync(command, gateway);
+
+            Assert.Equal(
+                CardJobSettlementReturnOutcome.RequiresAttention,
+                result.Outcome);
+            Assert.Equal(1, gateway.ReverseCalls);
+            Assert.Equal(1, gateway.RefundCalls);
+
+            using var verifyScope = _factory.Services.CreateScope();
+            var services = verifyScope.ServiceProvider;
+            var settlementReturn = Assert.IsType<SettlementReturn>(
+                await services.GetRequiredService<
+                        ISettlementReturnRepository>()
+                    .FindByRequestIdAsync(command.OperationId));
+            var auditCount = await CountAuditEventsAsync(
+                services,
+                settlementReturn.Id,
+                "settlement-return.card-job.refund-requires-attention");
+
+            Assert.Equal(1, auditCount);
         }
         finally
         {
@@ -162,15 +331,15 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
                     item.State);
                 Assert.Equal(
                     SettlementReturnProviderAttemptState.InProgress,
-                    item.ReverseAttemptState);
-                Assert.True(item.CanRecoverReverse);
+                    item.ProviderAttemptState);
+                Assert.True(item.CanRecoverProviderAttempt);
             }
 
             var gateway = new StatusOnlyGateway(scenario.PayId);
             var result = await RunAsync(command, gateway);
 
             Assert.Equal(
-                CardJobSettlementReturnOutcome.Confirmed,
+                CardJobSettlementReturnOutcome.ReverseCompleted,
                 result.Outcome);
             Assert.False(result.ReverseRequestSent);
             Assert.Equal(0, gateway.ReverseCalls);
@@ -200,7 +369,7 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
             var completedItem = Assert.Single(completed).Value;
             Assert.Equal(command.OperationId, completedItem.RequestId);
             Assert.True(completedItem.IsCompletedReverse);
-            Assert.False(completedItem.CanRecoverReverse);
+            Assert.False(completedItem.CanRecoverProviderAttempt);
         }
         finally
         {
@@ -245,6 +414,23 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
             services.GetRequiredService<IAuditTrail>(),
             gateway,
             timeProvider);
+    }
+
+    private static Task<int> CountAuditEventsAsync(
+        IServiceProvider services,
+        Guid settlementReturnId,
+        string action)
+    {
+        var dbContext = services.GetRequiredService<FuaPayDbContext>();
+        return dbContext.Database.SqlQuery<int>(
+                $"""
+                SELECT count(*)::integer AS "Value"
+                FROM audit.events
+                WHERE entity_type = 'settlement-return'
+                  AND entity_id = {settlementReturnId.ToString()}
+                  AND action = {action}
+                """)
+            .SingleAsync();
     }
 
     private async Task<Scenario> SeedScenarioAsync()
@@ -459,6 +645,168 @@ public sealed class CsobCardJobSettlementReturnPersistenceTests :
         public Task<CsobPaymentRefundResult> RefundAsync(
             string payId,
             long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class DirectRefundGateway : ICsobGatewayClient
+    {
+        private readonly int _refundPaymentStatus;
+        private readonly Exception? _refundException;
+        private int _reverseCalls;
+        private int _refundCalls;
+
+        public DirectRefundGateway(
+            int refundPaymentStatus = 10,
+            Exception? refundException = null)
+        {
+            _refundPaymentStatus = refundPaymentStatus;
+            _refundException = refundException;
+        }
+
+        public int ReverseCalls => Volatile.Read(ref _reverseCalls);
+
+        public int RefundCalls => Volatile.Read(ref _refundCalls);
+
+        public Task<CsobPaymentReverseResult> ReverseAsync(
+            string payId,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(1, Interlocked.Increment(ref _reverseCalls));
+            return Task.FromResult(new CsobPaymentReverseResult(
+                payId,
+                150,
+                "Payment already settled",
+                8,
+                StatusDetail: null));
+        }
+
+        public Task<CsobPaymentStatusResult> GetStatusAsync(
+            string payId,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException(
+                "Direct refund audit test must not require status recovery.");
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(1, Interlocked.Increment(ref _refundCalls));
+            Assert.Null(amountMinorUnits);
+
+            if (_refundException is not null)
+            {
+                return Task.FromException<CsobPaymentRefundResult>(
+                    _refundException);
+            }
+
+            return Task.FromResult(new CsobPaymentRefundResult(
+                payId,
+                0,
+                "OK",
+                _refundPaymentStatus,
+                AuthCode: null,
+                StatusDetail: null));
+        }
+
+        public Task<CsobEchoResult> EchoAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobEchoResult> EchoPostAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobPaymentInitResult> InitializeAsync(
+            CsobPaymentInit payment,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class CoordinatedRefundGateway : ICsobGatewayClient
+    {
+        private readonly TaskCompletionSource _reverseStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseReverse =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _reverseCalls;
+        private int _refundCalls;
+        private int _statusCalls;
+
+        public int ReverseCalls => Volatile.Read(ref _reverseCalls);
+
+        public int RefundCalls => Volatile.Read(ref _refundCalls);
+
+        public int StatusCalls => Volatile.Read(ref _statusCalls);
+
+        public long? RefundAmountMinorUnits { get; private set; }
+
+        public Task WaitUntilReverseStartedAsync(
+            CancellationToken cancellationToken = default) =>
+            _reverseStarted.Task.WaitAsync(
+                TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+        public void ReleaseReverse() => _releaseReverse.TrySetResult();
+
+        public async Task<CsobPaymentReverseResult> ReverseAsync(
+            string payId,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(1, Interlocked.Increment(ref _reverseCalls));
+            _reverseStarted.TrySetResult();
+            await _releaseReverse.Task.WaitAsync(
+                TimeSpan.FromSeconds(10),
+                cancellationToken);
+            return new CsobPaymentReverseResult(
+                payId,
+                150,
+                "Payment already settled",
+                8,
+                StatusDetail: null);
+        }
+
+        public Task<CsobPaymentStatusResult> GetStatusAsync(
+            string payId,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _statusCalls);
+            return Task.FromResult(new CsobPaymentStatusResult(
+                payId,
+                0,
+                "OK",
+                8,
+                AuthCode: null,
+                StatusDetail: null));
+        }
+
+        public Task<CsobPaymentRefundResult> RefundAsync(
+            string payId,
+            long? amountMinorUnits = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(1, Interlocked.Increment(ref _refundCalls));
+            RefundAmountMinorUnits = amountMinorUnits;
+            return Task.FromResult(new CsobPaymentRefundResult(
+                payId,
+                0,
+                "OK",
+                10,
+                AuthCode: "TEST",
+                StatusDetail: null));
+        }
+
+        public Task<CsobEchoResult> EchoAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobEchoResult> EchoPostAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CsobPaymentInitResult> InitializeAsync(
+            CsobPaymentInit payment,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }

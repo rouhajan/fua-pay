@@ -99,6 +99,22 @@ public sealed class SettlementReturnProviderAttemptTests
     }
 
     [Fact]
+    public void UpdateUncertain_RecordsNewStatusOnlyDiagnostic()
+    {
+        var attempt = CreateUncertain();
+        var changedAt = CreatedAt.AddMinutes(3);
+
+        attempt.UpdateUncertain("refund processing", changedAt);
+
+        Assert.Equal(
+            SettlementReturnProviderAttemptState.Uncertain,
+            attempt.State);
+        Assert.Equal("refund processing", attempt.Diagnostic);
+        Assert.Equal(changedAt, attempt.UpdatedAt);
+        Assert.Null(attempt.FinishedAt);
+    }
+
+    [Fact]
     public void Uncertain_CanOnlyBeResolvedToTerminalOutcome()
     {
         var confirmed = CreateUncertain();

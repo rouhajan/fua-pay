@@ -123,6 +123,20 @@ public sealed class SettlementReturnProviderAttempt
         UpdatedAt = normalizedTime;
     }
 
+    public void UpdateUncertain(
+        string diagnostic,
+        DateTimeOffset changedAt)
+    {
+        EnsureState(
+            SettlementReturnProviderAttemptState.Uncertain,
+            SettlementReturnProviderAttemptState.Uncertain);
+
+        var normalizedDiagnostic = NormalizeDiagnostic(diagnostic);
+        var normalizedTime = ValidateChangedAt(changedAt);
+        Diagnostic = normalizedDiagnostic;
+        UpdatedAt = normalizedTime;
+    }
+
     internal static SettlementReturnProviderAttempt Restore(
         Guid id,
         Guid settlementReturnId,

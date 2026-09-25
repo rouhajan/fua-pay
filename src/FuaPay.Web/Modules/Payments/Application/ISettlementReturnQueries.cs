@@ -9,37 +9,76 @@ public sealed record SettlementReturnAdministrationItem(
     Guid OriginalPaymentId,
     SettlementReturnState State,
     string Reason,
-    Guid? ReverseAttemptId,
-    PaymentProvider? ReverseAttemptProvider,
-    SettlementReturnProviderAttemptState? ReverseAttemptState)
+    Guid? ProviderAttemptId,
+    PaymentProvider? Provider,
+    SettlementReturnProviderOperation? ProviderOperation,
+    SettlementReturnProviderAttemptState? ProviderAttemptState,
+    string? ProviderAttemptDiagnostic)
 {
-    private bool HasExpectedReverseAttempt =>
-        ReverseAttemptId == RequestId &&
-        ReverseAttemptProvider == PaymentProvider.Csob;
+    private bool HasExpectedProviderAttempt =>
+        ProviderAttemptId.HasValue &&
+        ProviderAttemptId != Guid.Empty &&
+        Provider == PaymentProvider.Csob &&
+        (ProviderOperation != SettlementReturnProviderOperation.Reverse ||
+         ProviderAttemptId == RequestId);
 
-    public bool CanRecoverReverse =>
+    public bool CanRecoverProviderAttempt =>
         Kind == SettlementReturnKind.CardJob &&
-        HasExpectedReverseAttempt &&
+        HasExpectedProviderAttempt &&
         (State is
             SettlementReturnState.InProgress or
             SettlementReturnState.RequiresAttention) &&
-        (ReverseAttemptState is
+        (ProviderAttemptState is
             SettlementReturnProviderAttemptState.InProgress or
             SettlementReturnProviderAttemptState.Uncertain);
 
     public bool IsCompletedReverse =>
         Kind == SettlementReturnKind.CardJob &&
-        HasExpectedReverseAttempt &&
+        HasExpectedProviderAttempt &&
         State == SettlementReturnState.Completed &&
-        ReverseAttemptState ==
+        ProviderOperation == SettlementReturnProviderOperation.Reverse &&
+        ProviderAttemptState ==
             SettlementReturnProviderAttemptState.Confirmed;
 
-    public bool IsRejectedReverse =>
+    public bool IsCompletedRefund =>
         Kind == SettlementReturnKind.CardJob &&
-        HasExpectedReverseAttempt &&
+        HasExpectedProviderAttempt &&
+        State == SettlementReturnState.Completed &&
+        ProviderOperation == SettlementReturnProviderOperation.Refund &&
+        ProviderAttemptState ==
+            SettlementReturnProviderAttemptState.Confirmed;
+
+    public bool IsRefundProcessing =>
+        Kind == SettlementReturnKind.CardJob &&
+        HasExpectedProviderAttempt &&
+        ProviderOperation == SettlementReturnProviderOperation.Refund &&
+        State is
+            SettlementReturnState.InProgress or
+            SettlementReturnState.RequiresAttention &&
+        (ProviderAttemptState ==
+            SettlementReturnProviderAttemptState.InProgress ||
+         (ProviderAttemptState ==
+            SettlementReturnProviderAttemptState.Uncertain &&
+          string.Equals(
+              ProviderAttemptDiagnostic,
+              CardJobSettlementReturnDiagnostics.RefundProcessing,
+              StringComparison.Ordinal)));
+
+    public bool IsPreExistingProviderRefund =>
+        Kind == SettlementReturnKind.CardJob &&
+        HasExpectedProviderAttempt &&
+        ProviderOperation == SettlementReturnProviderOperation.Reverse &&
         State == SettlementReturnState.RequiresAttention &&
-        ReverseAttemptState ==
-            SettlementReturnProviderAttemptState.Rejected;
+        ProviderAttemptState ==
+            SettlementReturnProviderAttemptState.Rejected &&
+        (string.Equals(
+             ProviderAttemptDiagnostic,
+             CardJobSettlementReturnDiagnostics.PreExistingRefundProcessing,
+             StringComparison.Ordinal) ||
+         string.Equals(
+             ProviderAttemptDiagnostic,
+             CardJobSettlementReturnDiagnostics.PreExistingReturned,
+             StringComparison.Ordinal));
 }
 
 public interface ISettlementReturnQueries

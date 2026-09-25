@@ -87,11 +87,11 @@ public sealed class AdminPaymentReturnRenderingTests :
     [InlineData(
         SettlementReturnState.Completed,
         SettlementReturnProviderAttemptState.Confirmed,
-        "completed")]
+        "reverse-completed")]
     [InlineData(
         SettlementReturnState.RequiresAttention,
         SettlementReturnProviderAttemptState.Rejected,
-        "refund-needed")]
+        "attention")]
     [InlineData(
         SettlementReturnState.Requested,
         SettlementReturnProviderAttemptState.Prepared,
@@ -126,7 +126,7 @@ public sealed class AdminPaymentReturnRenderingTests :
             SettlementReturnState.RequiresAttention,
             SettlementReturnProviderAttemptState.Uncertain) with
         {
-            ReverseAttemptId = Guid.NewGuid()
+            ProviderAttemptId = Guid.NewGuid()
         };
 
         var html = await RenderAsync(item);
@@ -137,6 +137,72 @@ public sealed class AdminPaymentReturnRenderingTests :
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "data-return-action=\"new\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "data-return-action=\"recover\"",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RefundProcessingIsDistinctAndRecoverable()
+    {
+        var item = ReturnItem(
+            Guid.NewGuid(),
+            SettlementReturnState.InProgress,
+            SettlementReturnProviderAttemptState.InProgress,
+            SettlementReturnProviderOperation.Refund,
+            attemptId: Guid.NewGuid());
+
+        var html = await RenderAsync(item);
+
+        Assert.Contains(
+            "data-return-state=\"refund-processing\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Refund čeká na stavové ověření",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "data-return-action=\"recover\"",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompletedRefundIsDistinctFromReverse()
+    {
+        var html = await RenderAsync(ReturnItem(
+            Guid.NewGuid(),
+            SettlementReturnState.Completed,
+            SettlementReturnProviderAttemptState.Confirmed,
+            SettlementReturnProviderOperation.Refund,
+            attemptId: Guid.NewGuid()));
+
+        Assert.Contains(
+            "data-return-state=\"refund-completed\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "data-return-action=\"recover\"",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PreExistingProviderRefundRequiresAttention()
+    {
+        var html = await RenderAsync(ReturnItem(
+            Guid.NewGuid(),
+            SettlementReturnState.RequiresAttention,
+            SettlementReturnProviderAttemptState.Rejected,
+            diagnostic:
+                CardJobSettlementReturnDiagnostics.PreExistingReturned));
+
+        Assert.Contains(
+            "data-return-state=\"provider-refund-pre-existing\"",
             html,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -239,7 +305,11 @@ public sealed class AdminPaymentReturnRenderingTests :
     private static SettlementReturnAdministrationItem ReturnItem(
         Guid requestId,
         SettlementReturnState returnState,
-        SettlementReturnProviderAttemptState attemptState) =>
+        SettlementReturnProviderAttemptState attemptState,
+        SettlementReturnProviderOperation operation =
+            SettlementReturnProviderOperation.Reverse,
+        string? diagnostic = null,
+        Guid? attemptId = null) =>
         new(
             Guid.NewGuid(),
             requestId,
@@ -247,9 +317,11 @@ public sealed class AdminPaymentReturnRenderingTests :
             PaymentId,
             returnState,
             "Approved full return",
-            requestId,
+            attemptId ?? requestId,
             PaymentProvider.Csob,
-            attemptState);
+            operation,
+            attemptState,
+            diagnostic);
 
     private sealed class AdminPageQueries :
         IPaymentQueries,
