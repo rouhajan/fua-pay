@@ -458,11 +458,14 @@ The pages currently cover:
 - card processing on ČSOB;
 - explicit statement that FUA Pay does not store PAN/card number or CVC/CVV.
 
-Two external/presentation items remain separate from the tested payment core:
+Two public/presentation follow-ups remain separate from the tested payment core:
 
-1. the intended dedicated operational/payment mailbox `fuapay@tul.cz` has not
-   been confirmed as existing/monitored, so the truthful current application
-   contact remains published instead;
+1. `fuapay@tul.cz` is already confirmed and functional. The exact tested release
+   `e84d851...` nevertheless still renders `jan.rouha@tul.cz` as the FUA Pay
+   operational contact in `/Privacy`. This is a source-content TODO: replace it
+   with `fuapay@tul.cz` before the public production-card launch. `/Terms`
+   already links to `/Privacy` and does not need to duplicate the operational
+   contact;
 2. official Visa/Mastercard acceptance marks are not currently documented as
    present in the checkout UI. ČSOB's separate payment-method-presentation
    guidance says to place Visa and Mastercard acceptance marks on the checkout
