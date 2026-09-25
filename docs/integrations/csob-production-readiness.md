@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-23
+Status: 2026-09-24
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu až k bezpečné aktivaci produkčního ČSOB provozu. Není checklistem prvního
@@ -378,9 +378,16 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
    správce, aby app registration správně obsahovala samostatný
    `/signout-callback-oidc`; známý stav je popsán v
    [entra-id.md](entra-id.md).
-6. Doplnit automatické hardening testy identifikované auditem: concurrent
-   CardJob creation, celou `Succeeded + nový status 7/8` reconciliation cestu
-   a HTTP-level object-isolation probe.
+6. Automatické hardening testy identifikované auditem:
+   - [x] Concurrent CardJob creation: PR #76 je mergnutý v
+     `8e45f248f295d1d9af665e3214dfce2ab2eef399`. PostgreSQL test
+     `ConcurrentDirectPayments_CreateSinglePayment` ověřuje stejný `Payment.Id`
+     pro dva souběžné požadavky a právě jeden payment i initiation řádek;
+     [evidence a výsledky](../testing/card-job-concurrent-creation-verification-2026-09-23.md).
+     Nejde o živý ČSOB double-click test ani počítání provider HTTP init callů;
+     příslušný live scénář v kroku 7 zůstává otevřený.
+   - [ ] Celá `Succeeded + nový status 7/8` reconciliation cesta.
+   - [ ] HTTP-level object-isolation probe.
 7. Z jednoho clean commitu/release artefaktu udělat izolovaný staging deploy a
    v jediném souvislém testovacím okně zopakovat:
    - fresh GET echo a POST echo;
@@ -406,6 +413,21 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
 Fresh live `payment/status` replay nad již `Succeeded` zůstává do kroku 7
 otevřenou evidence položkou. Terminální `0/6 Failed` je naopak uzavřený
 automated-covered non-blocking bod, viz sekce D.
+
+### Repository checkpoint 2026-09-24
+
+PR #77 přidal pouze runtime regresní test stránkování administrace plateb a
+[evidenci CodeQL nálezů #2 a #3](../testing/codeql-xss-pagination-verification-2026-09-24.md).
+Merge commit je `4497133577b004b0f64f84116f9cc2706cd578cd`; post-merge
+[CI #402](https://github.com/rouhajan/fua-pay/actions/runs/35996673068) a
+[CodeQL #407](https://github.com/rouhajan/fua-pay/actions/runs/35996673119)
+skončily `SUCCESS` na tomto přesném commitu. Detail closeoutu, včetně původu
+potvrzení dismissalů a úklidu větve, je v odkazované evidenci.
+
+Tento checkpoint nedokládá nový deployment ani nový live ČSOB test. Nemění
+pořadí ani zbývající rozsah kroků 2–11 a není produkční GO. Issue #37 zůstává
+otevřené; refund, CardTopUp návrat kreditu, účetní export a zbývající acceptance
+se tímto dokumentačním krokem neoznačují jako hotové.
 
 ## F. Historický přechodný staging release/deploy gate
 
