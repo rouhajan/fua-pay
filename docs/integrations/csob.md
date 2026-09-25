@@ -1,6 +1,6 @@
 # ČSOB Payment Gateway eAPI 1.9
 
-Status: 2026-09-22
+Status: 2026-09-24
 
 Pokud je ČSOB aktivní, FUA Pay jej používá jako provider adaptér nad interním
 provider-neutral modelem platby. Browserový návrat nikdy není finanční autorita;
@@ -200,39 +200,53 @@ Read-only kontrola potvrdila na každou zakázku právě jednu payment, jednu
 document source ID, částky a provider reference. Jde o fresh end-to-end důkaz
 běžného uživatelského CardJob flow nad izolovaným stagingem.
 
-## CardJob payment/reverse
+## CardJob Reverse → full Refund
 
 Administrátor může z přehledu plateb spustit pouze plnou vratku úspěšné
 ČSOB platby zakázky. POST s antiforgery předá jen idempotentní operation ID,
 identifikátor vybírané platby a důvod; zákazníka, zakázku, částku, provider a
 `payId` služba vždy znovu odvodí z autoritativní uložené platby a vypořádání
-zakázky. CardTopUp, kreditní zakázka, částečná vratka a refund nejsou touto
-cestou podporovány.
+zakázky. CardTopUp, kreditní zakázka a částečná či opakovaná vratka touto cestou
+podporovány nejsou.
 
 `SettlementReturn` a jeho Reverse provider attempt se nejdřív v jedné databázové
 transakci uloží jako `InProgress`. Teprve po commitu smí první oprávněný request
 odeslat podepsaný PUT `payment/reverse`; databázová transakce se přes HTTP nedrží.
-Jediný potvrzený výsledek je čerstvá, podepsaná odpověď pro stejné `payId` s
-`resultCode=0`, `paymentStatus=5`.
+Čerstvá podepsaná odpověď pro stejné `payId` s `resultCode=0`,
+`paymentStatus=5` potvrzuje Reverse a dokončuje vratku.
 
 Jakmile PUT mohl být odeslán, timeout, zrušení, transportní chyba, neplatná
 odpověď nebo chyba lokálního zápisu vedou do `Uncertain` /
 `RequiresAttention`. Replay `InProgress` nebo `Uncertain` volá pouze podepsané
 `payment/status` a PUT nikdy automaticky neopakuje.
 
-Přímá odpověď reverse potvrzuje pouze `resultCode=0`, `paymentStatus=5`.
-Dokumentované `resultCode=150` spolu se stavem 8, 9 nebo 10 zamítne jen Reverse
-attempt a ponechá vratku v `RequiresAttention` pro samostatné budoucí
-rozhodnutí o refundu. Jiné nenulové kombinace, například `160/8`, zůstávají
-nejasné. Stavové recovery má oddělenou hranici: úspěšná podepsaná
-odpověď `payment/status` `0/5` vratku dokončí a `0/8`, `0/9` nebo `0/10`
-zamítne jen Reverse attempt. Z lokálního času se výsledek neodvozuje.
+Přímá odpověď reverse potvrzuje pouze `0/5`. Dokumentované `150/8` nebo
+status-only recovery `0/8` prokáže zúčtovaný stav: historický Reverse attempt se
+zamítne a v jedné transakci se založí a zahájí nový Refund attempt. Až po commitu
+se odešle `payment/refund` pro stejné autoritativní `payId` s vynechaným
+`amount`. Jde výhradně o plný refund. Přímé `0/10` z tohoto konkrétního PUT může
+Refund potvrdit a dokončit vratku; přímé `0/9` ponechá aktivní zpracovávaný Refund.
 
-Administrátorský přehled načítá provider-neutral stav existující vratky.
-Aktivní `InProgress` / `Uncertain` pokus nabídne jen stavové ověření s
-původním uloženým request ID. Dokončená vratka se zobrazí jako vrácená;
-zamítnutý Reverse jako rozhodnutí o refundu a nekonzistentní stav jako
-vyžadující pozornost. Žádný z těchto stavů nenabídne nový reverse.
+Stav 9 nebo 10 zjištěný na Reverse cestě znamená možný externí/předchozí refund.
+Reverse se uzavře s auditovatelnou diagnostikou, vratka vyžaduje pozornost a
+`payment/refund` se nevolá. Jiné nenulové či neznámé kombinace, například
+`160/8`, zůstávají nejasné. Z lokálního času se žádný finanční výsledek
+neodvozuje.
+
+Po jakémkoli možná odeslaném refund PUT vedou timeout, síťová chyba, cancellation,
+neplatný podpis, freshness, jiné `payId`, malformed odpověď nebo lokální chyba
+potvrzení do `Uncertain` / `RequiresAttention`. Replay pak volá výhradně
+`payment/status`; druhý refund PUT se neposílá. Status 9 zůstává zpracovávaný.
+Status 8 a nesouvisející kombinace zůstávají fail-closed. Samotný status 10 při
+recovery není dostatečný k automatickému dokončení: veřejná primární dokumentace
+nepublikuje jednoznačnou strojově čitelnou `statusDetail` hodnotu dokazující plný
+refund, kterou by současný response model mohl bezpečně ověřit.
+
+Administrátorský přehled načítá provider-neutral stav existující vratky a
+rozlišuje dokončený Reverse, zpracovávaný Refund, dokončený Refund a stav
+vyžadující pozornost včetně předem existující providerové vratky. Aktivní
+`InProgress` / `Uncertain` attempt nabídne jen stavové ověření s původním
+uloženým request ID. Žádný replay nenabídne nový Reverse ani druhý Refund PUT.
 
 ## Protokolová hranice payment/refund
 
@@ -243,12 +257,12 @@ stejným HTTP, RSA/SHA-256, freshness a fail-closed ověřením jako ostatní
 gateway operace a vrací strukturovaný protokolový výsledek včetně volitelných
 `authCode` a `statusDetail`.
 
-Jde pouze o transportní podporu. Žádná současná aplikační služba, endpoint,
-worker ani UI tuto metodu nevolá a samotný HTTP 200 nebo `resultCode=0`
-nevytváří ani nedokončuje `SettlementReturn` či provider attempt. Doménová
-rezervace vratného limitu, korelace nejasného výsledku, opakované/částečné
-refund lifecycle a CardTopUp návrat zůstávají samostatným neimplementovaným
-rozsahem.
+CardJob aplikační orchestrace tuto hranici používá pouze pro výše popsaný plný
+refund po bezpečně prokázaném stavu 8. Samotný HTTP 200 není autorita; služba
+pracuje jen s výsledkem po RSA/SHA-256, freshness a `payId` ověření. Částečné a
+opakované refundy, jejich kumulativní limit, CardTopUp návrat a automatické
+rozlišení plného/částečného návratu při status-only recovery zůstávají
+neimplementované.
 
 ## Známé implementační mezery před production readiness
 
@@ -268,10 +282,13 @@ krytá implementací: `PaymentSettlementService.CompleteAsync()` nad již
 opakovaný i concurrent ČSOB settlement s právě jedním pohybem/dokumentem nebo
 job settlementem. Tato evidence nenahrazuje chybějící fresh live provider replay.
 
-Refund není součástí povinného ČSOB production-activation checklistu. Přidaná
-protokolová hranice sama o sobě není in-app card refund ani production-ready
-vratka; před zpřístupněním je stále nutná samostatná doménová orchestrace,
-perzistence, recovery, audit, UI a odpovídající acceptance.
+Plný CardJob Refund je implementovaný v aplikaci včetně durabilního attemptu,
+status-only recovery, auditu a admin UI, ale nebyl ověřen živým gateway testem.
+Částečný/opakovaný refund, CardTopUp návrat a jednoznačná recovery plného refundu
+ze samotného statusu 10 zůstávají samostatnými mezerami. Refund navíc není
+součástí povinného ČSOB production-activation checklistu; tento lokálně
+otestovaný slice proto sám o sobě nedokládá production readiness ani bankovní
+acceptance.
 
 ## Konfigurace
 

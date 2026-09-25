@@ -10,14 +10,24 @@ namespace FuaPay.Web.Modules.Payments.Infrastructure.Csob;
 public sealed class CsobCardJobSettlementReturnService :
     ICardJobSettlementReturnService
 {
-    private const string AmbiguousReverseDiagnostic =
+    internal const string ReverseAmbiguousDiagnostic =
         "CSOB reverse outcome requires signed status recovery.";
-
-    private const string AmbiguousStatusDiagnostic =
+    internal const string ReverseStatusAmbiguousDiagnostic =
         "CSOB status does not yet prove the reverse outcome.";
-
-    private const string NonReversibleDiagnostic =
-        "CSOB payment is already in a non-reversible lifecycle state.";
+    internal const string ReverseSettledDiagnostic =
+        "Signed CSOB evidence proved paymentStatus 8; full refund started.";
+    internal const string ReverseFoundRefundProcessingDiagnostic =
+        CardJobSettlementReturnDiagnostics.PreExistingRefundProcessing;
+    internal const string ReverseFoundReturnedDiagnostic =
+        CardJobSettlementReturnDiagnostics.PreExistingReturned;
+    internal const string RefundAmbiguousDiagnostic =
+        "CSOB full-refund outcome requires signed status recovery.";
+    internal const string RefundStatusAmbiguousDiagnostic =
+        "CSOB status does not yet prove the full-refund outcome.";
+    internal const string RefundProcessingDiagnostic =
+        CardJobSettlementReturnDiagnostics.RefundProcessing;
+    internal const string RefundReturnedWithoutFullProofDiagnostic =
+        "Signed CSOB status 10 lacks documented machine-readable full-refund proof.";
 
     private readonly IJobRepository _jobRepository;
     private readonly IJobPaymentCoordination _jobPaymentCoordination;
@@ -78,55 +88,33 @@ public sealed class CsobCardJobSettlementReturnService :
         ValidateCommand(command);
 
         Preparation preparation;
-
         try
         {
-            preparation = await _transaction.ExecuteAsync(
-                transactionCancellationToken => PrepareAsync(
-                    command,
-                    transactionCancellationToken),
+            preparation = await PrepareTransactionAsync(
+                command,
                 cancellationToken);
         }
         catch (Exception exception) when (
             exception is SettlementReturnConcurrencyException or
                 SettlementReturnProviderAttemptConcurrencyException)
         {
-            preparation = await _transaction.ExecuteAsync(
-                transactionCancellationToken =>
-                    LoadAfterPreparationRaceAsync(
-                        command.OperationId,
-                        command.AdministratorUserId,
-                        transactionCancellationToken),
+            preparation = await PrepareTransactionAsync(
+                command,
                 cancellationToken);
         }
 
-        return preparation.Disposition switch
-        {
-            PreparationDisposition.SendReverse =>
-                await SendReverseAsync(
-                    command.OperationId,
-                    preparation,
-                    cancellationToken),
-            PreparationDisposition.RecoverByStatus =>
-                await RecoverByStatusAsync(
-                    command.OperationId,
-                    preparation,
-                    cancellationToken),
-            PreparationDisposition.Confirmed =>
-                CreateResult(
-                    preparation,
-                    CardJobSettlementReturnOutcome.Confirmed,
-                    reverseRequestSent: false),
-            PreparationDisposition.Rejected =>
-                CreateResult(
-                    preparation,
-                    CardJobSettlementReturnOutcome.ReverseRejected,
-                    reverseRequestSent: false),
-            _ => throw Inconsistent(
-                command.OperationId,
-                "unsupported preparation disposition")
-        };
+        return await ContinueAsync(
+            command.OperationId,
+            preparation,
+            cancellationToken);
     }
+
+    private Task<Preparation> PrepareTransactionAsync(
+        CardJobSettlementReturnCommand command,
+        CancellationToken cancellationToken) =>
+        _transaction.ExecuteAsync(
+            ct => PrepareAsync(command, ct),
+            cancellationToken);
 
     private async Task<Preparation> PrepareAsync(
         CardJobSettlementReturnCommand command,
@@ -152,32 +140,22 @@ public sealed class CsobCardJobSettlementReturnService :
             ?? throw NotAllowed(
                 originalPaymentId,
                 "the authoritative original payment does not exist");
-
         ValidatePayment(payment);
 
         var jobId = payment.JobId!.Value;
-        var wasLocked = await _jobPaymentCoordination.LockJobAsync(
+        await LockJobOrThrowAsync(
+            command.OperationId,
             jobId,
             cancellationToken);
-
-        if (!wasLocked)
-        {
-            throw NotAllowed(
-                payment.Id,
-                "the authoritative job does not exist");
-        }
-
         var job = await _jobRepository.FindByIdAsync(
             jobId,
             cancellationToken)
             ?? throw NotAllowed(
                 payment.Id,
                 "the authoritative job does not exist");
-
         ValidateJob(payment, job);
 
         SettlementReturn settlementReturn;
-
         if (existingReturn is null)
         {
             var candidate = new SettlementReturn(
@@ -191,10 +169,9 @@ public sealed class CsobCardJobSettlementReturnService :
                 payment.Amount,
                 command.Reason,
                 _timeProvider.GetUtcNow());
-            var registration = await _registrationService.RegisterAsync(
+            settlementReturn = (await _registrationService.RegisterAsync(
                 candidate,
-                cancellationToken);
-            settlementReturn = registration.SettlementReturn;
+                cancellationToken)).SettlementReturn;
         }
         else
         {
@@ -202,93 +179,134 @@ public sealed class CsobCardJobSettlementReturnService :
         }
 
         ValidateReturn(payment, job, settlementReturn);
-
-        var creation = await _attemptService.CreateAsync(
-            new CreateSettlementReturnProviderAttemptCommand(
-                command.OperationId,
-                settlementReturn.Id,
-                SettlementReturnProviderOperation.Reverse),
+        var history = await _attemptRepository.ListBySettlementReturnIdAsync(
+            settlementReturn.Id,
             cancellationToken);
-        var attempt = creation.Attempt;
 
-        ValidateAttempt(settlementReturn, payment, attempt);
+        if (history.Count == 0)
+        {
+            if (settlementReturn.State != SettlementReturnState.Requested)
+            {
+                throw Inconsistent(
+                    command.OperationId,
+                    "an unresolved return has no provider-attempt history");
+            }
 
-        return await ResolvePreparationAsync(
-            settlementReturn,
-            attempt,
-            command.AdministratorUserId,
-            cancellationToken);
+            var created = await _attemptService.CreateAsync(
+                new CreateSettlementReturnProviderAttemptCommand(
+                    command.OperationId,
+                    settlementReturn.Id,
+                    SettlementReturnProviderOperation.Reverse),
+                cancellationToken);
+            history = [created.Attempt];
+        }
+
+        ValidateHistory(settlementReturn, payment, history);
+
+        var confirmed = history.SingleOrDefault(
+            attempt => attempt.State ==
+                SettlementReturnProviderAttemptState.Confirmed);
+        if (confirmed is not null)
+        {
+            if (settlementReturn.State != SettlementReturnState.Completed)
+            {
+                throw Inconsistent(
+                    command.OperationId,
+                    "a confirmed attempt has not completed the return");
+            }
+
+            return Preparation.For(
+                settlementReturn,
+                confirmed,
+                command.AdministratorUserId,
+                confirmed.Operation ==
+                    SettlementReturnProviderOperation.Reverse
+                    ? Disposition.ReverseCompleted
+                    : Disposition.RefundCompleted);
+        }
+
+        var active = history.SingleOrDefault(attempt => attempt.IsActive);
+        if (active is not null)
+        {
+            return await ResolveActiveAsync(
+                settlementReturn,
+                active,
+                command.AdministratorUserId,
+                cancellationToken);
+        }
+
+        var rejected = history
+            .Where(attempt => attempt.State ==
+                SettlementReturnProviderAttemptState.Rejected)
+            .OrderByDescending(attempt => attempt.CreatedAt)
+            .ThenByDescending(attempt => attempt.Id)
+            .FirstOrDefault();
+
+        if (settlementReturn.State == SettlementReturnState.RequiresAttention)
+        {
+            return Preparation.For(
+                settlementReturn,
+                rejected ?? history[^1],
+                command.AdministratorUserId,
+                IsPreExistingRefund(rejected?.Diagnostic)
+                    ? Disposition.PreExistingProviderRefund
+                    : Disposition.RequiresAttention);
+        }
+
+        throw Inconsistent(
+            command.OperationId,
+            "the return has no resumable provider attempt");
     }
 
-    private async Task<Preparation> ResolvePreparationAsync(
+    private async Task<Preparation> ResolveActiveAsync(
         SettlementReturn settlementReturn,
         SettlementReturnProviderAttempt attempt,
-        Guid administratorActorUserId,
+        Guid actorId,
         CancellationToken cancellationToken)
     {
         if (
-            attempt.State ==
-                SettlementReturnProviderAttemptState.Confirmed &&
-            settlementReturn.State == SettlementReturnState.Completed)
-        {
-            return CreatePreparation(
-                settlementReturn,
-                attempt,
-                administratorActorUserId,
-                PreparationDisposition.Confirmed);
-        }
-
-        if (
-            attempt.State ==
-                SettlementReturnProviderAttemptState.Rejected &&
-            settlementReturn.State ==
-                SettlementReturnState.RequiresAttention)
-        {
-            return CreatePreparation(
-                settlementReturn,
-                attempt,
-                administratorActorUserId,
-                PreparationDisposition.Rejected);
-        }
-
-        if (
-            attempt.State ==
-                SettlementReturnProviderAttemptState.Prepared &&
+            attempt.State == SettlementReturnProviderAttemptState.Prepared &&
             settlementReturn.State is
                 SettlementReturnState.Requested or
-                SettlementReturnState.InProgress)
+                SettlementReturnState.InProgress or
+                SettlementReturnState.RequiresAttention)
         {
             var changedAt = _timeProvider.GetUtcNow();
-
             if (settlementReturn.State == SettlementReturnState.Requested)
             {
                 settlementReturn.Begin(changedAt);
             }
+            else if (
+                settlementReturn.State ==
+                    SettlementReturnState.RequiresAttention)
+            {
+                settlementReturn.Resume(changedAt);
+            }
 
             _auditTrail.Stage(CreateAudit(
                 settlementReturn,
-                administratorActorUserId,
-                "settlement-return.card-job.reverse-started",
-                "CSOB reverse became eligible after durable InProgress " +
-                "persistence.",
+                actorId,
+                Action(attempt.Operation, "started"),
+                attempt.Operation ==
+                    SettlementReturnProviderOperation.Reverse
+                    ? "CSOB reverse became eligible after durable InProgress persistence."
+                    : "CSOB full refund became eligible after durable InProgress persistence.",
                 changedAt));
-
             attempt = await _attemptService.BeginAsync(
                 attempt.Id,
                 cancellationToken);
+            await _returnRepository.SaveAsync(
+                settlementReturn,
+                cancellationToken);
 
-            if (settlementReturn.State == SettlementReturnState.InProgress)
-            {
-                await _returnRepository.SaveAsync(
-                    settlementReturn,
-                    cancellationToken);
-            }
-
-            return CreatePreparation(
+            return Preparation.For(
                 settlementReturn,
                 attempt,
-                administratorActorUserId,
-                PreparationDisposition.SendReverse);
+                actorId,
+                attempt.Operation ==
+                    SettlementReturnProviderOperation.Reverse
+                    ? Disposition.SendReverse
+                    : Disposition.SendRefund);
         }
 
         if (
@@ -310,338 +328,680 @@ public sealed class CsobCardJobSettlementReturnService :
                     cancellationToken);
             }
 
-            return CreatePreparation(
+            return Preparation.For(
                 settlementReturn,
                 attempt,
-                administratorActorUserId,
-                PreparationDisposition.RecoverByStatus);
+                actorId,
+                attempt.Operation ==
+                    SettlementReturnProviderOperation.Reverse
+                    ? Disposition.RecoverReverse
+                    : Disposition.RecoverRefund);
         }
 
         throw Inconsistent(
             settlementReturn.RequestId,
-            $"return {settlementReturn.State} and Reverse attempt " +
-            $"{attempt.State} cannot be resumed");
+            $"return {settlementReturn.State} and {attempt.Operation} " +
+            $"attempt {attempt.State} cannot be resumed");
     }
 
-    private async Task<Preparation> LoadAfterPreparationRaceAsync(
+    private async Task<CardJobSettlementReturnResult> ContinueAsync(
         Guid operationId,
-        Guid administratorActorUserId,
-        CancellationToken cancellationToken)
-    {
-        var settlementReturn = await _returnRepository.FindByRequestIdAsync(
-            operationId,
-            cancellationToken)
-            ?? throw Inconsistent(
+        Preparation preparation,
+        CancellationToken cancellationToken) =>
+        preparation.Next switch
+        {
+            Disposition.SendReverse => await SendReverseAsync(
                 operationId,
-                "the operation disappeared after a concurrency conflict");
-        var attempt = await _attemptRepository.FindByIdAsync(
-            operationId,
-            cancellationToken)
-            ?? throw Inconsistent(
+                preparation,
+                cancellationToken),
+            Disposition.RecoverReverse => await RecoverReverseAsync(
                 operationId,
-                "the Reverse attempt disappeared after a concurrency conflict");
-
-        return await ResolvePreparationAsync(
-            settlementReturn,
-            attempt,
-            administratorActorUserId,
-            cancellationToken);
-    }
+                preparation,
+                cancellationToken),
+            Disposition.SendRefund => await SendRefundAsync(
+                operationId,
+                preparation,
+                cancellationToken),
+            Disposition.RecoverRefund => await RecoverRefundAsync(
+                operationId,
+                preparation,
+                cancellationToken),
+            Disposition.ReverseCompleted => Result(
+                preparation,
+                CardJobSettlementReturnOutcome.ReverseCompleted),
+            Disposition.RefundCompleted => Result(
+                preparation,
+                CardJobSettlementReturnOutcome.RefundCompleted),
+            Disposition.PreExistingProviderRefund => Result(
+                preparation,
+                CardJobSettlementReturnOutcome.PreExistingProviderRefund),
+            Disposition.RequiresAttention => Result(
+                preparation,
+                CardJobSettlementReturnOutcome.RequiresAttention),
+            _ => throw Inconsistent(
+                operationId,
+                "unsupported preparation disposition")
+        };
 
     private async Task<CardJobSettlementReturnResult> SendReverseAsync(
         Guid operationId,
         Preparation preparation,
         CancellationToken cancellationToken)
     {
+        CsobPaymentReverseResult response;
         try
         {
-            var response = await _gatewayClient.ReverseAsync(
+            response = await _gatewayClient.ReverseAsync(
                 preparation.ProviderReference,
-                cancellationToken);
-
-            return await ApplyReverseResponseAsync(
-                operationId,
-                preparation,
-                response,
                 cancellationToken);
         }
         catch (OperationCanceledException exception)
         {
-            await PersistSafetyStateOrThrowAsync(
+            await PersistSafetyOrThrowAsync(
                 operationId,
                 preparation,
-                AmbiguousReverseDiagnostic,
-                reverseRequestSent: true,
+                ReverseAmbiguousDiagnostic,
+                reverseSent: true,
+                refundSent: false,
                 exception);
             throw;
         }
         catch (Exception exception)
         {
-            return await PersistSafetyStateOrThrowAsync(
+            return await PersistSafetyOrThrowAsync(
                 operationId,
                 preparation,
-                AmbiguousReverseDiagnostic,
-                reverseRequestSent: true,
+                ReverseAmbiguousDiagnostic,
+                reverseSent: true,
+                refundSent: false,
                 exception);
         }
+
+        if (response.ResultCode == 0 && response.PaymentStatus == 5)
+        {
+            return await ResolveAfterMutationAsync(
+                operationId,
+                preparation,
+                () => ConfirmAsync(
+                    operationId,
+                    preparation,
+                    reverseSent: true,
+                    refundSent: false,
+                    cancellationToken),
+                ReverseAmbiguousDiagnostic,
+                reverseSent: true,
+                refundSent: false);
+        }
+
+        if (response.ResultCode == 150 && response.PaymentStatus == 8)
+        {
+            Preparation refund;
+            try
+            {
+                refund = await TransitionToRefundAsync(
+                    operationId,
+                    preparation,
+                    reverseSent: true,
+                    cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                return await PersistSafetyOrThrowAsync(
+                    operationId,
+                    preparation,
+                    ReverseAmbiguousDiagnostic,
+                    reverseSent: true,
+                    refundSent: false,
+                    exception);
+            }
+
+            return await ContinueAsync(operationId, refund, cancellationToken);
+        }
+
+        if (
+            response.ResultCode == 150 &&
+            response.PaymentStatus is 9 or 10)
+        {
+            return await MarkPreExistingAsync(
+                operationId,
+                preparation,
+                response.PaymentStatus,
+                reverseSent: true,
+                cancellationToken);
+        }
+
+        return await MarkUncertainAsync(
+            operationId,
+            preparation,
+            ReverseAmbiguousDiagnostic,
+            reverseSent: true,
+            refundSent: false,
+            cancellationToken);
     }
 
-    private async Task<CardJobSettlementReturnResult> RecoverByStatusAsync(
+    private async Task<CardJobSettlementReturnResult> RecoverReverseAsync(
+        Guid operationId,
+        Preparation preparation,
+        CancellationToken cancellationToken)
+    {
+        CsobPaymentStatusResult status;
+        try
+        {
+            status = await _gatewayClient.GetStatusAsync(
+                preparation.ProviderReference,
+                cancellationToken);
+        }
+        catch (OperationCanceledException exception)
+        {
+            await PersistSafetyOrThrowAsync(
+                operationId,
+                preparation,
+                ReverseStatusAmbiguousDiagnostic,
+                reverseSent: false,
+                refundSent: false,
+                exception);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return await PersistSafetyOrThrowAsync(
+                operationId,
+                preparation,
+                ReverseStatusAmbiguousDiagnostic,
+                reverseSent: false,
+                refundSent: false,
+                exception);
+        }
+
+        if (status.ResultCode == 0 && status.PaymentStatus == 5)
+        {
+            return await ConfirmAsync(
+                operationId,
+                preparation,
+                reverseSent: false,
+                refundSent: false,
+                cancellationToken);
+        }
+
+        if (status.ResultCode == 0 && status.PaymentStatus == 8)
+        {
+            var refund = await TransitionToRefundAsync(
+                operationId,
+                preparation,
+                reverseSent: false,
+                cancellationToken);
+            return await ContinueAsync(operationId, refund, cancellationToken);
+        }
+
+        if (
+            status.ResultCode == 0 &&
+            status.PaymentStatus is 9 or 10)
+        {
+            return await MarkPreExistingAsync(
+                operationId,
+                preparation,
+                status.PaymentStatus,
+                reverseSent: false,
+                cancellationToken);
+        }
+
+        return await MarkUncertainAsync(
+            operationId,
+            preparation,
+            ReverseStatusAmbiguousDiagnostic,
+            reverseSent: false,
+            refundSent: false,
+            cancellationToken);
+    }
+
+    private async Task<CardJobSettlementReturnResult> SendRefundAsync(
         Guid operationId,
         Preparation preparation,
         CancellationToken cancellationToken)
     {
         try
         {
-            var status = await _gatewayClient.GetStatusAsync(
+            var response = await _gatewayClient.RefundAsync(
                 preparation.ProviderReference,
+                amountMinorUnits: null,
                 cancellationToken);
 
-            if (status.ResultCode == 0 && status.PaymentStatus == 5)
+            if (response.ResultCode == 0 && response.PaymentStatus == 10)
             {
                 return await ConfirmAsync(
                     operationId,
                     preparation,
-                    reverseRequestSent: false,
+                    preparation.ReverseSent,
+                    refundSent: true,
                     cancellationToken);
             }
 
-            if (
-                status.ResultCode == 0 &&
-                IsDefinitivelyNonReversible(status.PaymentStatus))
+            if (response.ResultCode == 0 && response.PaymentStatus == 9)
             {
-                return await RejectAsync(
+                return await ObserveRefundProcessingAsync(
                     operationId,
                     preparation,
-                    reverseRequestSent: false,
+                    preparation.ReverseSent,
+                    refundSent: true,
                     cancellationToken);
             }
 
             return await MarkUncertainAsync(
                 operationId,
                 preparation,
-                AmbiguousStatusDiagnostic,
-                reverseRequestSent: false,
+                RefundAmbiguousDiagnostic,
+                preparation.ReverseSent,
+                refundSent: true,
                 cancellationToken);
         }
         catch (OperationCanceledException exception)
         {
-            await PersistSafetyStateOrThrowAsync(
+            await PersistSafetyOrThrowAsync(
                 operationId,
                 preparation,
-                AmbiguousStatusDiagnostic,
-                reverseRequestSent: false,
+                RefundAmbiguousDiagnostic,
+                preparation.ReverseSent,
+                refundSent: true,
                 exception);
             throw;
         }
         catch (Exception exception)
         {
-            return await PersistSafetyStateOrThrowAsync(
+            return await PersistSafetyOrThrowAsync(
                 operationId,
                 preparation,
-                AmbiguousStatusDiagnostic,
-                reverseRequestSent: false,
+                RefundAmbiguousDiagnostic,
+                preparation.ReverseSent,
+                refundSent: true,
                 exception);
         }
     }
 
-    private Task<CardJobSettlementReturnResult> ApplyReverseResponseAsync(
+    private async Task<CardJobSettlementReturnResult> RecoverRefundAsync(
         Guid operationId,
         Preparation preparation,
-        CsobPaymentReverseResult response,
         CancellationToken cancellationToken)
     {
-        if (response.ResultCode == 0 && response.PaymentStatus == 5)
+        CsobPaymentStatusResult status;
+        try
         {
-            return ConfirmAsync(
+            status = await _gatewayClient.GetStatusAsync(
+                preparation.ProviderReference,
+                cancellationToken);
+        }
+        catch (OperationCanceledException exception)
+        {
+            await PersistSafetyOrThrowAsync(
                 operationId,
                 preparation,
-                reverseRequestSent: true,
+                RefundStatusAmbiguousDiagnostic,
+                reverseSent: false,
+                refundSent: false,
+                exception);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return await PersistSafetyOrThrowAsync(
+                operationId,
+                preparation,
+                RefundStatusAmbiguousDiagnostic,
+                reverseSent: false,
+                refundSent: false,
+                exception);
+        }
+
+        if (status.ResultCode == 0 && status.PaymentStatus == 9)
+        {
+            return await ObserveRefundProcessingAsync(
+                operationId,
+                preparation,
+                reverseSent: false,
+                refundSent: false,
                 cancellationToken);
         }
 
-        if (
-            response.ResultCode == 150 &&
-            IsDefinitivelyNonReversible(response.PaymentStatus))
-        {
-            return RejectAsync(
-                operationId,
-                preparation,
-                reverseRequestSent: true,
-                cancellationToken);
-        }
-
-        return MarkUncertainAsync(
+        return await MarkUncertainAsync(
             operationId,
             preparation,
-            AmbiguousReverseDiagnostic,
-            reverseRequestSent: true,
+            status.ResultCode == 0 && status.PaymentStatus == 10
+                ? RefundReturnedWithoutFullProofDiagnostic
+                : RefundStatusAmbiguousDiagnostic,
+            reverseSent: false,
+            refundSent: false,
             cancellationToken);
+    }
+
+    private Task<Preparation> TransitionToRefundAsync(
+        Guid operationId,
+        Preparation reverse,
+        bool reverseSent,
+        CancellationToken cancellationToken) =>
+        _transaction.ExecuteAsync(
+            ct => TransitionToRefundInsideAsync(
+                operationId,
+                reverse,
+                reverseSent,
+                ct),
+            cancellationToken);
+
+    private async Task<Preparation> TransitionToRefundInsideAsync(
+        Guid operationId,
+        Preparation reverse,
+        bool reverseSent,
+        CancellationToken cancellationToken)
+    {
+        await LockJobOrThrowAsync(
+            operationId,
+            reverse.JobId,
+            cancellationToken);
+        var settlementReturn = await RequireReturnAsync(
+            operationId,
+            reverse,
+            cancellationToken);
+        if (settlementReturn.State == SettlementReturnState.Completed)
+        {
+            return await ResolveCompletedPreparationAsync(
+                operationId,
+                reverse,
+                settlementReturn,
+                cancellationToken);
+        }
+
+        var reverseAttempt = await RequireAttemptAsync(
+            operationId,
+            reverse,
+            cancellationToken);
+
+        if (
+            reverseAttempt.State ==
+                SettlementReturnProviderAttemptState.Rejected)
+        {
+            var currentRefund = (await _attemptRepository
+                .ListBySettlementReturnIdAsync(
+                    settlementReturn.Id,
+                    cancellationToken))
+                .SingleOrDefault(attempt =>
+                    attempt.Operation ==
+                        SettlementReturnProviderOperation.Refund &&
+                    (attempt.IsActive ||
+                     attempt.State ==
+                        SettlementReturnProviderAttemptState.Confirmed));
+            if (
+                currentRefund?.State ==
+                    SettlementReturnProviderAttemptState.Confirmed &&
+                settlementReturn.State == SettlementReturnState.Completed)
+            {
+                return Preparation.For(
+                    settlementReturn,
+                    currentRefund,
+                    reverse.AdministratorActorUserId,
+                    Disposition.RefundCompleted);
+            }
+
+            if (currentRefund is not null)
+            {
+                return Preparation.For(
+                    settlementReturn,
+                    currentRefund,
+                    reverse.AdministratorActorUserId,
+                    Disposition.RecoverRefund);
+            }
+
+            return Preparation.For(
+                settlementReturn,
+                reverseAttempt,
+                reverse.AdministratorActorUserId,
+                IsPreExistingRefund(reverseAttempt.Diagnostic)
+                    ? Disposition.PreExistingProviderRefund
+                    : Disposition.RequiresAttention);
+        }
+
+        EnsureResolvable(
+            operationId,
+            settlementReturn,
+            reverseAttempt,
+            SettlementReturnProviderOperation.Reverse);
+
+        var changedAt = _timeProvider.GetUtcNow();
+        await _attemptService.RejectAsync(
+            reverseAttempt.Id,
+            ReverseSettledDiagnostic,
+            cancellationToken);
+        if (
+            settlementReturn.State ==
+                SettlementReturnState.RequiresAttention)
+        {
+            settlementReturn.Resume(changedAt);
+        }
+
+        _auditTrail.Stage(CreateAudit(
+            settlementReturn,
+            reverse.AdministratorActorUserId,
+            Action(SettlementReturnProviderOperation.Reverse, "rejected"),
+            "Signed CSOB evidence proved paymentStatus 8; the settled payment continues as a full refund.",
+            changedAt));
+
+        var created = await _attemptService.CreateAsync(
+            new CreateSettlementReturnProviderAttemptCommand(
+                Guid.NewGuid(),
+                settlementReturn.Id,
+                SettlementReturnProviderOperation.Refund),
+            cancellationToken);
+        var refundAttempt = await _attemptService.BeginAsync(
+            created.Attempt.Id,
+            cancellationToken);
+        _auditTrail.Stage(CreateAudit(
+            settlementReturn,
+            reverse.AdministratorActorUserId,
+            Action(SettlementReturnProviderOperation.Refund, "started"),
+            "A durable full-refund attempt was committed before the CSOB PUT.",
+            changedAt));
+        await _returnRepository.SaveAsync(
+            settlementReturn,
+            cancellationToken);
+
+        return Preparation.For(
+            settlementReturn,
+            refundAttempt,
+            reverse.AdministratorActorUserId,
+            Disposition.SendRefund,
+            reverseSent);
+    }
+
+    private Task<CardJobSettlementReturnResult> MarkPreExistingAsync(
+        Guid operationId,
+        Preparation preparation,
+        int paymentStatus,
+        bool reverseSent,
+        CancellationToken cancellationToken) =>
+        _transaction.ExecuteAsync(
+            ct => MarkPreExistingInsideAsync(
+                operationId,
+                preparation,
+                paymentStatus,
+                reverseSent,
+                ct),
+            cancellationToken);
+
+    private async Task<CardJobSettlementReturnResult>
+        MarkPreExistingInsideAsync(
+            Guid operationId,
+            Preparation preparation,
+            int paymentStatus,
+            bool reverseSent,
+            CancellationToken cancellationToken)
+    {
+        await LockJobOrThrowAsync(
+            operationId,
+            preparation.JobId,
+            cancellationToken);
+        var settlementReturn = await RequireReturnAsync(
+            operationId,
+            preparation,
+            cancellationToken);
+        if (settlementReturn.State == SettlementReturnState.Completed)
+        {
+            return await ResolveCompletedResultAsync(
+                operationId,
+                preparation,
+                settlementReturn,
+                reverseSent,
+                refundSent: false,
+                cancellationToken);
+        }
+
+        var attempt = await RequireAttemptAsync(
+            operationId,
+            preparation,
+            cancellationToken);
+
+        if (attempt.State == SettlementReturnProviderAttemptState.Rejected)
+        {
+            var currentRefund = (await _attemptRepository
+                .ListBySettlementReturnIdAsync(
+                    settlementReturn.Id,
+                    cancellationToken))
+                .SingleOrDefault(item =>
+                    item.Operation ==
+                        SettlementReturnProviderOperation.Refund &&
+                    (item.IsActive ||
+                     item.State ==
+                        SettlementReturnProviderAttemptState.Confirmed));
+            if (
+                currentRefund?.State ==
+                    SettlementReturnProviderAttemptState.Confirmed &&
+                settlementReturn.State == SettlementReturnState.Completed)
+            {
+                return Result(
+                    Preparation.For(
+                        settlementReturn,
+                        currentRefund,
+                        preparation.AdministratorActorUserId,
+                        Disposition.RefundCompleted),
+                    CardJobSettlementReturnOutcome.RefundCompleted,
+                    reverseSent,
+                    refundSent: false);
+            }
+
+            if (currentRefund is not null)
+            {
+                return Result(
+                    Preparation.For(
+                        settlementReturn,
+                        currentRefund,
+                        preparation.AdministratorActorUserId,
+                        Disposition.RecoverRefund),
+                    ActiveRefundOutcome(currentRefund),
+                    reverseSent,
+                    refundSent: false);
+            }
+
+            if (IsPreExistingRefund(attempt.Diagnostic))
+            {
+                return Result(
+                    preparation,
+                    CardJobSettlementReturnOutcome.PreExistingProviderRefund,
+                    reverseSent,
+                    refundSent: false);
+            }
+        }
+
+        EnsureResolvable(
+            operationId,
+            settlementReturn,
+            attempt,
+            SettlementReturnProviderOperation.Reverse);
+        var changedAt = _timeProvider.GetUtcNow();
+        await _attemptService.RejectAsync(
+            attempt.Id,
+            paymentStatus == 9
+                ? ReverseFoundRefundProcessingDiagnostic
+                : ReverseFoundReturnedDiagnostic,
+            cancellationToken);
+        if (settlementReturn.State == SettlementReturnState.InProgress)
+        {
+            settlementReturn.RequireAttention(changedAt);
+        }
+
+        _auditTrail.Stage(CreateAudit(
+            settlementReturn,
+            preparation.AdministratorActorUserId,
+            "settlement-return.card-job.provider-refund-pre-existing",
+            $"Signed CSOB evidence found paymentStatus {paymentStatus} before FUA Pay sent any refund; no refund PUT was issued.",
+            changedAt));
+        await _returnRepository.SaveAsync(
+            settlementReturn,
+            cancellationToken);
+
+        return Result(
+            preparation,
+            CardJobSettlementReturnOutcome.PreExistingProviderRefund,
+            reverseSent,
+            refundSent: false);
     }
 
     private Task<CardJobSettlementReturnResult> ConfirmAsync(
         Guid operationId,
         Preparation preparation,
-        bool reverseRequestSent,
-        CancellationToken cancellationToken)
-    {
-        return _transaction.ExecuteAsync(
-            transactionCancellationToken => ChangeStateAsync(
+        bool reverseSent,
+        bool refundSent,
+        CancellationToken cancellationToken) =>
+        _transaction.ExecuteAsync(
+            ct => ConfirmInsideAsync(
                 operationId,
                 preparation,
-                StateResolution.Confirm,
-                diagnostic: null,
-                reverseRequestSent,
-                transactionCancellationToken),
+                reverseSent,
+                refundSent,
+                ct),
             cancellationToken);
-    }
 
-    private Task<CardJobSettlementReturnResult> RejectAsync(
+    private async Task<CardJobSettlementReturnResult> ConfirmInsideAsync(
         Guid operationId,
         Preparation preparation,
-        bool reverseRequestSent,
+        bool reverseSent,
+        bool refundSent,
         CancellationToken cancellationToken)
     {
-        return _transaction.ExecuteAsync(
-            transactionCancellationToken => ChangeStateAsync(
-                operationId,
-                preparation,
-                StateResolution.Reject,
-                NonReversibleDiagnostic,
-                reverseRequestSent,
-                transactionCancellationToken),
+        await LockJobOrThrowAsync(
+            operationId,
+            preparation.JobId,
             cancellationToken);
-    }
-
-    private Task<CardJobSettlementReturnResult> MarkUncertainAsync(
-        Guid operationId,
-        Preparation preparation,
-        string diagnostic,
-        bool reverseRequestSent,
-        CancellationToken cancellationToken)
-    {
-        return _transaction.ExecuteAsync(
-            transactionCancellationToken => ChangeStateAsync(
-                operationId,
-                preparation,
-                StateResolution.MarkUncertain,
-                diagnostic,
-                reverseRequestSent,
-                transactionCancellationToken),
-            cancellationToken);
-    }
-
-    private async Task<CardJobSettlementReturnResult> ChangeStateAsync(
-        Guid operationId,
-        Preparation preparation,
-        StateResolution resolution,
-        string? diagnostic,
-        bool reverseRequestSent,
-        CancellationToken cancellationToken)
-    {
-        var settlementReturn = await _returnRepository.FindByIdAsync(
-            preparation.SettlementReturnId,
-            cancellationToken)
-            ?? throw Inconsistent(
-                operationId,
-                "the SettlementReturn no longer exists");
-        var attempt = await _attemptRepository.FindByIdAsync(
-            preparation.ProviderAttemptId,
-            cancellationToken)
-            ?? throw Inconsistent(
-                operationId,
-                "the Reverse attempt no longer exists");
-
-        ValidateAttemptForChange(
+        var settlementReturn = await RequireReturnAsync(
             operationId,
             preparation,
+            cancellationToken);
+        if (settlementReturn.State == SettlementReturnState.Completed)
+        {
+            return await ResolveCompletedResultAsync(
+                operationId,
+                preparation,
+                settlementReturn,
+                reverseSent,
+                refundSent,
+                cancellationToken);
+        }
+
+        var attempt = await RequireAttemptAsync(
+            operationId,
+            preparation,
+            cancellationToken);
+
+        EnsureResolvable(
+            operationId,
             settlementReturn,
-            attempt);
-
-        if (
-            attempt.State ==
-                SettlementReturnProviderAttemptState.Confirmed &&
-            settlementReturn.State == SettlementReturnState.Completed)
-        {
-            return CreateResult(
-                preparation,
-                CardJobSettlementReturnOutcome.Confirmed,
-                reverseRequestSent);
-        }
-
-        if (
-            attempt.State ==
-                SettlementReturnProviderAttemptState.Rejected &&
-            settlementReturn.State ==
-                SettlementReturnState.RequiresAttention)
-        {
-            return CreateResult(
-                preparation,
-                CardJobSettlementReturnOutcome.ReverseRejected,
-                reverseRequestSent);
-        }
-
-        return resolution switch
-        {
-            StateResolution.Confirm => await ConfirmInsideTransactionAsync(
-                operationId,
-                preparation,
-                settlementReturn,
-                attempt,
-                reverseRequestSent,
-                cancellationToken),
-            StateResolution.Reject => await RejectInsideTransactionAsync(
-                operationId,
-                preparation,
-                settlementReturn,
-                attempt,
-                diagnostic!,
-                reverseRequestSent,
-                cancellationToken),
-            StateResolution.MarkUncertain =>
-                await MarkUncertainInsideTransactionAsync(
-                    operationId,
-                    preparation,
-                    settlementReturn,
-                    attempt,
-                    diagnostic!,
-                    reverseRequestSent,
-                    cancellationToken),
-            _ => throw Inconsistent(
-                operationId,
-                "unsupported state resolution")
-        };
-    }
-
-    private async Task<CardJobSettlementReturnResult>
-        ConfirmInsideTransactionAsync(
-            Guid operationId,
-            Preparation preparation,
-            SettlementReturn settlementReturn,
-            SettlementReturnProviderAttempt attempt,
-            bool reverseRequestSent,
-            CancellationToken cancellationToken)
-    {
-        if (
-            attempt.State is not
-                SettlementReturnProviderAttemptState.InProgress and not
-                SettlementReturnProviderAttemptState.Uncertain ||
-            settlementReturn.State is not
-                SettlementReturnState.InProgress and not
-                SettlementReturnState.RequiresAttention)
-        {
-            throw Inconsistent(
-                operationId,
-                "confirmed gateway evidence cannot resolve the current states");
-        }
-
+            attempt,
+            preparation.Operation);
         var changedAt = _timeProvider.GetUtcNow();
         settlementReturn.Complete(changedAt);
         _auditTrail.Stage(CreateAudit(
             settlementReturn,
             preparation.AdministratorActorUserId,
-            "settlement-return.card-job.reverse-confirmed",
-            "Signed CSOB evidence confirmed resultCode 0 and paymentStatus 5.",
+            Action(preparation.Operation, "confirmed"),
+            preparation.Operation ==
+                SettlementReturnProviderOperation.Reverse
+                ? "Signed CSOB evidence confirmed resultCode 0 and paymentStatus 5."
+                : "The direct signed CSOB full-refund response confirmed resultCode 0 and paymentStatus 10.",
             changedAt));
         await _attemptService.ConfirmAsync(
             attempt.Id,
@@ -650,23 +1010,62 @@ public sealed class CsobCardJobSettlementReturnService :
             settlementReturn,
             cancellationToken);
 
-        return CreateResult(
+        return Result(
             preparation,
-            CardJobSettlementReturnOutcome.Confirmed,
-            reverseRequestSent);
+            CompletedOutcome(preparation.Operation),
+            reverseSent,
+            refundSent);
     }
 
+    private Task<CardJobSettlementReturnResult> ObserveRefundProcessingAsync(
+        Guid operationId,
+        Preparation preparation,
+        bool reverseSent,
+        bool refundSent,
+        CancellationToken cancellationToken) =>
+        _transaction.ExecuteAsync(
+            ct => ObserveRefundProcessingInsideAsync(
+                operationId,
+                preparation,
+                reverseSent,
+                refundSent,
+                ct),
+            cancellationToken);
+
     private async Task<CardJobSettlementReturnResult>
-        RejectInsideTransactionAsync(
+        ObserveRefundProcessingInsideAsync(
             Guid operationId,
             Preparation preparation,
-            SettlementReturn settlementReturn,
-            SettlementReturnProviderAttempt attempt,
-            string diagnostic,
-            bool reverseRequestSent,
+            bool reverseSent,
+            bool refundSent,
             CancellationToken cancellationToken)
     {
+        await LockJobOrThrowAsync(
+            operationId,
+            preparation.JobId,
+            cancellationToken);
+        var settlementReturn = await RequireReturnAsync(
+            operationId,
+            preparation,
+            cancellationToken);
+        if (settlementReturn.State == SettlementReturnState.Completed)
+        {
+            return await ResolveCompletedResultAsync(
+                operationId,
+                preparation,
+                settlementReturn,
+                reverseSent,
+                refundSent,
+                cancellationToken);
+        }
+
+        var attempt = await RequireAttemptAsync(
+            operationId,
+            preparation,
+            cancellationToken);
+
         if (
+            attempt.Operation != SettlementReturnProviderOperation.Refund ||
             attempt.State is not
                 SettlementReturnProviderAttemptState.InProgress and not
                 SettlementReturnProviderAttemptState.Uncertain ||
@@ -676,106 +1075,204 @@ public sealed class CsobCardJobSettlementReturnService :
         {
             throw Inconsistent(
                 operationId,
-                "non-reversible gateway evidence cannot resolve the current states");
+                "refund-processing evidence cannot resolve the current states");
         }
 
-        var changedAt = _timeProvider.GetUtcNow();
-
-        if (settlementReturn.State == SettlementReturnState.InProgress)
-        {
-            settlementReturn.RequireAttention(changedAt);
-        }
-
-        _auditTrail.Stage(CreateAudit(
-            settlementReturn,
-            preparation.AdministratorActorUserId,
-            "settlement-return.card-job.reverse-rejected",
-            "Signed CSOB evidence proved a non-reversible state; Refund " +
-            "remains a separate operator decision.",
-            changedAt));
-        await _attemptService.RejectAsync(
-            attempt.Id,
-            diagnostic,
-            cancellationToken);
-        await _returnRepository.SaveAsync(
-            settlementReturn,
-            cancellationToken);
-
-        return CreateResult(
-            preparation,
-            CardJobSettlementReturnOutcome.ReverseRejected,
-            reverseRequestSent);
-    }
-
-    private async Task<CardJobSettlementReturnResult>
-        MarkUncertainInsideTransactionAsync(
-            Guid operationId,
-            Preparation preparation,
-            SettlementReturn settlementReturn,
-            SettlementReturnProviderAttempt attempt,
-            string diagnostic,
-            bool reverseRequestSent,
-            CancellationToken cancellationToken)
-    {
         if (
             attempt.State ==
-                SettlementReturnProviderAttemptState.Uncertain &&
-            settlementReturn.State ==
-                SettlementReturnState.RequiresAttention)
+                SettlementReturnProviderAttemptState.Uncertain)
         {
-            return CreateResult(
-                preparation,
-                CardJobSettlementReturnOutcome.RequiresAttention,
-                reverseRequestSent);
+            await _attemptService.UpdateUncertainAsync(
+                attempt.Id,
+                RefundProcessingDiagnostic,
+                cancellationToken);
         }
 
-        if (
-            attempt.State !=
-                SettlementReturnProviderAttemptState.InProgress ||
-            settlementReturn.State is not
-                SettlementReturnState.InProgress and not
-                SettlementReturnState.RequiresAttention)
-        {
-            throw Inconsistent(
+        await _auditTrail.WriteAsync(
+            CreateAudit(
+                settlementReturn,
+                preparation.AdministratorActorUserId,
+                Action(SettlementReturnProviderOperation.Refund, "processing"),
+                "Signed CSOB evidence confirmed paymentStatus 9; no additional refund PUT will be sent.",
+                _timeProvider.GetUtcNow()),
+            cancellationToken);
+        return Result(
+            preparation,
+            CardJobSettlementReturnOutcome.RefundProcessing,
+            reverseSent,
+            refundSent);
+    }
+
+    private Task<CardJobSettlementReturnResult> MarkUncertainAsync(
+        Guid operationId,
+        Preparation preparation,
+        string diagnostic,
+        bool reverseSent,
+        bool refundSent,
+        CancellationToken cancellationToken) =>
+        _transaction.ExecuteAsync(
+            ct => MarkUncertainInsideAsync(
                 operationId,
-                "an ambiguous provider outcome cannot resolve the current states");
+                preparation,
+                diagnostic,
+                reverseSent,
+                refundSent,
+                ct),
+            cancellationToken);
+
+    private async Task<CardJobSettlementReturnResult> MarkUncertainInsideAsync(
+        Guid operationId,
+        Preparation preparation,
+        string diagnostic,
+        bool reverseSent,
+        bool refundSent,
+        CancellationToken cancellationToken)
+    {
+        await LockJobOrThrowAsync(
+            operationId,
+            preparation.JobId,
+            cancellationToken);
+        var settlementReturn = await RequireReturnAsync(
+            operationId,
+            preparation,
+            cancellationToken);
+        if (settlementReturn.State == SettlementReturnState.Completed)
+        {
+            return await ResolveCompletedResultAsync(
+                operationId,
+                preparation,
+                settlementReturn,
+                reverseSent,
+                refundSent,
+                cancellationToken);
         }
 
-        var changedAt = _timeProvider.GetUtcNow();
+        var attempt = await RequireAttemptAsync(
+            operationId,
+            preparation,
+            cancellationToken);
 
+        if (attempt.State == SettlementReturnProviderAttemptState.Rejected)
+        {
+            var currentRefund = (await _attemptRepository
+                .ListBySettlementReturnIdAsync(
+                    settlementReturn.Id,
+                    cancellationToken))
+                .SingleOrDefault(item =>
+                    item.Operation ==
+                        SettlementReturnProviderOperation.Refund &&
+                    (item.IsActive ||
+                     item.State ==
+                        SettlementReturnProviderAttemptState.Confirmed));
+            if (
+                currentRefund?.State ==
+                    SettlementReturnProviderAttemptState.Confirmed &&
+                settlementReturn.State == SettlementReturnState.Completed)
+            {
+                return Result(
+                    Preparation.For(
+                        settlementReturn,
+                        currentRefund,
+                        preparation.AdministratorActorUserId,
+                        Disposition.RefundCompleted),
+                    CardJobSettlementReturnOutcome.RefundCompleted,
+                    reverseSent,
+                    refundSent);
+            }
+
+            if (currentRefund is not null)
+            {
+                return Result(
+                    Preparation.For(
+                        settlementReturn,
+                        currentRefund,
+                        preparation.AdministratorActorUserId,
+                        Disposition.RecoverRefund),
+                    ActiveRefundOutcome(currentRefund),
+                    reverseSent,
+                    refundSent);
+            }
+        }
+
+        EnsureResolvable(
+            operationId,
+            settlementReturn,
+            attempt,
+            preparation.Operation);
+        var changedAt = _timeProvider.GetUtcNow();
         if (settlementReturn.State == SettlementReturnState.InProgress)
         {
             settlementReturn.RequireAttention(changedAt);
+            await _returnRepository.SaveAsync(
+                settlementReturn,
+                cancellationToken);
         }
 
-        _auditTrail.Stage(CreateAudit(
-            settlementReturn,
-            preparation.AdministratorActorUserId,
-            "settlement-return.card-job.reverse-requires-attention",
-            "CSOB reverse outcome is ambiguous; all future automatic " +
-            "recovery is status-only.",
-            changedAt));
-        await _attemptService.MarkUncertainAsync(
-            attempt.Id,
-            diagnostic,
-            cancellationToken);
-        await _returnRepository.SaveAsync(
-            settlementReturn,
-            cancellationToken);
+        if (attempt.State == SettlementReturnProviderAttemptState.InProgress)
+        {
+            await _attemptService.MarkUncertainAsync(
+                attempt.Id,
+                diagnostic,
+                cancellationToken);
+        }
+        else
+        {
+            await _attemptService.UpdateUncertainAsync(
+                attempt.Id,
+                diagnostic,
+                cancellationToken);
+        }
 
-        return CreateResult(
+        await _auditTrail.WriteAsync(
+            CreateAudit(
+                settlementReturn,
+                preparation.AdministratorActorUserId,
+                Action(preparation.Operation, "requires-attention"),
+                preparation.Operation ==
+                    SettlementReturnProviderOperation.Reverse
+                    ? "CSOB reverse outcome is ambiguous; all future automatic recovery is status-only."
+                    : "CSOB full-refund outcome is unresolved; all future automatic recovery is status-only and no second refund PUT is allowed.",
+                changedAt),
+            cancellationToken);
+        return Result(
             preparation,
             CardJobSettlementReturnOutcome.RequiresAttention,
-            reverseRequestSent);
+            reverseSent,
+            refundSent);
     }
 
     private async Task<CardJobSettlementReturnResult>
-        PersistSafetyStateOrThrowAsync(
+        ResolveAfterMutationAsync(
             Guid operationId,
             Preparation preparation,
+            Func<Task<CardJobSettlementReturnResult>> apply,
             string diagnostic,
-            bool reverseRequestSent,
-            Exception providerOrPersistenceException)
+            bool reverseSent,
+            bool refundSent)
+    {
+        try
+        {
+            return await apply();
+        }
+        catch (Exception exception)
+        {
+            return await PersistSafetyOrThrowAsync(
+                operationId,
+                preparation,
+                diagnostic,
+                reverseSent,
+                refundSent,
+                exception);
+        }
+    }
+
+    private async Task<CardJobSettlementReturnResult> PersistSafetyOrThrowAsync(
+        Guid operationId,
+        Preparation preparation,
+        string diagnostic,
+        bool reverseSent,
+        bool refundSent,
+        Exception originalException)
     {
         try
         {
@@ -783,16 +1280,325 @@ public sealed class CsobCardJobSettlementReturnService :
                 operationId,
                 preparation,
                 diagnostic,
-                reverseRequestSent,
+                reverseSent,
+                refundSent,
                 CancellationToken.None);
         }
         catch (Exception safetyException)
         {
             throw new CardJobSettlementReturnSafetyStateException(
                 operationId,
-                new AggregateException(
-                    providerOrPersistenceException,
-                    safetyException));
+                new AggregateException(originalException, safetyException));
+        }
+    }
+
+    private async Task LockJobOrThrowAsync(
+        Guid operationId,
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        if (!await _jobPaymentCoordination.LockJobAsync(
+                jobId,
+                cancellationToken))
+        {
+            throw Inconsistent(
+                operationId,
+                "the authoritative job disappeared while resolving the return");
+        }
+    }
+
+    private async Task<SettlementReturn> RequireReturnAsync(
+        Guid operationId,
+        Preparation preparation,
+        CancellationToken cancellationToken)
+    {
+        var settlementReturn = await _returnRepository.FindByIdAsync(
+            preparation.SettlementReturnId,
+            cancellationToken)
+            ?? throw Inconsistent(
+                operationId,
+                "the SettlementReturn no longer exists");
+        if (
+            settlementReturn.RequestId != operationId ||
+            settlementReturn.JobId != preparation.JobId ||
+            settlementReturn.Kind != SettlementReturnKind.CardJob)
+        {
+            throw Inconsistent(
+                operationId,
+                "the persisted return identity changed");
+        }
+
+        return settlementReturn;
+    }
+
+    private async Task<Preparation> ResolveCompletedPreparationAsync(
+        Guid operationId,
+        Preparation stalePreparation,
+        SettlementReturn settlementReturn,
+        CancellationToken cancellationToken)
+    {
+        if (settlementReturn.State != SettlementReturnState.Completed)
+        {
+            throw Inconsistent(
+                operationId,
+                "completed-state convergence requires a completed return");
+        }
+
+        if (!settlementReturn.OriginalPaymentId.HasValue)
+        {
+            throw Inconsistent(
+                operationId,
+                "the completed CardJob return has no original payment");
+        }
+
+        var payment = await _paymentRepository.FindByIdAsync(
+            settlementReturn.OriginalPaymentId.Value,
+            cancellationToken)
+            ?? throw Inconsistent(
+                operationId,
+                "the authoritative original payment disappeared");
+
+        if (
+            payment.Provider != PaymentProvider.Csob ||
+            payment.PurposeType != PaymentPurposeType.Job ||
+            payment.Status != PaymentStatus.Succeeded ||
+            payment.ProviderReference is null ||
+            payment.JobId != settlementReturn.JobId ||
+            payment.CustomerUserId != settlementReturn.CustomerUserId ||
+            payment.Amount != settlementReturn.Amount ||
+            !string.Equals(
+                payment.ProviderReference,
+                stalePreparation.ProviderReference,
+                StringComparison.Ordinal))
+        {
+            throw Inconsistent(
+                operationId,
+                "the completed return no longer matches its authoritative CSOB payment");
+        }
+
+        var history = await _attemptRepository.ListBySettlementReturnIdAsync(
+            settlementReturn.Id,
+            cancellationToken);
+        ValidateHistory(settlementReturn, payment, history);
+
+        var confirmed = history.SingleOrDefault(attempt =>
+            attempt.State == SettlementReturnProviderAttemptState.Confirmed)
+            ?? throw Inconsistent(
+                operationId,
+                "the completed return has no confirmed provider attempt");
+
+        return Preparation.For(
+            settlementReturn,
+            confirmed,
+            stalePreparation.AdministratorActorUserId,
+            confirmed.Operation == SettlementReturnProviderOperation.Reverse
+                ? Disposition.ReverseCompleted
+                : Disposition.RefundCompleted,
+            stalePreparation.ReverseSent);
+    }
+
+    private async Task<CardJobSettlementReturnResult>
+        ResolveCompletedResultAsync(
+            Guid operationId,
+            Preparation stalePreparation,
+            SettlementReturn settlementReturn,
+            bool reverseSent,
+            bool refundSent,
+            CancellationToken cancellationToken)
+    {
+        var completed = await ResolveCompletedPreparationAsync(
+            operationId,
+            stalePreparation,
+            settlementReturn,
+            cancellationToken);
+
+        return Result(
+            completed,
+            CompletedOutcome(completed.Operation),
+            reverseSent,
+            refundSent);
+    }
+
+    private async Task<SettlementReturnProviderAttempt> RequireAttemptAsync(
+        Guid operationId,
+        Preparation preparation,
+        CancellationToken cancellationToken)
+    {
+        var attempt = await _attemptRepository.FindByIdAsync(
+            preparation.ProviderAttemptId,
+            cancellationToken)
+            ?? throw Inconsistent(
+                operationId,
+                "the provider attempt no longer exists");
+        if (
+            attempt.SettlementReturnId != preparation.SettlementReturnId ||
+            attempt.Provider != PaymentProvider.Csob ||
+            attempt.Operation != preparation.Operation ||
+            !string.Equals(
+                attempt.ProviderReference,
+                preparation.ProviderReference,
+                StringComparison.Ordinal))
+        {
+            throw Inconsistent(
+                operationId,
+                "the persisted provider-attempt identity changed");
+        }
+
+        return attempt;
+    }
+
+    private static void EnsureResolvable(
+        Guid operationId,
+        SettlementReturn settlementReturn,
+        SettlementReturnProviderAttempt attempt,
+        SettlementReturnProviderOperation operation)
+    {
+        if (
+            attempt.Operation != operation ||
+            attempt.State is not
+                SettlementReturnProviderAttemptState.InProgress and not
+                SettlementReturnProviderAttemptState.Uncertain ||
+            settlementReturn.State is not
+                SettlementReturnState.InProgress and not
+                SettlementReturnState.RequiresAttention)
+        {
+            throw Inconsistent(
+                operationId,
+                "signed gateway evidence cannot resolve the current states");
+        }
+    }
+
+    private static void ValidateHistory(
+        SettlementReturn settlementReturn,
+        Payment payment,
+        IReadOnlyList<SettlementReturnProviderAttempt> history)
+    {
+        if (history.Count == 0)
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "the CardJob return has no provider-attempt history");
+        }
+
+        if (
+            history.Count(attempt => attempt.IsActive) > 1 ||
+            history.Count(attempt => attempt.State ==
+                SettlementReturnProviderAttemptState.Confirmed) > 1)
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "provider-attempt history has multiple active or confirmed attempts");
+        }
+
+        foreach (var attempt in history)
+        {
+            if (
+                attempt.SettlementReturnId != settlementReturn.Id ||
+                attempt.Provider != PaymentProvider.Csob ||
+                !string.Equals(
+                    attempt.ProviderReference,
+                    payment.ProviderReference,
+                    StringComparison.Ordinal))
+            {
+                throw Inconsistent(
+                    settlementReturn.RequestId,
+                    "provider-attempt history does not match the authoritative CSOB payment");
+            }
+        }
+
+        var reverseAttempts = history
+            .Where(attempt =>
+                attempt.Operation == SettlementReturnProviderOperation.Reverse)
+            .ToArray();
+        var refundAttempts = history
+            .Where(attempt =>
+                attempt.Operation == SettlementReturnProviderOperation.Refund)
+            .ToArray();
+
+        if (
+            reverseAttempts.Length != 1 ||
+            reverseAttempts[0].Id != settlementReturn.RequestId)
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "CardJob return history must contain exactly one request-bound Reverse attempt");
+        }
+
+        if (refundAttempts.Length > 1)
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "R2 CardJob return history must not contain multiple Refund attempts");
+        }
+
+        var reverse = reverseAttempts[0];
+        var refund = refundAttempts.SingleOrDefault();
+
+        if (
+            refund is not null &&
+            (reverse.State !=
+                SettlementReturnProviderAttemptState.Rejected ||
+             !reverse.StartedAt.HasValue ||
+             !reverse.FinishedAt.HasValue ||
+             !string.Equals(
+                 reverse.Diagnostic,
+                 ReverseSettledDiagnostic,
+                 StringComparison.Ordinal) ||
+             reverse.FinishedAt.Value > refund.CreatedAt))
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "Refund may exist only after signed paymentStatus 8 " +
+                "provenance from a started and finished Reverse attempt");
+        }
+
+        if (
+            refund?.State == SettlementReturnProviderAttemptState.Rejected)
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "R2 does not support a rejected Refund attempt history");
+        }
+
+        var confirmed = history
+            .Where(attempt =>
+                attempt.State == SettlementReturnProviderAttemptState.Confirmed)
+            .ToArray();
+
+        if (settlementReturn.State == SettlementReturnState.Completed)
+        {
+            if (confirmed.Length != 1)
+            {
+                throw Inconsistent(
+                    settlementReturn.RequestId,
+                    "a completed CardJob return must have exactly one confirmed provider attempt");
+            }
+
+            if (
+                confirmed[0].Operation ==
+                    SettlementReturnProviderOperation.Reverse &&
+                refund is not null)
+            {
+                throw Inconsistent(
+                    settlementReturn.RequestId,
+                    "a Reverse-completed return must not also contain a Refund attempt");
+            }
+
+            if (
+                confirmed[0].Operation ==
+                    SettlementReturnProviderOperation.Refund &&
+                refund?.Id != confirmed[0].Id)
+            {
+                throw Inconsistent(
+                    settlementReturn.RequestId,
+                    "a Refund-completed return does not match its confirmed Refund attempt");
+            }
+        }
+        else if (confirmed.Length != 0)
+        {
+            throw Inconsistent(
+                settlementReturn.RequestId,
+                "an unresolved CardJob return must not have a confirmed provider attempt");
         }
     }
 
@@ -849,85 +1655,57 @@ public sealed class CsobCardJobSettlementReturnService :
         }
     }
 
-    private static void ValidateAttempt(
-        SettlementReturn settlementReturn,
-        Payment payment,
-        SettlementReturnProviderAttempt attempt)
-    {
-        if (
-            attempt.SettlementReturnId != settlementReturn.Id ||
-            attempt.Provider != PaymentProvider.Csob ||
-            attempt.Operation != SettlementReturnProviderOperation.Reverse ||
-            !string.Equals(
-                attempt.ProviderReference,
-                payment.ProviderReference,
-                StringComparison.Ordinal))
-        {
-            throw Inconsistent(
-                settlementReturn.RequestId,
-                "the provider attempt does not match the authoritative " +
-                "CSOB payment");
-        }
-    }
+    private static bool IsPreExistingRefund(string? diagnostic) =>
+        string.Equals(
+            diagnostic,
+            ReverseFoundRefundProcessingDiagnostic,
+            StringComparison.Ordinal) ||
+        string.Equals(
+            diagnostic,
+            ReverseFoundReturnedDiagnostic,
+            StringComparison.Ordinal);
 
-    private static void ValidateAttemptForChange(
-        Guid operationId,
-        Preparation preparation,
-        SettlementReturn settlementReturn,
-        SettlementReturnProviderAttempt attempt)
-    {
-        if (
-            settlementReturn.RequestId != operationId ||
-            settlementReturn.Id != preparation.SettlementReturnId ||
-            settlementReturn.Kind != SettlementReturnKind.CardJob ||
-            attempt.Id != preparation.ProviderAttemptId ||
-            attempt.SettlementReturnId != settlementReturn.Id ||
-            attempt.Provider != PaymentProvider.Csob ||
-            attempt.Operation != SettlementReturnProviderOperation.Reverse ||
-            !string.Equals(
-                attempt.ProviderReference,
-                preparation.ProviderReference,
-                StringComparison.Ordinal))
-        {
-            throw Inconsistent(
-                operationId,
-                "the persisted operation identity changed");
-        }
-    }
-
-    private static bool IsDefinitivelyNonReversible(int paymentStatus) =>
-        paymentStatus is 8 or 9 or 10;
-
-    private static Preparation CreatePreparation(
-        SettlementReturn settlementReturn,
-        SettlementReturnProviderAttempt attempt,
-        Guid administratorActorUserId,
-        PreparationDisposition disposition) =>
-        new(
-            settlementReturn.Id,
-            attempt.Id,
-            attempt.ProviderReference,
-            administratorActorUserId,
-            disposition);
-
-    private static CardJobSettlementReturnResult CreateResult(
+    private static CardJobSettlementReturnResult Result(
         Preparation preparation,
         CardJobSettlementReturnOutcome outcome,
-        bool reverseRequestSent) =>
+        bool reverseSent = false,
+        bool refundSent = false) =>
         new(
             preparation.SettlementReturnId,
             preparation.ProviderAttemptId,
             outcome,
-            reverseRequestSent);
+            reverseSent || preparation.ReverseSent,
+            refundSent);
+
+    private static CardJobSettlementReturnOutcome CompletedOutcome(
+        SettlementReturnProviderOperation operation) =>
+        operation == SettlementReturnProviderOperation.Reverse
+            ? CardJobSettlementReturnOutcome.ReverseCompleted
+            : CardJobSettlementReturnOutcome.RefundCompleted;
+
+    private static CardJobSettlementReturnOutcome ActiveRefundOutcome(
+        SettlementReturnProviderAttempt attempt) =>
+        attempt.State == SettlementReturnProviderAttemptState.Uncertain &&
+         string.Equals(
+             attempt.Diagnostic,
+             RefundProcessingDiagnostic,
+             StringComparison.Ordinal)
+            ? CardJobSettlementReturnOutcome.RefundProcessing
+            : CardJobSettlementReturnOutcome.RequiresAttention;
+
+    private static string Action(
+        SettlementReturnProviderOperation operation,
+        string suffix) =>
+        $"settlement-return.card-job.{operation.ToString().ToLowerInvariant()}-{suffix}";
 
     private static AuditEntry CreateAudit(
         SettlementReturn settlementReturn,
-        Guid administratorActorUserId,
+        Guid actorId,
         string action,
         string outcome,
         DateTimeOffset occurredAt) =>
         AuditEntry.ForUser(
-            administratorActorUserId,
+            actorId,
             action,
             "settlement-return",
             settlementReturn.Id.ToString(),
@@ -976,37 +1754,51 @@ public sealed class CsobCardJobSettlementReturnService :
     }
 
     private static CardJobSettlementReturnNotAllowedException NotAllowed(
-        Guid originalPaymentId,
+        Guid paymentId,
         string reason) =>
-        new(originalPaymentId, reason);
+        new(paymentId, reason);
 
     private static CardJobSettlementReturnStateInconsistentException
-        Inconsistent(
-            Guid operationId,
-            string reason) =>
+        Inconsistent(Guid operationId, string reason) =>
         new(operationId, reason);
 
-    private enum PreparationDisposition
+    private enum Disposition
     {
         Unknown = 0,
         SendReverse = 1,
-        RecoverByStatus = 2,
-        Confirmed = 3,
-        Rejected = 4
-    }
-
-    private enum StateResolution
-    {
-        Unknown = 0,
-        Confirm = 1,
-        Reject = 2,
-        MarkUncertain = 3
+        RecoverReverse = 2,
+        SendRefund = 3,
+        RecoverRefund = 4,
+        ReverseCompleted = 5,
+        RefundCompleted = 6,
+        PreExistingProviderRefund = 7,
+        RequiresAttention = 8
     }
 
     private sealed record Preparation(
         Guid SettlementReturnId,
+        Guid JobId,
         Guid ProviderAttemptId,
+        SettlementReturnProviderOperation Operation,
         string ProviderReference,
         Guid AdministratorActorUserId,
-        PreparationDisposition Disposition);
+        Disposition Next,
+        bool ReverseSent)
+    {
+        public static Preparation For(
+            SettlementReturn settlementReturn,
+            SettlementReturnProviderAttempt attempt,
+            Guid actorId,
+            Disposition next,
+            bool reverseSent = false) =>
+            new(
+                settlementReturn.Id,
+                settlementReturn.JobId!.Value,
+                attempt.Id,
+                attempt.Operation,
+                attempt.ProviderReference,
+                actorId,
+                next,
+                reverseSent);
+    }
 }

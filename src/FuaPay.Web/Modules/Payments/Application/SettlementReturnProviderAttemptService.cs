@@ -73,6 +73,11 @@ public sealed class SettlementReturnProviderAttemptService
 
         if (active is not null)
         {
+            if (active.Id == command.AttemptId)
+            {
+                return ResolveReplay(command, active);
+            }
+
             throw new SettlementReturnProviderAttemptAlreadyActiveException(
                 command.SettlementReturnId,
                 active.Id);
@@ -222,6 +227,19 @@ public sealed class SettlementReturnProviderAttemptService
         return ChangeAsync(
             attemptId,
             attempt => attempt.MarkUncertain(
+                diagnostic,
+                _timeProvider.GetUtcNow()),
+            cancellationToken);
+    }
+
+    public Task<SettlementReturnProviderAttempt> UpdateUncertainAsync(
+        Guid attemptId,
+        string diagnostic,
+        CancellationToken cancellationToken = default)
+    {
+        return ChangeAsync(
+            attemptId,
+            attempt => attempt.UpdateUncertain(
                 diagnostic,
                 _timeProvider.GetUtcNow()),
             cancellationToken);

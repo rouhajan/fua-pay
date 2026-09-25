@@ -76,9 +76,67 @@ public sealed class AdminPaymentReturnPageTests
         Assert.NotNull(model.TempData["StatusMessage"]);
     }
 
+    [Fact]
+    public async Task ReversePost_BareInProgressRefundMessageDoesNotClaimProcessing()
+    {
+        var service = new RecordingCardJobSettlementReturnService(
+            CardJobSettlementReturnOutcome.RequiresAttention);
+        var model = new IndexModel(
+            new EmptyPaymentQueries(),
+            new EmptyAccessUserQueries(),
+            new EmptyReconciliationQueries(),
+            new EmptySettlementReturnQueries(),
+            service);
+        var administratorId = Guid.NewGuid();
+        var httpContext = new DefaultHttpContext
+        {
+            User = AccessClaimsPrincipalFactory.Create(
+                new AccessSessionSnapshot(
+                    administratorId,
+                    "Administrator",
+                    "admin@example.cz",
+                    AccessUserStatus.Active,
+                    [AccessRole.Admin]),
+                "Test")
+        };
+        model.PageContext = new PageContext
+        {
+            HttpContext = httpContext
+        };
+        model.TempData = new TempDataDictionary(
+            httpContext,
+            new MemoryTempDataProvider());
+
+        var response = await model.OnPostReverseAsync(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "Approved full return");
+
+        Assert.IsType<RedirectToPageResult>(response);
+        var message = Assert.IsType<string>(
+            model.TempData["StatusMessage"]);
+        Assert.DoesNotContain(
+            "refund se zpracovává",
+            message,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "vyžaduje pozornost",
+            message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class RecordingCardJobSettlementReturnService :
         ICardJobSettlementReturnService
     {
+        private readonly CardJobSettlementReturnOutcome _outcome;
+
+        public RecordingCardJobSettlementReturnService(
+            CardJobSettlementReturnOutcome outcome =
+                CardJobSettlementReturnOutcome.ReverseCompleted)
+        {
+            _outcome = outcome;
+        }
+
         public CardJobSettlementReturnCommand? Command { get; private set; }
 
         public Task<CardJobSettlementReturnResult> ReturnAsync(
@@ -89,7 +147,7 @@ public sealed class AdminPaymentReturnPageTests
             return Task.FromResult(new CardJobSettlementReturnResult(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
-                CardJobSettlementReturnOutcome.Confirmed,
+                _outcome,
                 ReverseRequestSent: true));
         }
     }

@@ -61,13 +61,10 @@ internal sealed class EfSettlementReturnQueries : ISettlementReturnQueries
         var returnIds = returns
             .Select(item => item.Id)
             .ToArray();
-        var reverseAttempts = await _dbContext
+        var providerAttempts = await _dbContext
             .SettlementReturnProviderAttempts
             .AsNoTracking()
-            .Where(item =>
-                returnIds.Contains(item.SettlementReturnId) &&
-                item.Operation ==
-                    (int)SettlementReturnProviderOperation.Reverse)
+            .Where(item => returnIds.Contains(item.SettlementReturnId))
             .OrderByDescending(item => item.CreatedAt)
             .ThenByDescending(item => item.Id)
             .Select(item => new
@@ -75,20 +72,28 @@ internal sealed class EfSettlementReturnQueries : ISettlementReturnQueries
                 item.Id,
                 item.SettlementReturnId,
                 item.Provider,
-                item.State
+                item.Operation,
+                item.State,
+                item.Diagnostic
             })
             .ToArrayAsync(cancellationToken);
-        var reverseAttemptsByReturn = reverseAttempts
+        var providerAttemptsByReturn = providerAttempts
             .GroupBy(item => item.SettlementReturnId)
             .ToDictionary(
                 group => group.Key,
-                group => group.First());
+                group => group.FirstOrDefault(item =>
+                    item.State is
+                        (int)SettlementReturnProviderAttemptState.Prepared or
+                        (int)SettlementReturnProviderAttemptState.InProgress or
+                        (int)SettlementReturnProviderAttemptState.Confirmed or
+                        (int)SettlementReturnProviderAttemptState.Uncertain)
+                    ?? group.First());
 
         return returns.ToDictionary(
             item => item.OriginalPaymentId,
             item =>
             {
-                var attempt = reverseAttemptsByReturn.GetValueOrDefault(
+                var attempt = providerAttemptsByReturn.GetValueOrDefault(
                     item.Id);
                 return new SettlementReturnAdministrationItem(
                     item.Id,
@@ -99,7 +104,9 @@ internal sealed class EfSettlementReturnQueries : ISettlementReturnQueries
                     item.Reason,
                     attempt?.Id,
                     (PaymentProvider?)attempt?.Provider,
-                    (SettlementReturnProviderAttemptState?)attempt?.State);
+                    (SettlementReturnProviderOperation?)attempt?.Operation,
+                    (SettlementReturnProviderAttemptState?)attempt?.State,
+                    attempt?.Diagnostic);
             });
     }
 }

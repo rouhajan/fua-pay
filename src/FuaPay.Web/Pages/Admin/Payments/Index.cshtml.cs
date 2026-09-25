@@ -158,14 +158,18 @@ public sealed class IndexModel : PageModel
 
             TempData["StatusMessage"] = result.Outcome switch
             {
-                CardJobSettlementReturnOutcome.Confirmed =>
+                CardJobSettlementReturnOutcome.ReverseCompleted =>
                     "ČSOB reverse byl ověřen a vratka dokončena.",
-                CardJobSettlementReturnOutcome.ReverseRejected =>
-                    "Platba již není reverzibilní. Vratka vyžaduje " +
-                    "samostatné rozhodnutí o refundu.",
+                CardJobSettlementReturnOutcome.RefundProcessing =>
+                    "ČSOB refund se zpracovává. Další ověření je pouze stavové.",
+                CardJobSettlementReturnOutcome.RefundCompleted =>
+                    "ČSOB full refund byl ověřen a vratka dokončena.",
+                CardJobSettlementReturnOutcome.PreExistingProviderRefund =>
+                    "ČSOB již eviduje zpracovávaný nebo dokončený refund, " +
+                    "který nevytvořil tento tok. Vratka vyžaduje kontrolu.",
                 _ =>
-                    "Výsledek ČSOB reverse je nejasný. Vratka vyžaduje " +
-                    "pozornost; další ověření je pouze stavové."
+                    "Výsledek karetní vratky je nejasný. Vratka vyžaduje " +
+                    "pozornost; žádný providerový PUT se automaticky neopakuje."
             };
 
             return RedirectToPage(new { view = "admin" });

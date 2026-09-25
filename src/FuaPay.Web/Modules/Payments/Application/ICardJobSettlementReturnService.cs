@@ -6,19 +6,34 @@ public sealed record CardJobSettlementReturnCommand(
     Guid AdministratorUserId,
     string Reason);
 
+public static class CardJobSettlementReturnDiagnostics
+{
+    public const string PreExistingRefundProcessing =
+        "Signed CSOB evidence found paymentStatus 9 before FUA Pay refund.";
+
+    public const string PreExistingReturned =
+        "Signed CSOB evidence found paymentStatus 10 before FUA Pay refund.";
+
+    public const string RefundProcessing =
+        "Signed CSOB status proved paymentStatus 9; refund is processing.";
+}
+
 public enum CardJobSettlementReturnOutcome
 {
     Unknown = 0,
-    Confirmed = 1,
-    RequiresAttention = 2,
-    ReverseRejected = 3
+    ReverseCompleted = 1,
+    RefundProcessing = 2,
+    RefundCompleted = 3,
+    RequiresAttention = 4,
+    PreExistingProviderRefund = 5
 }
 
 public sealed record CardJobSettlementReturnResult(
     Guid SettlementReturnId,
     Guid ProviderAttemptId,
     CardJobSettlementReturnOutcome Outcome,
-    bool ReverseRequestSent);
+    bool ReverseRequestSent,
+    bool RefundRequestSent = false);
 
 public interface ICardJobSettlementReturnService
 {

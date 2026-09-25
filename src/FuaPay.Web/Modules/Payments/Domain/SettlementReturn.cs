@@ -127,6 +127,17 @@ public sealed class SettlementReturn
         UpdatedAt = normalized;
     }
 
+    public void Resume(DateTimeOffset changedAt)
+    {
+        EnsureState(
+            SettlementReturnState.RequiresAttention,
+            SettlementReturnState.InProgress);
+
+        var normalized = ValidateChangedAt(changedAt);
+        State = SettlementReturnState.InProgress;
+        UpdatedAt = normalized;
+    }
+
     internal static SettlementReturn Restore(
         Guid id,
         Guid requestId,

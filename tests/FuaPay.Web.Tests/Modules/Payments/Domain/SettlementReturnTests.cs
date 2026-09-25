@@ -224,6 +224,21 @@ public sealed class SettlementReturnTests
     }
 
     [Fact]
+    public void Resume_TransitionsRequiresAttentionBackToInProgress()
+    {
+        var settlementReturn = CreateRequiresAttention();
+        var changedAt = RequestedAt.AddMinutes(3);
+
+        settlementReturn.Resume(changedAt);
+
+        Assert.Equal(
+            SettlementReturnState.InProgress,
+            settlementReturn.State);
+        Assert.Equal(changedAt, settlementReturn.UpdatedAt);
+        Assert.Null(settlementReturn.CompletedAt);
+    }
+
+    [Fact]
     public void Complete_TransitionsRequiresAttentionToCompleted()
     {
         var settlementReturn = CreateRequiresAttention();

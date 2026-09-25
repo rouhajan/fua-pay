@@ -63,7 +63,9 @@ public sealed class CsobCardJobSettlementReturnServiceTests
 
         var result = await fixture.Service.ReturnAsync(fixture.Command);
 
-        Assert.Equal(CardJobSettlementReturnOutcome.Confirmed, result.Outcome);
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.ReverseCompleted,
+            result.Outcome);
         Assert.True(result.ReverseRequestSent);
         Assert.Equal(1, fixture.Gateway.ReverseCalls);
         Assert.Equal(0, fixture.Gateway.StatusCalls);
@@ -102,8 +104,12 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         var first = await fixture.Service.ReturnAsync(fixture.Command);
         var replay = await fixture.Service.ReturnAsync(fixture.Command);
 
-        Assert.Equal(CardJobSettlementReturnOutcome.Confirmed, first.Outcome);
-        Assert.Equal(CardJobSettlementReturnOutcome.Confirmed, replay.Outcome);
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.ReverseCompleted,
+            first.Outcome);
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.ReverseCompleted,
+            replay.Outcome);
         Assert.True(first.ReverseRequestSent);
         Assert.False(replay.ReverseRequestSent);
         Assert.Equal(1, fixture.Gateway.ReverseCalls);
@@ -138,7 +144,7 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         var recovered = await fixture.Service.ReturnAsync(fixture.Command);
 
         Assert.Equal(
-            CardJobSettlementReturnOutcome.Confirmed,
+            CardJobSettlementReturnOutcome.ReverseCompleted,
             recovered.Outcome);
         Assert.False(recovered.ReverseRequestSent);
         Assert.Equal(1, fixture.Gateway.ReverseCalls);
@@ -159,7 +165,9 @@ public sealed class CsobCardJobSettlementReturnServiceTests
 
         var result = await fixture.Service.ReturnAsync(fixture.Command);
 
-        Assert.Equal(CardJobSettlementReturnOutcome.Confirmed, result.Outcome);
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.ReverseCompleted,
+            result.Outcome);
         Assert.False(result.ReverseRequestSent);
         Assert.Equal(0, fixture.Gateway.ReverseCalls);
         Assert.Equal(1, fixture.Gateway.StatusCalls);
@@ -176,7 +184,9 @@ public sealed class CsobCardJobSettlementReturnServiceTests
 
         var result = await fixture.Service.ReturnAsync(fixture.Command);
 
-        Assert.Equal(CardJobSettlementReturnOutcome.Confirmed, result.Outcome);
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.ReverseCompleted,
+            result.Outcome);
         Assert.Equal(0, fixture.Gateway.ReverseCalls);
         Assert.Equal(1, fixture.Gateway.StatusCalls);
     }
@@ -267,10 +277,9 @@ public sealed class CsobCardJobSettlementReturnServiceTests
     }
 
     [Theory]
-    [InlineData(8)]
     [InlineData(9)]
     [InlineData(10)]
-    public async Task ReturnAsync_DefinitiveStatusRejectsOnlyReverseAttempt(
+    public async Task ReturnAsync_PreExistingProviderRefundSendsNoRefund(
         int paymentStatus)
     {
         var fixture = new Fixture();
@@ -282,7 +291,7 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         var result = await fixture.Service.ReturnAsync(fixture.Command);
 
         Assert.Equal(
-            CardJobSettlementReturnOutcome.ReverseRejected,
+            CardJobSettlementReturnOutcome.PreExistingProviderRefund,
             result.Outcome);
         Assert.Equal(0, fixture.Gateway.ReverseCalls);
         Assert.Equal(1, fixture.Gateway.StatusCalls);
@@ -292,25 +301,13 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         Assert.Equal(
             SettlementReturnProviderAttemptState.Rejected,
             Assert.Single(fixture.AttemptRepository.Stored).State);
-
-        var refund = await fixture.AttemptService.CreateAsync(
-            new CreateSettlementReturnProviderAttemptCommand(
-                Guid.NewGuid(),
-                result.SettlementReturnId,
-                SettlementReturnProviderOperation.Refund));
-
-        Assert.True(refund.Created);
-        Assert.Equal(
-            SettlementReturnProviderAttemptState.Prepared,
-            refund.Attempt.State);
-        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
     }
 
     [Theory]
-    [InlineData(8)]
     [InlineData(9)]
     [InlineData(10)]
-    public async Task ReturnAsync_DocumentedInvalidStateReverseResponsePreservesRefundPath(
+    public async Task ReturnAsync_DirectPreExistingProviderRefundSendsNoRefund(
         int paymentStatus)
     {
         var fixture = new Fixture();
@@ -321,7 +318,7 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         var result = await fixture.Service.ReturnAsync(fixture.Command);
 
         Assert.Equal(
-            CardJobSettlementReturnOutcome.ReverseRejected,
+            CardJobSettlementReturnOutcome.PreExistingProviderRefund,
             result.Outcome);
         Assert.Equal(1, fixture.Gateway.ReverseCalls);
         Assert.Equal(
@@ -330,6 +327,7 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         Assert.Equal(
             SettlementReturnProviderAttemptState.Rejected,
             Assert.Single(fixture.AttemptRepository.Stored).State);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
     }
 
     [Fact]
@@ -337,22 +335,23 @@ public sealed class CsobCardJobSettlementReturnServiceTests
     {
         var fixture = new Fixture();
         fixture.Gateway.ReverseResult = Reverse(
-            paymentStatus: 8,
+            paymentStatus: 9,
             resultCode: 150);
 
         var first = await fixture.Service.ReturnAsync(fixture.Command);
         var replay = await fixture.Service.ReturnAsync(fixture.Command);
 
         Assert.Equal(
-            CardJobSettlementReturnOutcome.ReverseRejected,
+            CardJobSettlementReturnOutcome.PreExistingProviderRefund,
             first.Outcome);
         Assert.Equal(
-            CardJobSettlementReturnOutcome.ReverseRejected,
+            CardJobSettlementReturnOutcome.PreExistingProviderRefund,
             replay.Outcome);
         Assert.True(first.ReverseRequestSent);
         Assert.False(replay.ReverseRequestSent);
         Assert.Equal(1, fixture.Gateway.ReverseCalls);
         Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
     }
 
     [Theory]
@@ -433,10 +432,436 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         var recovered = await fixture.Service.ReturnAsync(fixture.Command);
 
         Assert.Equal(
-            CardJobSettlementReturnOutcome.Confirmed,
+            CardJobSettlementReturnOutcome.ReverseCompleted,
             recovered.Outcome);
         Assert.Equal(1, fixture.Gateway.ReverseCalls);
         Assert.Equal(1, fixture.Gateway.StatusCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_SettledReverseCreatesDurableFullRefundBeforePut()
+    {
+        var fixture = new Fixture();
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 8,
+            resultCode: 150);
+        fixture.Gateway.OnRefund = () =>
+        {
+            Assert.False(fixture.Transaction.IsActive);
+            Assert.Equal(2, fixture.AttemptRepository.Stored.Count);
+            Assert.Equal(
+                SettlementReturnProviderAttemptState.Rejected,
+                fixture.AttemptRepository.Stored.Single(attempt =>
+                    attempt.Operation ==
+                        SettlementReturnProviderOperation.Reverse).State);
+            Assert.Equal(
+                SettlementReturnProviderAttemptState.InProgress,
+                fixture.AttemptRepository.Stored.Single(attempt =>
+                    attempt.Operation ==
+                        SettlementReturnProviderOperation.Refund).State);
+        };
+
+        var result = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RefundCompleted,
+            result.Outcome);
+        Assert.True(result.ReverseRequestSent);
+        Assert.True(result.RefundRequestSent);
+        Assert.Equal(1, fixture.Gateway.ReverseCalls);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Null(fixture.Gateway.LastRefundAmountMinorUnits);
+        Assert.Equal(
+            SettlementReturnState.Completed,
+            Assert.Single(fixture.ReturnRepository.Stored).State);
+        var attempts = fixture.AttemptRepository.Stored;
+        Assert.Equal(2, attempts.Count);
+        Assert.Equal(
+            SettlementReturnProviderAttemptState.Confirmed,
+            attempts.Single(attempt =>
+                attempt.Operation ==
+                    SettlementReturnProviderOperation.Refund).State);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_StatusEightRecoveryTransitionsToRefund()
+    {
+        var fixture = new Fixture();
+        fixture.SeedExisting(
+            SettlementReturnState.InProgress,
+            SettlementReturnProviderAttemptState.InProgress);
+        fixture.Gateway.StatusResult = Status(paymentStatus: 8);
+
+        var result = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RefundCompleted,
+            result.Outcome);
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(1, fixture.Gateway.StatusCalls);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.False(result.ReverseRequestSent);
+        Assert.True(result.RefundRequestSent);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_DirectRefundProcessingStaysUnresolved()
+    {
+        var fixture = new Fixture();
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 8,
+            resultCode: 150);
+        fixture.Gateway.RefundResult = Refund(paymentStatus: 9);
+
+        var result = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RefundProcessing,
+            result.Outcome);
+        Assert.Equal(
+            SettlementReturnState.InProgress,
+            Assert.Single(fixture.ReturnRepository.Stored).State);
+        Assert.Equal(
+            SettlementReturnProviderAttemptState.InProgress,
+            fixture.AttemptRepository.Stored.Single(attempt =>
+                attempt.Operation ==
+                    SettlementReturnProviderOperation.Refund).State);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+    }
+
+    [Theory]
+    [InlineData(130, 10)]
+    [InlineData(150, 8)]
+    [InlineData(160, 10)]
+    [InlineData(0, 8)]
+    [InlineData(0, 7)]
+    public async Task ReturnAsync_UnsafeRefundResponseFailsClosed(
+        int resultCode,
+        int paymentStatus)
+    {
+        var fixture = new Fixture();
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 8,
+            resultCode: 150);
+        fixture.Gateway.RefundResult = Refund(
+            paymentStatus,
+            resultCode);
+
+        var result = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RequiresAttention,
+            result.Outcome);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Equal(
+            SettlementReturnProviderAttemptState.Uncertain,
+            fixture.AttemptRepository.Stored.Single(attempt =>
+                attempt.Operation ==
+                    SettlementReturnProviderOperation.Refund).State);
+    }
+
+    [Theory]
+    [InlineData("network failure")]
+    [InlineData("timeout")]
+    [InlineData("invalid signature")]
+    [InlineData("tampered response")]
+    [InlineData("malformed response")]
+    [InlineData("stale response")]
+    [InlineData("future response")]
+    [InlineData("wrong payId")]
+    public async Task ReturnAsync_AmbiguousRefundPutIsNeverRepeated(
+        string ambiguity)
+    {
+        var fixture = new Fixture();
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 8,
+            resultCode: 150);
+        fixture.Gateway.RefundException = ambiguity switch
+        {
+            "network failure" =>
+                new HttpRequestException("simulated network failure"),
+            "timeout" => new TimeoutException("simulated timeout"),
+            _ => new CsobGatewayException($"simulated {ambiguity}")
+        };
+
+        var ambiguous = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RequiresAttention,
+            ambiguous.Outcome);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+
+        fixture.Gateway.RefundException = null;
+        fixture.Gateway.StatusResult = Status(paymentStatus: 9);
+        var replay = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RefundProcessing,
+            replay.Outcome);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Equal(1, fixture.Gateway.StatusCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_RefundCancellationIsUncertainAndNeverRepeated()
+    {
+        var fixture = new Fixture();
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 8,
+            resultCode: 150);
+        fixture.Gateway.RefundException = new TaskCanceledException();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => fixture.Service.ReturnAsync(fixture.Command));
+
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        fixture.Gateway.RefundException = null;
+        fixture.Gateway.StatusResult = Status(paymentStatus: 8);
+        _ = await fixture.Service.ReturnAsync(fixture.Command);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Equal(1, fixture.Gateway.StatusCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_RefundConfirmationPersistenceFailureNeverResends()
+    {
+        var fixture = new Fixture();
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 8,
+            resultCode: 150);
+        fixture.Transaction.FailOnExecution = 3;
+
+        var result = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RequiresAttention,
+            result.Outcome);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Equal(
+            SettlementReturnProviderAttemptState.Uncertain,
+            fixture.AttemptRepository.Stored.Single(attempt =>
+                attempt.Operation ==
+                    SettlementReturnProviderOperation.Refund).State);
+
+        fixture.Gateway.StatusResult = Status(paymentStatus: 9);
+        var replay = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RefundProcessing,
+            replay.Outcome);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Equal(1, fixture.Gateway.StatusCalls);
+    }
+
+    [Theory]
+    [InlineData(8)]
+    [InlineData(10)]
+    [InlineData(7)]
+    public async Task ReturnAsync_ActiveRefundRecoveryNeverSendsAnotherPut(
+        int paymentStatus)
+    {
+        var fixture = new Fixture();
+        fixture.SeedRefundAttempt(
+            SettlementReturnState.RequiresAttention,
+            SettlementReturnProviderAttemptState.Uncertain);
+        fixture.Gateway.StatusResult = Status(paymentStatus);
+
+        var result = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RequiresAttention,
+            result.Outcome);
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
+        Assert.Equal(1, fixture.Gateway.StatusCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_CompletedRefundReplayPerformsNoHttp()
+    {
+        var fixture = new Fixture();
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 8,
+            resultCode: 150);
+
+        var first = await fixture.Service.ReturnAsync(fixture.Command);
+        var replay = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RefundCompleted,
+            first.Outcome);
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RefundCompleted,
+            replay.Outcome);
+        Assert.Equal(1, fixture.Gateway.ReverseCalls);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.False(replay.ReverseRequestSent);
+        Assert.False(replay.RefundRequestSent);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_OrphanRefundHistoryFailsClosedWithoutHttp()
+    {
+        var fixture = new Fixture();
+        fixture.SeedOrphanRefundHistory();
+
+        await Assert.ThrowsAsync<
+            CardJobSettlementReturnStateInconsistentException>(
+                () => fixture.Service.ReturnAsync(fixture.Command));
+
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_RefundBesideNonRejectedReverseFailsClosed()
+    {
+        var fixture = new Fixture();
+        fixture.SeedRefundBesideNonRejectedReverse();
+
+        await Assert.ThrowsAsync<
+            CardJobSettlementReturnStateInconsistentException>(
+                () => fixture.Service.ReturnAsync(fixture.Command));
+
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_MultipleRefundAttemptsFailClosedWithoutHttp()
+    {
+        var fixture = new Fixture();
+        fixture.SeedMultipleRefundHistory();
+
+        await Assert.ThrowsAsync<
+            CardJobSettlementReturnStateInconsistentException>(
+                () => fixture.Service.ReturnAsync(fixture.Command));
+
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_ValidRejectedReverseWithRefundRecoversStatusOnly()
+    {
+        var fixture = new Fixture();
+        fixture.SeedRefundAttempt(
+            SettlementReturnState.RequiresAttention,
+            SettlementReturnProviderAttemptState.Uncertain);
+        fixture.Gateway.StatusResult = Status(paymentStatus: 9);
+
+        var result = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RefundProcessing,
+            result.Outcome);
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(1, fixture.Gateway.StatusCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
+    }
+
+    [Theory]
+    [InlineData(
+        CsobCardJobSettlementReturnService
+            .ReverseFoundRefundProcessingDiagnostic)]
+    [InlineData(
+        CsobCardJobSettlementReturnService
+            .ReverseFoundReturnedDiagnostic)]
+    public async Task ReturnAsync_PreExistingReverseWithPreparedRefundFailsClosed(
+        string reverseDiagnostic)
+    {
+        var fixture = new Fixture();
+        fixture.SeedPreparedRefundHistory(
+            reverseDiagnostic,
+            beginReverse: true);
+
+        await Assert.ThrowsAsync<
+            CardJobSettlementReturnStateInconsistentException>(
+                () => fixture.Service.ReturnAsync(fixture.Command));
+
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_UnsentRejectedReverseWithPreparedRefundFailsClosed()
+    {
+        var fixture = new Fixture();
+        fixture.SeedPreparedRefundHistory(
+            CsobCardJobSettlementReturnService.ReverseSettledDiagnostic,
+            beginReverse: false);
+
+        await Assert.ThrowsAsync<
+            CardJobSettlementReturnStateInconsistentException>(
+                () => fixture.Service.ReturnAsync(fixture.Command));
+
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_RefundPredatingReverseRejectionFailsClosed()
+    {
+        var fixture = new Fixture();
+        fixture.SeedPreparedRefundHistory(
+            CsobCardJobSettlementReturnService.ReverseSettledDiagnostic,
+            beginReverse: true,
+            refundPredatesRejection: true);
+
+        await Assert.ThrowsAsync<
+            CardJobSettlementReturnStateInconsistentException>(
+                () => fixture.Service.ReturnAsync(fixture.Command));
+
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_ValidSettledReverseWithPreparedRefundSendsRefund()
+    {
+        var fixture = new Fixture();
+        fixture.SeedPreparedRefundHistory(
+            CsobCardJobSettlementReturnService.ReverseSettledDiagnostic,
+            beginReverse: true);
+
+        var result = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RefundCompleted,
+            result.Outcome);
+        Assert.Equal(0, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.Equal(1, fixture.Gateway.RefundCalls);
+    }
+
+    [Fact]
+    public async Task ReturnAsync_BareConcurrentRefundDoesNotClaimProcessing()
+    {
+        var fixture = new Fixture();
+        fixture.Gateway.OnReverse =
+            fixture.ConcurrentlyTransitionToBareRefundInProgress;
+        fixture.Gateway.ReverseResult = Reverse(
+            paymentStatus: 9,
+            resultCode: 150);
+
+        var result = await fixture.Service.ReturnAsync(fixture.Command);
+
+        Assert.Equal(
+            CardJobSettlementReturnOutcome.RequiresAttention,
+            result.Outcome);
+        Assert.NotEqual(
+            CardJobSettlementReturnOutcome.RefundProcessing,
+            result.Outcome);
+        Assert.Equal(1, fixture.Gateway.ReverseCalls);
+        Assert.Equal(0, fixture.Gateway.StatusCalls);
+        Assert.Equal(0, fixture.Gateway.RefundCalls);
     }
 
     [Fact]
@@ -470,6 +895,17 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             PayId,
             resultCode,
             resultCode == 0 ? "OK" : "Status unavailable",
+            paymentStatus,
+            AuthCode: null,
+            StatusDetail: null);
+
+    private static CsobPaymentRefundResult Refund(
+        int paymentStatus,
+        int resultCode = 0) =>
+        new(
+            PayId,
+            resultCode,
+            resultCode == 0 ? "OK" : "Refund unresolved",
             paymentStatus,
             AuthCode: null,
             StatusDetail: null);
@@ -624,6 +1060,240 @@ public sealed class CsobCardJobSettlementReturnServiceTests
             AttemptRepository.Stored.Add(attempt);
         }
 
+        public SettlementReturnProviderAttempt SeedRefundAttempt(
+            SettlementReturnState returnState,
+            SettlementReturnProviderAttemptState refundState)
+        {
+            var settlementReturn = new SettlementReturn(
+                Guid.NewGuid(),
+                Command.OperationId,
+                SettlementReturnKind.CardJob,
+                Payment.Id,
+                Job.Id,
+                Payment.CustomerUserId,
+                Command.AdministratorUserId,
+                Payment.Amount,
+                Command.Reason,
+                Now.AddMinutes(-6));
+            settlementReturn.Begin(Now.AddMinutes(-5));
+
+            var reverse = new SettlementReturnProviderAttempt(
+                Command.OperationId,
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Reverse,
+                PayId,
+                Now.AddMinutes(-6));
+            reverse.Begin(Now.AddMinutes(-5));
+            reverse.Reject(
+                CsobCardJobSettlementReturnService.ReverseSettledDiagnostic,
+                Now.AddMinutes(-4));
+
+            var refund = new SettlementReturnProviderAttempt(
+                Guid.NewGuid(),
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Refund,
+                PayId,
+                Now.AddMinutes(-4));
+            refund.Begin(Now.AddMinutes(-3));
+
+            if (
+                refundState ==
+                    SettlementReturnProviderAttemptState.Uncertain)
+            {
+                refund.MarkUncertain(
+                    "simulated refund ambiguity",
+                    Now.AddMinutes(-2));
+            }
+            else if (
+                refundState !=
+                    SettlementReturnProviderAttemptState.InProgress)
+            {
+                throw new ArgumentOutOfRangeException(nameof(refundState));
+            }
+
+            if (returnState == SettlementReturnState.RequiresAttention)
+            {
+                settlementReturn.RequireAttention(Now.AddMinutes(-2));
+            }
+            else if (returnState != SettlementReturnState.InProgress)
+            {
+                throw new ArgumentOutOfRangeException(nameof(returnState));
+            }
+
+            ReturnRepository.Stored.Add(settlementReturn);
+            AttemptRepository.Stored.Add(reverse);
+            AttemptRepository.Stored.Add(refund);
+            return refund;
+        }
+
+        public void SeedPreparedRefundHistory(
+            string reverseDiagnostic,
+            bool beginReverse,
+            bool refundPredatesRejection = false)
+        {
+            var settlementReturn = CreateInProgressReturn(
+                requestedAt: Now.AddMinutes(-7),
+                startedAt: Now.AddMinutes(-6));
+            var reverse = new SettlementReturnProviderAttempt(
+                Command.OperationId,
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Reverse,
+                PayId,
+                Now.AddMinutes(-7));
+
+            if (beginReverse)
+            {
+                reverse.Begin(Now.AddMinutes(-6));
+            }
+
+            reverse.Reject(reverseDiagnostic, Now.AddMinutes(-4));
+
+            var refund = new SettlementReturnProviderAttempt(
+                Guid.NewGuid(),
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Refund,
+                PayId,
+                refundPredatesRejection
+                    ? Now.AddMinutes(-5)
+                    : Now.AddMinutes(-4));
+
+            ReturnRepository.Stored.Add(settlementReturn);
+            AttemptRepository.Stored.Add(reverse);
+            AttemptRepository.Stored.Add(refund);
+        }
+
+        public void ConcurrentlyTransitionToBareRefundInProgress()
+        {
+            var settlementReturn = Assert.Single(ReturnRepository.Stored);
+            var reverse = Assert.Single(AttemptRepository.Stored);
+            reverse.Reject(
+                CsobCardJobSettlementReturnService.ReverseSettledDiagnostic,
+                Now);
+            var refund = new SettlementReturnProviderAttempt(
+                Guid.NewGuid(),
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Refund,
+                PayId,
+                Now);
+            refund.Begin(Now);
+            AttemptRepository.Stored.Add(refund);
+        }
+
+        public void SeedOrphanRefundHistory()
+        {
+            var settlementReturn = CreateInProgressReturn(
+                requestedAt: Now.AddMinutes(-6),
+                startedAt: Now.AddMinutes(-5));
+            var refund = new SettlementReturnProviderAttempt(
+                Guid.NewGuid(),
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Refund,
+                PayId,
+                Now.AddMinutes(-4));
+            refund.Begin(Now.AddMinutes(-3));
+
+            ReturnRepository.Stored.Add(settlementReturn);
+            AttemptRepository.Stored.Add(refund);
+        }
+
+        public void SeedRefundBesideNonRejectedReverse()
+        {
+            var settlementReturn = CreateInProgressReturn(
+                requestedAt: Now.AddMinutes(-7),
+                startedAt: Now.AddMinutes(-6));
+            var reverse = new SettlementReturnProviderAttempt(
+                Command.OperationId,
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Reverse,
+                PayId,
+                Now.AddMinutes(-7));
+            reverse.Begin(Now.AddMinutes(-6));
+
+            var refund = new SettlementReturnProviderAttempt(
+                Guid.NewGuid(),
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Refund,
+                PayId,
+                Now.AddMinutes(-5));
+            refund.Reject(
+                "simulated invalid Refund beside active Reverse",
+                Now.AddMinutes(-4));
+
+            ReturnRepository.Stored.Add(settlementReturn);
+            AttemptRepository.Stored.Add(reverse);
+            AttemptRepository.Stored.Add(refund);
+        }
+
+        public void SeedMultipleRefundHistory()
+        {
+            var settlementReturn = CreateInProgressReturn(
+                requestedAt: Now.AddMinutes(-8),
+                startedAt: Now.AddMinutes(-7));
+            var reverse = new SettlementReturnProviderAttempt(
+                Command.OperationId,
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Reverse,
+                PayId,
+                Now.AddMinutes(-8));
+            reverse.Begin(Now.AddMinutes(-7));
+            reverse.Reject(
+                CsobCardJobSettlementReturnService.ReverseSettledDiagnostic,
+                Now.AddMinutes(-6));
+
+            var firstRefund = new SettlementReturnProviderAttempt(
+                Guid.NewGuid(),
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Refund,
+                PayId,
+                Now.AddMinutes(-6));
+            firstRefund.Reject(
+                "simulated historical duplicate Refund",
+                Now.AddMinutes(-5));
+
+            var secondRefund = new SettlementReturnProviderAttempt(
+                Guid.NewGuid(),
+                settlementReturn.Id,
+                PaymentProvider.Csob,
+                SettlementReturnProviderOperation.Refund,
+                PayId,
+                Now.AddMinutes(-5));
+            secondRefund.Begin(Now.AddMinutes(-4));
+
+            ReturnRepository.Stored.Add(settlementReturn);
+            AttemptRepository.Stored.Add(reverse);
+            AttemptRepository.Stored.Add(firstRefund);
+            AttemptRepository.Stored.Add(secondRefund);
+        }
+
+        private SettlementReturn CreateInProgressReturn(
+            DateTimeOffset requestedAt,
+            DateTimeOffset startedAt)
+        {
+            var settlementReturn = new SettlementReturn(
+                Guid.NewGuid(),
+                Command.OperationId,
+                SettlementReturnKind.CardJob,
+                Payment.Id,
+                Job.Id,
+                Payment.CustomerUserId,
+                Command.AdministratorUserId,
+                Payment.Amount,
+                Command.Reason,
+                requestedAt);
+            settlementReturn.Begin(startedAt);
+            return settlementReturn;
+        }
+
         private static Job CreateJob(Guid customerId, Guid jobId)
         {
             var job = new Job(
@@ -682,15 +1352,26 @@ public sealed class CsobCardJobSettlementReturnServiceTests
 
         public int StatusCalls { get; private set; }
 
+        public int RefundCalls { get; private set; }
+
         public Action? OnReverse { get; set; }
 
+        public Action? OnRefund { get; set; }
+
         public Exception? ReverseException { get; set; }
+
+        public Exception? RefundException { get; set; }
 
         public CsobPaymentReverseResult ReverseResult { get; set; } =
             Reverse(paymentStatus: 5);
 
         public CsobPaymentStatusResult StatusResult { get; set; } =
             Status(paymentStatus: 7);
+
+        public CsobPaymentRefundResult RefundResult { get; set; } =
+            Refund(paymentStatus: 10);
+
+        public long? LastRefundAmountMinorUnits { get; private set; }
 
         public Task<CsobPaymentReverseResult> ReverseAsync(
             string payId,
@@ -731,8 +1412,18 @@ public sealed class CsobCardJobSettlementReturnServiceTests
         public Task<CsobPaymentRefundResult> RefundAsync(
             string payId,
             long? amountMinorUnits = null,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            CancellationToken cancellationToken = default)
+        {
+            RefundCalls++;
+            LastRefundAmountMinorUnits = amountMinorUnits;
+            Assert.Equal(PayId, payId);
+            OnRefund?.Invoke();
+
+            return RefundException is null
+                ? Task.FromResult(RefundResult with { PayId = payId })
+                : Task.FromException<CsobPaymentRefundResult>(
+                    RefundException);
+        }
     }
 
     private sealed class RecordingAuditTrail : IAuditTrail

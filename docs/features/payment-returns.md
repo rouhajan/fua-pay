@@ -53,23 +53,37 @@ sekvenci uzavírá; další pokus lze založit jen po předchozích definitivně
 zamítnutých nebo neprovedených pokusech.
 
 Pro plnou vratku zakázky uhrazené kartou přes ČSOB je nad tímto základem
-implementované `payment/reverse`. Administrátorský POST používá stabilní
+implementovaný tok Reverse → full Refund. Administrátorský POST používá stabilní
 operation ID a ze serverového stavu odvozuje původní platbu, zákazníka, celou
-částku, zakázku, provider i `payId`. Return i attempt musí být durabilně
-`InProgress` před PUT a přes HTTP se nedrží databázová transakce.
+částku, zakázku, provider i `payId`. Return i provider attempt musí být durabilně
+`InProgress` před příslušným PUT a přes HTTP se nedrží databázová transakce.
 
-Podepsaná a čerstvá odpověď `0/5` vratku potvrdí a dokončí. Přímá
-odpověď reverse zamítne pokus jen při dokumentovaném `resultCode=150`
-a aktuálním nereverzibilním stavu 8, 9 nebo 10. Jiné nenulové kombinace,
-včetně `160/8`, přejdou do `Uncertain` / `RequiresAttention`.
+Nová vratka vždy začíná `payment/reverse`. Podepsaná a čerstvá odpověď `0/5`
+potvrdí Reverse a dokončí vratku stejně jako dosud. Pokud přímá dokumentovaná
+odpověď `150/8` nebo status-only recovery `0/8` prokáže, že je platba již
+zúčtovaná, Reverse attempt se definitivně zamítne a ve stejné databázové
+transakci vznikne a začne nový Refund attempt. Teprve po commitu se právě jednou
+volá `payment/refund` bez pole `amount`, tedy jako plný refund.
 
-Replay i restart použije pouze `payment/status` a stavový PUT se automaticky
-neopakuje. Úspěšné podepsané stavové ověření `0/8`, `0/9` nebo `0/10`
-zamítne jen Reverse attempt, takže `SettlementReturn` zůstává dostupná pro
-budoucí samostatně autorizované rozhodnutí o refundu. Administrace při
-existujícím aktivním pokusu zobrazuje stavové ověření se stejným uloženým
-operation ID; dokončená, zamítnutá nebo nekonzistentní vratka nový reverse
-nenabízí.
+Přímá podepsaná odpověď refundu `0/10` potvrzuje právě odeslaný plný refund a
+dokončí vratku. Odpověď `0/9` znamená zpracovávaný refund: vratka zůstává
+nedokončená, aktivní attempt se při dalším spuštění ověřuje jen přes
+`payment/status` a další refund PUT se neposílá. Neznámé nebo nenulové kombinace
+se nepovažují za úspěch a zůstávají fail-closed.
+
+Stav 9 nebo 10 zjištěný ještě na Reverse cestě může znamenat externí či dřívější
+refund. Taková vratka přejde do attention/reconciliation stavu a FUA Pay neodešle
+žádný refund PUT. Po nejasném refund PUT se attempt uloží jako `Uncertain`; každý
+replay je status-only. Status 9 zůstává zpracovávaný. Veřejný ČSOB model sice pro
+status 10 popisuje detail rozlišující plný a částečný návrat, ale veřejná primární
+dokumentace neposkytuje jednoznačnou strojově čitelnou hodnotu, kterou by současný
+response model mohl bezpečně použít jako důkaz plného refundu. Samotný status 10
+proto při recovery vratku automaticky nedokončí a vyžaduje reconciliation.
+
+Administrace rozlišuje dokončený Reverse, zpracovávaný Refund, dokončený Refund a
+stav vyžadující pozornost včetně předem existující providerové vratky. Aktivní
+`InProgress` / `Uncertain` attempt nabízí jen statusové ověření se stejným
+uloženým operation ID; nový Reverse ani druhý Refund PUT nenabízí.
 
 ## Cílový rozsah před aktivací produkčních karetních plateb
 
@@ -117,9 +131,7 @@ FUA Pay částky jsou výrazně nižší.
 
 ## Aktuálně ještě nepodporované
 
-- doménová orchestrace ČSOB `payment/refund`, jeho perzistentní attempt a
-  recovery lifecycle; klientská protokolová hranice je implementovaná, ale
-  žádná aplikační služba, endpoint, worker ani UI ji zatím nevolá;
+- částečné a opakované ČSOB refundy včetně kumulativního limitu a recovery
+  jednoznačně rozlišujícího plný a částečný návrat;
 - CardTopUp návrat nevyčerpaného kreditu na kartu;
-- opakované/částečné refundy a jejich kumulativní limit;
 - PDF nebo samostatné potvrzení o vratce.
