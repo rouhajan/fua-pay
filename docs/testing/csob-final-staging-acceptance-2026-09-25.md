@@ -391,21 +391,25 @@ ORDER BY r.updated_at, r.payment_id;
 
 ## Closeout still required
 
-This checkpoint was taken before the final staging shutdown. Before leaving the
-payment acceptance window closed, perform the canonical closeout:
+This checkpoint was taken before the final staging shutdown. Do not leave the
+passwordless test-identity staging window open merely because evidence review is
+unfinished. The safe order is:
 
-1. classify the three existing `RequiresAttention` rows;
-2. re-confirm `Pending=0` and due reconciliation `=0`;
-3. restore active `/etc/fuapay-staging/staging.env` exactly from
+1. re-confirm `Pending=0` and due reconciliation `=0`;
+2. restore active `/etc/fuapay-staging/staging.env` exactly from
    `/etc/fuapay-staging/staging.env.pre-csob-20260925T163512Z`;
-4. verify restored SHA-256
+3. verify restored SHA-256
    `3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4`;
-5. stop `fuapay-staging.service` and leave it disabled;
-6. remove the temporary UFW `8443/tcp` allow for `147.230.72.120`;
-7. verify no listener on `127.0.0.1:5081`;
-8. remove only precisely identified temporary acceptance runners/artifacts that
+4. stop `fuapay-staging.service` and leave it disabled;
+5. remove the temporary UFW `8443/tcp` allow for `147.230.72.120`;
+6. verify no listener on `127.0.0.1:5081`;
+7. remove only precisely identified temporary acceptance runners/artifacts that
    are no longer needed;
-9. re-run Production health/current/env/Nginx/301 guard.
+8. re-run Production health/current/env/Nginx/301 guard.
+
+The three existing `RequiresAttention` rows are durable DB evidence and can be
+classified read-only after the runtime is safely stopped. They must be classified
+before bank GO, but they are not a reason to leave staging reachable overnight.
 
 The staging current symlink should remain on release `e84d851...` while the
 service is stopped.
@@ -496,8 +500,9 @@ The next session should start from this document, not from memory.
 
 Order:
 
-1. inspect/classify the 3 `RequiresAttention` reconciliation rows;
-2. complete payment-window closeout and record final closed-state evidence;
+1. complete payment-window closeout and record final closed-state evidence;
+2. inspect/classify the 3 durable `RequiresAttention` reconciliation rows
+   read-only while staging remains stopped;
 3. hand the closed-state evidence to the FUA Print workstream;
 4. open a narrow Print staging window and run the print-code/PIN + actual
    print-for-credit acceptance;
