@@ -602,10 +602,11 @@ oken a tento checkpoint je superseduje.
 
 Před pause gatem bylo `Pending=0` a due reconciliation `=0`. Současně byly
 zjištěny 3 existující řádky `PaymentReconciliationState.RequiresAttention`.
-Jejich původ nebyl v tomto okně ještě klasifikován. Nesmějí být mazány ani
-přepisovány jen kvůli dosažení nuly; před bankovním GO se nejprve read-only
-identifikují a zdokumentuje se, zda jde o historickou testovací evidenci nebo
-aktuální operátorský problém.
+Read-only klasifikace 2026-09-26 je jednoznačně svázala se třemi historickými
+`payment/init` timeouty incidentu 2026-09-13 (orderNo 13/14/15); žádný z nich
+nemá bezpečně známý payId ani provedený reconciliation attempt. Řádky zůstávají
+zachované jako fail-closed audit/recovery evidence a nemažou se kvůli dosažení
+nuly.
 
 Finální staging closeout je PASS. Aktivní staging env byl vrácen přesně na
 fail-closed SHA-256
@@ -625,8 +626,14 @@ Nginx site SHA-256
 a alias `fuapay.fa.tul.cz:443` zůstává HTTP 301 na
 `https://fuapay.tul.cz/`.
 
-Tři durable `RequiresAttention` řádky zůstávají otevřené pouze k read-only
-klasifikaci před bankovním GO; runtime kvůli nim nemusí být otevřený.
+Tři durable `RequiresAttention` řádky byly 2026-09-26 read-only klasifikovány
+jako přesně tři historické nejasné `payment/init` timeouty z incidentu
+2026-09-13 (orderNo 13/14/15). Všechny mají payment `Created`, initiation
+`Uncertain`, žádný bezpečně známý payId, reconciliation attempt count 0 a
+uložený důvod, že automatický `payment/init` retry je zakázán. Nejde o aktuální
+Pending platby ani o artefakt Entra uživatelů. Zůstávají zachované jako
+audit/recovery evidence a nejsou důvodem k opětovnému otevření runtime ani
+samostatným bank-GO blockerem.
 
 ### Bankovní submission po tomto runu
 
