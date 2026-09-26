@@ -358,10 +358,46 @@ At 2026-09-25 18:31 UTC:
 All five returns created/used by the 2026-09-25 live acceptance are
 `Completed`. Their provider-attempt counts are 1, 2, 1, 1 and 1 as expected.
 
-The three `RequiresAttention` reconciliation rows were not classified before this
-checkpoint. They may be historical evidence from prior test windows, but that must
-not be assumed. Before bank GO they must be inspected read-only and explicitly
-classified. Do not rewrite or delete them merely to make the count zero.
+The three `RequiresAttention` reconciliation rows were classified read-only on
+2026-09-26 and are confirmed historical evidence from the 2026-09-13 ČSOB
+integration incident, not current unresolved payments and not identity/Entra
+artifacts.
+
+Exact rows:
+
+- order 13, payment `8867ae06-2bdb-460c-8769-265dd7c9a9a3`;
+- order 14, payment `a330f5b7-cc93-4136-987a-dbaf7b219246`;
+- order 15, payment `10db109f-97db-4d95-9031-c7e93f6a4b3d`.
+
+All three have:
+
+- local payment status `Created` (1);
+- initiation state `Uncertain` (4);
+- no local provider reference;
+- no observed provider reference;
+- no reconciliation provider reference;
+- reconciliation `RequiresAttention` (3);
+- attempt count `0`;
+- no later reconciliation attempt, browser return, gateway payment status or
+  result code;
+- initiation error:
+  `Výsledek zahájení platby u poskytovatele nebyl lokálně potvrzen.`;
+- reconciliation error:
+  `Inicializace ČSOB je nejasná a nemá bezpečně známé payId; automatický payment/init retry je zakázán.`.
+
+Their timestamps line up exactly with the three outbound `payment/init` timeout
+requests documented in `docs/integrations/csob-incident-2026-09-13.md`
+(12:50:29, 12:57:35 and 13:00:59 UTC). The recovery rows were created after the
+corresponding timeout windows at approximately 12:51:09, 12:58:09 and 13:01:32
+UTC.
+
+Conclusion: these are intentional fail-closed durable records of three historical
+ambiguous `payment/init` operations during the 2026-09-13 external integration
+incident. They have no safe payId and therefore must not be retried automatically.
+They do not represent three Entra users, and the number three is unrelated to the
+number of historical Entra-linked staging identities. They are preserved as audit
+evidence and are not a bank-GO blocker now that they are classified and no
+`Pending`/due reconciliation exists.
 
 Suggested first command for the next session:
 
@@ -523,8 +559,10 @@ The next session should start from this document, not from memory.
 
 Order:
 
-1. inspect/classify the 3 durable `RequiresAttention` reconciliation rows
-   read-only while staging remains stopped;
+1. classification of the 3 durable `RequiresAttention` reconciliation rows:
+   **DONE 2026-09-26**; they are the three historical ambiguous `payment/init`
+   timeout records from the 2026-09-13 integration incident and remain preserved
+   as audit evidence;
 2. change the public FUA Pay operational contact in `/Privacy` from
    `jan.rouha@tul.cz` to the already confirmed and functional
    `fuapay@tul.cz`; do not lose the separate DPO contact
