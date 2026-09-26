@@ -216,3 +216,35 @@ Po obnovení služby:
    finančního efektu.
 
 Production traffic zůstává vypnutý.
+
+## Read-only classification of the three durable attention rows — 2026-09-26
+
+The isolated `fuapay_staging` database still contains exactly three
+`PaymentReconciliationState.RequiresAttention` rows originating from this
+incident. A read-only inspection on 2026-09-26 matched them to the three outbound
+`payment/init` timeout attempts documented above:
+
+| orderNo | Payment ID | Recovery created UTC |
+| ---: | --- | --- |
+| 13 | `8867ae06-2bdb-460c-8769-265dd7c9a9a3` | 2026-09-13 12:51:09.470206 |
+| 14 | `a330f5b7-cc93-4136-987a-dbaf7b219246` | 2026-09-13 12:58:09.730108 |
+| 15 | `10db109f-97db-4d95-9031-c7e93f6a4b3d` | 2026-09-13 13:01:32.263735 |
+
+Each row is intentionally fail-closed:
+
+- payment status `Created`;
+- initiation state `Uncertain`;
+- no payment/provider reference and no observed/candidate payId;
+- reconciliation state `RequiresAttention`;
+- attempt count `0`;
+- no browser return and no later provider-status result;
+- automatic `payment/init` retry prohibited because no safe payId is known.
+
+The stored reconciliation reason is:
+
+`Inicializace ČSOB je nejasná a nemá bezpečně známé payId; automatický payment/init retry je zakázán.`
+
+These rows are therefore historical audit/recovery evidence of this incident, not
+current outstanding payments. They are unrelated to the number or type of Entra
+identities present in the imported staging dataset. They remain preserved and are
+not deleted merely to obtain a zero attention count.
