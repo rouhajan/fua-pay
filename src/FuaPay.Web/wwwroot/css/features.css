@@ -256,3 +256,40 @@
   gap: 24px;
   background: #fffdf7;
 }
+
+.card-acceptance-marks {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.card-acceptance-marks__logos {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.card-acceptance-marks__logo {
+  display: block;
+  width: auto;
+  object-fit: contain;
+}
+
+.card-acceptance-marks__logo--visa {
+  height: 20px;
+}
+
+.card-acceptance-marks__logo--mastercard {
+  height: 22px;
+}
+
+.button-nowrap {
+  white-space: nowrap;
+}

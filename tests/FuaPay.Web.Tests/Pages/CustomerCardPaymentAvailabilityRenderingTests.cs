@@ -55,6 +55,65 @@ public sealed class CustomerCardPaymentAvailabilityRenderingTests :
         _factory = factory;
     }
 
+    [Fact]
+    public async Task CreateTopUp_RendersCardPresentationAndAmountGuidance()
+    {
+        var html = WebUtility.HtmlDecode(await RenderAsync(
+            "/Customer/Payments/CreateTopUp?view=customer",
+            paymentCreationEnabled: true,
+            new RenderingQueries()));
+
+        Assert.Contains(
+            "Minimální dobití:",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains("10 Kč", html, StringComparison.Ordinal);
+        Assert.Contains(
+            "Doporučené maximum:",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains("10 000 Kč", html, StringComparison.Ordinal);
+        Assert.Contains("Platba kartou", html, StringComparison.Ordinal);
+        Assert.Contains(
+            "card-acceptance-marks__logo--visa",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "card-acceptance-marks__logo--mastercard",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "alt=\"Visa\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "alt=\"Mastercard\"",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task JobDetails_WithCards_RendersCardAcceptanceMarks()
+    {
+        var job = PublishedUnpaidJob(priceMinorUnits: 70_000);
+        var html = WebUtility.HtmlDecode(await RenderAsync(
+            $"/Customer/Jobs/Details/{job.Id:D}?view=customer",
+            paymentCreationEnabled: true,
+            new RenderingQueries(
+                job: job,
+                creditBalanceMinorUnits: 100_000)));
+
+        Assert.Contains("Zaplatit přímo", html, StringComparison.Ordinal);
+        Assert.Contains(
+            "card-acceptance-marks__logo--visa",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "card-acceptance-marks__logo--mastercard",
+            html,
+            StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -93,6 +152,10 @@ public sealed class CustomerCardPaymentAvailabilityRenderingTests :
         Assert.DoesNotContain("Dobít kredit", html, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "Vyberte kredit nebo přímou platbu",
+            html,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "card-acceptance-marks",
             html,
             StringComparison.Ordinal);
     }

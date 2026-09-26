@@ -97,6 +97,7 @@
                 @if (Model.CanCreateCardPayment)
                 {
                     <p>Vyberte kredit nebo přímou platbu. Neúspěšný platební pokus zakázku nezruší.</p>
+                    <partial name="_CardAcceptanceMarks" />
                 }
 
                 <dl class="payment-balance-summary">
