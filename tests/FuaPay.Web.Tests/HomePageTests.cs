@@ -40,7 +40,7 @@ public sealed class HomePageTests :
     [Theory]
     [InlineData("/Privacy")]
     [InlineData("/Terms")]
-    public async Task PublicPaymentInformation_IsAnonymousAndDoesNotPublishUnverifiedMailbox(
+    public async Task PublicPaymentInformation_IsAnonymousAndUsesExpectedContacts(
         string path)
     {
         using var client = _factory.CreateClient(
@@ -55,14 +55,15 @@ public sealed class HomePageTests :
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("FUA Pay", content);
-        Assert.DoesNotContain("fuapay@tul.cz", content);
         if (path == "/Privacy")
         {
+            Assert.Contains("fuapay@tul.cz", content);
             Assert.Contains("poverenec@tul.cz", content);
             Assert.Contains("CVC/CVV", content);
         }
         else
         {
+            Assert.DoesNotContain("fuapay@tul.cz", content);
             Assert.Contains("CZK", content);
             Assert.Contains("platební brány ČSOB", content);
         }

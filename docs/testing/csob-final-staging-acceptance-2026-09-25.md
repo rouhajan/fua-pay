@@ -514,20 +514,29 @@ The pages currently cover:
 - card processing on ČSOB;
 - explicit statement that FUA Pay does not store PAN/card number or CVC/CVV.
 
-Two public/presentation follow-ups remain separate from the tested payment core:
+The exact tested release `e84d851...` still predates two presentation/source
+follow-ups identified during this acceptance. A post-acceptance source change
+prepared on 2026-09-26 addresses both without changing the payment lifecycle:
 
-1. `fuapay@tul.cz` is already confirmed and functional. The exact tested release
-   `e84d851...` nevertheless still renders `jan.rouha@tul.cz` as the FUA Pay
-   operational contact in `/Privacy`. This is a source-content TODO: replace it
-   with `fuapay@tul.cz` before the public production-card launch. `/Terms`
-   already links to `/Privacy` and does not need to duplicate the operational
-   contact;
-2. official Visa/Mastercard acceptance marks are not currently documented as
-   present in the checkout UI. ČSOB's separate payment-method-presentation
-   guidance says to place Visa and Mastercard acceptance marks on the checkout
-   page. This is distinct from the mandatory integration test-case list and
-   should be finished before public production-card launch using official assets
-   and presentation rules.
+1. `/Privacy` changes the FUA Pay operational contact from
+   `jan.rouha@tul.cz` to the already confirmed and functional
+   `fuapay@tul.cz`. The separate TUL DPO/GDPR contact
+   `poverenec@tul.cz` remains unchanged;
+2. the card-payment UI uses official Visa and Mastercard assets from the ČSOB
+   payment-gateway graphics bundle. Acceptance marks are shown at the actual
+   card-payment entry points — credit top-up and direct job payment when card
+   payment is enabled — and are intentionally not added to unrelated anonymous
+   public pages.
+
+The same source change also adds visible top-up guidance with the enforced
+minimum of 10 CZK and a UI-only recommended maximum of 10,000 CZK. The
+underlying enforced maximum remains 100,000 CZK; this is not a financial-policy
+or database change.
+
+These post-acceptance source changes are not part of the historical
+`e84d851...` live acceptance evidence. They still require the normal final
+verification, merge and staging acceptance before becoming the release used for
+bank submission or Production.
 
 Merchant-logo customization in POS Merchant is a separate branding feature and is
 not one of the listed production-activation test cases.
@@ -563,12 +572,14 @@ Order:
    **DONE 2026-09-26**; they are the three historical ambiguous `payment/init`
    timeout records from the 2026-09-13 integration incident and remain preserved
    as audit evidence;
-2. change the public FUA Pay operational contact in `/Privacy` from
-   `jan.rouha@tul.cz` to the already confirmed and functional
-   `fuapay@tul.cz`; do not lose the separate DPO contact
-   `poverenec@tul.cz`;
-3. finish the remaining public payment-presentation item (official
-   Visa/Mastercard acceptance marks) before public production-card launch;
+2. public-contact source follow-up: **DONE in the 2026-09-26 post-acceptance
+   candidate**; `/Privacy` now uses the confirmed `fuapay@tul.cz`
+   operational contact and preserves `poverenec@tul.cz` as the separate
+   TUL DPO/GDPR contact;
+3. card-presentation source follow-up: **DONE in the 2026-09-26
+   post-acceptance candidate**; official Visa/Mastercard acceptance marks
+   are present at the actual card-payment entry points. This candidate still
+   requires normal final verification and staging acceptance;
 4. hand the closed-state evidence to the FUA Print workstream;
 5. open a narrow Print staging window and run the print-code/PIN + actual
    print-for-credit acceptance;

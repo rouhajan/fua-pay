@@ -369,15 +369,23 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
    kontext TUL/FUA, CZK, charakter a způsob poskytnutí fakultních služeb,
    reklamace/vratky a bezpečné karetní zpracování bez ukládání PAN/CVC.
    Nadále platí:
-   - `poverenec@tul.cz` ponechat jako DPO/GDPR kontakt TUL;
+   - `poverenec@tul.cz` zůstává DPO/GDPR kontaktem TUL;
    - provozní/platební kontakt FUA Pay je potvrzený a funkční
      `fuapay@tul.cz`;
-   - aktuální release `e84d851...` má v `/Privacy` stále osobní provozní
-     kontakt `jan.rouha@tul.cz`; před veřejným produkčním spuštěním karet se
-     má tento zdrojový text změnit na potvrzený `fuapay@tul.cz`; `/Terms`
-     odkazuje na `/Privacy` a samostatný provozní kontakt v něm není nutný;
-   - schválené platební/karetní logo nebylo v repozitáři doloženo, proto nebylo
-     přidáno a tento externí bod zůstává otevřený.
+   - historicky živě otestovaný release `e84d851...` ještě obsahoval
+     `jan.rouha@tul.cz` v `/Privacy` a neměl acceptance marks v checkout UI;
+   - post-acceptance source change připravená 2026-09-26 mění kontakt v
+     `/Privacy` na `fuapay@tul.cz` a přidává oficiální Visa/Mastercard
+     acceptance marks z grafického balíku ČSOB do skutečných vstupních míst
+     karetní platby: dobití kreditu a přímá platba zakázky, pokud jsou karetní
+     platby povolené. Na nesouvisející anonymní veřejné stránky se loga
+     záměrně nepřidávají;
+   - stejná změna zobrazuje u dobití vynucené minimum 10 Kč a UI-only
+     doporučené maximum 10 000 Kč. Backendové maximum zůstává 100 000 Kč;
+   - tyto post-acceptance změny nejsou součástí historické live evidence
+     `e84d851...` a musí projít normálním finálním verification, merge a
+     staging acceptance před bankovním submission nebo Production.
+
 3. Production-grade returns scope z
    [payment-returns.md](../features/payment-returns.md):
    - [x] R2 CardJob plná vratka Reverse → full Refund je implementovaná v
