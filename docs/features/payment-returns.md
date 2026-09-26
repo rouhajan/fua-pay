@@ -187,3 +187,36 @@ FUA Pay částky jsou výrazně nižší.
 - automatické potvrzení konkrétní částečné vratky pouze ze status-only odpovědi
   10 bez publikovaného strojově čitelného důkazu;
 - PDF nebo samostatné potvrzení o vratce.
+
+
+## Live staging acceptance 2026-09-25
+
+Release `e84d851a31083a67f947e4d83b1ff37d2e5871e6` živě ověřil celý
+implementovaný providerový return scope proti ČSOB integration gateway.
+
+- Fresh CardJob Reverse: 20 CZK, přímé podepsané `0/5`, jeden provider attempt,
+  return `Completed`.
+- Full CardJob return po settlementu: Reverse větev prokázala stav 8 a byla
+  definitivně uzavřena; vznikl právě jeden full Refund attempt bez `amount`,
+  přímá podepsaná odpověď `0/10`, return `Completed`.
+- Repeated partial CardJob refund: 100 CZK a následně 50 CZK proti původní
+  platbě 520 CZK; každý refund měl vlastní `SettlementReturn` a vlastní
+  potvrzený Refund attempt `0/10`. Konzervativní zbývající vratná částka po
+  obou operacích byla 370 CZK.
+- CardTopUp return: plných 10 CZK bylo vráceno na původní kartu přes potvrzený
+  Reverse `0/5`; `CreditReturnHold` byl spotřebován a kredit byl odečten
+  právě jednou. Původní payment zůstal historicky `Succeeded`.
+- Účetní reconciliation export zachoval jeden řádek na provider attempt:
+  full Reverse -> Refund má jeden SettlementReturn a dva provider-attempt řádky;
+  repeated partial refundy mají dva samostatné SettlementReturns.
+
+Původní payment/job settlement se při vratkách nemaže ani nepřepisuje; live data
+potvrdila zamýšlenou historickou semantiku.
+
+Detailní identifikátory a DB/export evidence jsou v
+[`csob-final-staging-acceptance-2026-09-25.md`](../testing/csob-final-staging-acceptance-2026-09-25.md).
+
+Tento PASS nemění fail-closed recovery hranice. Nejasný možná odeslaný
+Reverse/Refund se nesmí automaticky opakovat druhým PUT a samotný pozdější
+`payment/status=10` bez jednoznačného důkazu konkrétní vratky nadále
+automaticky nepotvrzuje konkrétní full/partial refund.

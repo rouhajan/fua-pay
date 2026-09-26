@@ -11,6 +11,7 @@ Aktuální dokumentace je záměrně malá:
 - [finanční doklady](features/financial-documents.md);
 - [PDF potvrzení o úhradě](features/payment-receipts.md);
 - [účetní export plateb a vratek](features/payment-reconciliation-export.md);
+- [fresh ČSOB staging acceptance checkpoint 2026-09-25](testing/csob-final-staging-acceptance-2026-09-25.md);
 - [PostgreSQL, EF migrace a testy](development/database.md);
 - [produkční konfigurace a provoz](deployment/production-configuration.md);
 - [čistý produkční cutover](deployment/production-cutover-plan.md);

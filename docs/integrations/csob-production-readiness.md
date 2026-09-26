@@ -370,11 +370,12 @@ Cílem je, aby bankovní submission nebyl postaven na několik dní starých tes
    reklamace/vratky a bezpečné karetní zpracování bez ukládání PAN/CVC.
    Nadále platí:
    - `poverenec@tul.cz` ponechat jako DPO/GDPR kontakt TUL;
-   - provozní/platební kontakt FUA Pay má být `fuapay@tul.cz`, ale před
-     zveřejněním se musí potvrdit, že alias/mailbox skutečně existuje a je
-     monitorovaný;
-   - mailbox `fuapay@tul.cz` nebyl potvrzen, proto nebyl publikován a stávající
-     pravdivý kontakt zůstal zachován;
+   - provozní/platební kontakt FUA Pay je potvrzený a funkční
+     `fuapay@tul.cz`;
+   - aktuální release `e84d851...` má v `/Privacy` stále osobní provozní
+     kontakt `jan.rouha@tul.cz`; před veřejným produkčním spuštěním karet se
+     má tento zdrojový text změnit na potvrzený `fuapay@tul.cz`; `/Terms`
+     odkazuje na `/Privacy` a samostatný provozní kontakt v něm není nutný;
    - schválené platební/karetní logo nebylo v repozitáři doloženo, proto nebylo
      přidáno a tento externí bod zůstává otevřený.
 3. Production-grade returns scope z
@@ -557,3 +558,92 @@ evidence, nikoli jako aktuální runtime stav.
 - [ ] Final production acceptance: live/ready, Entra login/logout/roles, jeden
       kontrolovaný reálný ČSOB payment path a následná kontrola finančního efektu.
 - [ ] Teprve potom otevřít produkční platební tok běžným uživatelům.
+
+
+## Fresh staging acceptance 2026-09-25 — release `e84d851...`
+
+Detailní evidence a přesný resume point jsou v
+[`docs/testing/csob-final-staging-acceptance-2026-09-25.md`](../testing/csob-final-staging-acceptance-2026-09-25.md).
+
+Na izolovaném stagingu nad přesným release
+`e84d851a31083a67f947e4d83b1ff37d2e5871e6` byly čerstvě živě ověřeny všechny
+bankovní integrační scénáře požadované aktuálním activation checklistem ČSOB:
+
+- GET echo a POST echo: podepsané odpovědi `resultCode=0`;
+- úspěšná autorizovaná platba s právě jedním finančním efektem;
+- zrušení zákazníkem `0/3` bez finančního efektu;
+- 30minutová expiry větev: ověřený browser return `130/6`, následně serverový
+  `payment/status 0/6`, lokálně `Expired`, bez finančního efektu;
+- fresh CardJob `payment/reverse 0/5`.
+
+Nad rámec bankovního minima prošel celý implementovaný produkční scope FUA Pay:
+
+- full CardJob Reverse -> Refund: settled Reverse -> jeden full Refund,
+  přímé podepsané `0/10`;
+- dvě opakované partial CardJob Refund vratky 100 CZK + 50 CZK, každá vlastní
+  `SettlementReturn` a vlastní potvrzený Refund attempt;
+- plná CardTopUp vratka na původní kartu, hold spotřebován a kredit odečten
+  právě jednou;
+- cross-customer a cross-requester crafted URL izolace: 404;
+- skutečný browser double-click/concurrent CardJob creation: právě jeden Payment,
+  jedna PaymentInitiation a jeden provider payId;
+- dva fresh podepsané `payment/status` dotazy nad již `Succeeded` platbou:
+  oba `0/8`, lokálně `Succeeded`, `StateChanged=false`, bez druhého kreditu
+  nebo dokumentu;
+- účetní ČSOB reconciliation CSV: 37 datových řádků, 35 unikátních payments,
+  správná one-to-many historie provider attemptů, bez jména/e-mailu zákazníka,
+  audit `export.payment-reconciliation`.
+
+Tím jsou dřívější otevřené live body ze sekce D — repeated provider status,
+access-isolation browser probe a double-click/concurrent CardJob creation —
+pro tento přesný release živě pokryté. Starší historické texty, že tyto scénáře
+nebyly provedeny, zůstávají výše jen jako časově označená evidence starších
+oken a tento checkpoint je superseduje.
+
+Před pause gatem bylo `Pending=0` a due reconciliation `=0`. Současně byly
+zjištěny 3 existující řádky `PaymentReconciliationState.RequiresAttention`.
+Read-only klasifikace 2026-09-26 je jednoznačně svázala se třemi historickými
+`payment/init` timeouty incidentu 2026-09-13 (orderNo 13/14/15); žádný z nich
+nemá bezpečně známý payId ani provedený reconciliation attempt. Řádky zůstávají
+zachované jako fail-closed audit/recovery evidence a nemažou se kvůli dosažení
+nuly.
+
+Finální staging closeout je PASS. Aktivní staging env byl vrácen přesně na
+fail-closed SHA-256
+`3cc93de56b0a4329e331fe2ecf2e476cd90c269e1946650654786434fe2c69d4`;
+`Payments__Provider=None`, `Csob__Enabled=false`,
+`PrintPayments__Enabled=false` a `PrintCredentials__Enabled=false`.
+`fuapay-staging.service` je `inactive/disabled`, dočasné UFW allow pro
+`:8443` bylo odstraněno, `127.0.0.1:5081` neposlouchá a dočasné acceptance
+runnery byly odstraněny. Staging current zůstává na
+`e84d851a31083a67f947e4d83b1ff37d2e5871e6`.
+
+Final Production guard po shutdownu: `/health/ready=Healthy`, current release
+`774b324c48d8f874db21f115479f3b317c2a73d0`, production env SHA-256
+`a2c615cec52e9f9f3498b01212c0d12a38057619dd9676049746a4ca73f9dba5`,
+Nginx site SHA-256
+`491a7228c460ce5c8674a98e6c4c0d0433e0b4fd990360f29cf2d9c9280a91d9`
+a alias `fuapay.fa.tul.cz:443` zůstává HTTP 301 na
+`https://fuapay.tul.cz/`.
+
+Tři durable `RequiresAttention` řádky byly 2026-09-26 read-only klasifikovány
+jako přesně tři historické nejasné `payment/init` timeouty z incidentu
+2026-09-13 (orderNo 13/14/15). Všechny mají payment `Created`, initiation
+`Uncertain`, žádný bezpečně známý payId, reconciliation attempt count 0 a
+uložený důvod, že automatický `payment/init` retry je zakázán. Nejde o aktuální
+Pending platby ani o artefakt Entra uživatelů. Zůstávají zachované jako
+audit/recovery evidence a nejsou důvodem k opětovnému otevření runtime ani
+samostatným bank-GO blockerem.
+
+### Bankovní submission po tomto runu
+
+Aktuální veřejný ČSOB activation checklist uvádí, že povinné scénáře se provádějí
+v **integration prostředí** `https://iapi.iplatebnibrana.csob.cz/`, nikoli na
+produkční bráně. Po dokončení scénářů se jejich provedení potvrzuje v integration
+ČSOB POS Merchant, čímž se předají ke kontrole readiness. Produkční API a
+produkční klíče se zapínají až po schválení bankou; před otevřením běžným
+uživatelům je doporučen jeden kontrolovaný skutečný production payment.
+
+Refund není v seznamu povinných activation test cases, ale FUA Pay jej záměrně
+implementuje a 2026-09-25 jej živě ověřil jako vlastní production-readiness
+požadavek.

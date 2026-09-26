@@ -393,3 +393,37 @@ Pay go-live bez karet.
 
 Oficiální zdroj:
 https://github.com/csob/paymentgateway/wiki/Activation-of-the-production-environment
+
+
+## Fresh live acceptance 2026-09-25
+
+Dřívější odstavec v sekci „Známé implementační mezery před production readiness“
+popisuje stav před finálním fresh runem. Pro release
+`e84d851a31083a67f947e4d83b1ff37d2e5871e6` jej v live-evidence části
+superseduje checkpoint
+[`csob-final-staging-acceptance-2026-09-25.md`](../testing/csob-final-staging-acceptance-2026-09-25.md).
+
+Čerstvě živě byly ověřeny:
+
+- GET a POST echo;
+- success, cancel a 30minutová expiry;
+- fresh Reverse `0/5`;
+- full CardJob Reverse -> Refund s přímým potvrzeným Refund `0/10`;
+- dvě opakované partial CardJob Refund operace, každá s vlastním
+  `SettlementReturn` a přímým `0/10`;
+- plná CardTopUp vratka s potvrzeným providerovým výsledkem a přesně jedním
+  odečtením kreditu;
+- cross-customer/cross-requester URL isolation;
+- skutečný browser double-click/concurrent CardJob creation;
+- dva nové podepsané provider `payment/status` dotazy nad již `Succeeded`
+  platbou, oba `0/8`, oba `StateChanged=false`, bez druhého finančního efektu;
+- účetní/reconciliation CSV nad skutečnými payment/return/provider-attempt daty.
+
+Tím je pro aktuální release živě uzavřen i dříve chybějící provider-status replay
+nad `Succeeded` a live refund acceptance. Záměrně fail-closed recovery pravidlo
+pro nejasný refund zůstává stejné: samotný pozdější status 10 bez jednoznačného
+důkazu konkrétní operace není autorita pro automatické lokální dokončení.
+
+Před final closeoutem zůstávají 3 existující reconciliation řádky ve stavu
+`RequiresAttention`; jejich původ se musí read-only klasifikovat. V okamžiku
+checkpointu bylo `Pending=0` a due reconciliation `=0`.
