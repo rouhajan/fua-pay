@@ -1,7 +1,10 @@
 # Migrace zůstatků ze SafeQ do FUA Pay
 
 Status: implementační základ a lokální PostgreSQL acceptance PASS 2026-09-19;
-produkční cutover dosud neproběhl.
+první produkční operátorská acceptance a první schválená dávka PASS 2026-09-28.
+Migrace pokračuje inkrementálně jen pro další explicitně spárované Production
+Customer identity. Detailní produkční evidence je v
+[SafeQ production acceptance 2026-09-28](../testing/safeq-production-acceptance-2026-09-28.md).
 
 Tento dokument popisuje jednorázový převod existujících zákaznických kreditů
 ze starého SafeQ do čisté produkční databáze FUA Pay.
@@ -221,6 +224,42 @@ nepřenáší a nesmí se použít pro finální SafeQ pairing. Po
 finálním snapshotu lze potvrzené kladné převody provádět postupně během více dnů;
 unikátní SafeQ user ID přitom dovolí právě jeden finanční převod za celý život a
 všechny převody tohoto cutoveru musí dál odkazovat na stejný finální snapshot.
+
+## Produkční checkpoint 2026-09-28
+
+První reálná produkční dávka byla provedena nad přesným nasazeným release
+`8a9983f938581363899ef8465ec406adf116c749` a nad jediným finálním snapshotem
+se SHA-256
+`5305EEFCFE4B2D6DAF86DF11897626B5F2819FE422F33463D9AA53DD5072F6FA`.
+
+Schválený operátorský způsob je jednorázový externí CLI helper mimo repozitář.
+Helper je sestaven proti přesnému FUA Pay release, volá
+`LegacySafeQCreditTransferService` a nepoužívá přímé SQL zápisy do finančních
+tabulek. V Production běží pod OS účtem `fuapay`, používá stejný
+`/etc/fuapay/production.env` jako `fuapay.service` a PostgreSQL peer map
+`fuapay -> fuapay_app`. Helper není nový FUA Pay release, nemění
+`/opt/fuapay/current` a nevyžaduje restart webové služby.
+
+První schválená dávka obsahovala dva kladné převody o celkové hodnotě
+68 700 minor units, tedy 687,00 Kč. Závěrečná read-only reconciliation
+potvrdila přesně dva durable transfer records, dva canonical credit movements
+s `operation_id = command_id`, dva audity
+`credit.legacy-safeq-transfer`, správný zákaznický popis
+`Převod kreditu ze SafeQ`, nulový počet `Payment` a nulový počet
+`FinancialDocument`. Admin Credit view zobrazil oba pohyby lidským popisem
+bez technického SafeQ ID, snapshot SHA nebo command GUID v zobrazeném popisu.
+
+Konkrétní jména, SafeQ ID, FUA Pay UserId a command ID se do veřejného Git
+repozitáře záměrně nezapisují. Jsou dohledatelné v produkční durable transfer
+evidenci/auditu a v neveřejné pracovní párovací evidenci. To zachovává původní
+PII hranici tohoto dokumentu.
+
+Další dávky používají stejný model: nejprve legitimní Entra JIT vznik Production
+Customer identity, potom read-only návrh párování, explicitní lidské potvrzení
+každého páru, pouze kladné částky ze stejného immutable snapshotu, stabilní
+command ID pro preview i skutečný transfer a následná batch reconciliation.
+Nulové položky nevytvářejí pohyb a záporné položky zůstávají mimo automatický
+transfer.
 
 ## Implementační stav
 
