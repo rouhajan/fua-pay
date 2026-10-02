@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-09-25
+Status: 2026-10-02
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu až k bezpečné aktivaci produkčního ČSOB provozu. Není checklistem prvního
@@ -655,3 +655,68 @@ uživatelům je doporučen jeden kontrolovaný skutečný production payment.
 Refund není v seznamu povinných activation test cases, ale FUA Pay jej záměrně
 implementuje a 2026-09-25 jej živě ověřil jako vlastní production-readiness
 požadavek.
+
+## Production activation preparation 2026-10-02
+
+Před přechodem na produkční ČSOB credentials byl přímo na VM ověřen cílový
+release/schema parity gate:
+
+- Production i izolovaný staging ukazují na stejný release
+  `8a9983f938581363899ef8465ec406adf116c749`;
+- rekurzivní `diff -qr` obou release adresářů nehlásil žádný rozdíl;
+- nasazený `FuaPay.Web` má v obou prostředích SHA-256
+  `98b26fac12a0ba68ade76297307890a902efad9e50ba4af0fa2aac6752086fb9`;
+- staging i Production databáze mají 26 EF migrací;
+- Production `/health/ready` vrací `Healthy`;
+- staging zůstává environmentálně oddělený: `ASPNETCORE_ENVIRONMENT=Staging`,
+  testovací interactive sign-in, Entra vypnutá a ČSOB integration API;
+- Production zůstává `ASPNETCORE_ENVIRONMENT=Production`, Entra zapnutá a
+  karetní provoz fail-closed přes `Payments__Provider=None` a
+  `Csob__Enabled=false`.
+
+Tím je splněný požadavek, aby další production activation práce probíhala nad
+totožným aplikačním releasem v obou runtime prostředích; rozdílné zůstávají pouze
+záměrné environmentální konfigurace a oddělené DB/secrets.
+
+### Produkční key activation handoff
+
+Dne 2026-10-02 byla pro merchant `M1EPAY2213` v oficiálním produkčním ČSOB
+keygenu vytvořena nová produkční merchant keypair sada. Privátní materiál zůstává
+mimo Git/release a jeho obsah ani fingerprint není v tomto dokumentu uložen.
+
+Veřejný merchant klíč byl z produkčního keygenu odeslán do ČSOB:
+
+- merchant: `M1EPAY2213`;
+- bankovní request ID: `14836`;
+- jednorázový aktivační kód byl doručen odděleným kanálem a záměrně není
+  persistován v repozitáři;
+- potvrzení requestu v produkčním POS Merchantu je handoff na oprávněného
+  centrálního správce TUL.
+
+Pro verification stranu byl z oficiálního repozitáře ČSOB stažen produkční
+gateway public key `keys/mips_platebnibrana.csob.cz.pub`:
+
+- velikost: `451` bytes;
+- SHA-256:
+  `8BDFAF57189607C4E8FA63A39EA6B591A8903B249120159B2D70488C7B40C438`;
+- PEM typ: `PUBLIC KEY`.
+
+V okamžiku tohoto checkpointu nebyly produkční ČSOB secrets ani aktivní
+production payment konfigurace změněny. Production tedy stále nevytváří nové
+karetní platby.
+
+Další gate po bankovním potvrzení requestu `14836`:
+
+1. bezpečně ověřit novou merchant private/public keypair a očekávaný production
+   gateway public key;
+2. nainstalovat production signing/verification material do production secret
+   store mimo Git/release;
+3. nastavit pouze produkční API
+   `https://api.platebnibrana.csob.cz/` a přesnou return URL
+   `https://fuapay.tul.cz/payments/csob/return`;
+4. provést fresh podepsaný GET i POST echo a ověřit podpis odpovědí;
+5. teprve po PASS zapnout production ČSOB provider pro jeden kontrolovaný malý
+   reálný payment a zkontrolovat právě jeden lokální finanční efekt;
+6. běžný produkční karetní tok otevřít až po úspěšném production acceptance
+   closeoutu.
+
