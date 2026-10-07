@@ -1,6 +1,6 @@
 # ČSOB production readiness checklist
 
-Status: 2026-10-02
+Status: 2026-10-07
 
 Tento soubor je jediný aktuální checklist pro postup od dnešního integračního
 stavu až k bezpečné aktivaci produkčního ČSOB provozu. Není checklistem prvního
@@ -720,3 +720,101 @@ Další gate po bankovním potvrzení requestu `14836`:
 6. běžný produkční karetní tok otevřít až po úspěšném production acceptance
    closeoutu.
 
+
+
+## Production activation acceptance 2026-10-07
+
+Produkční aktivace ČSOB pro merchant `M1EPAY2213` byla 2026-10-07 dokončena
+řízeným end-to-end acceptance runem nad přesným nasazeným release
+`8a9983f938581363899ef8465ec406adf116c749`. Nasazený `FuaPay.Web` měl
+SHA-256
+`98b26fac12a0ba68ade76297307890a902efad9e50ba4af0fa2aac6752086fb9`.
+
+Před aktivací byly splněny samostatné kryptografické a provozní gate:
+
+- nová produkční merchant private/public keypair byla lokálně ověřena jako
+  odpovídající 2048bit RSA pár podpisem a verifikací; privátní materiál ani jeho
+  fingerprint se záměrně neukládá do repozitáře;
+- produkční gateway public key
+  `keys/mips_platebnibrana.csob.cz.pub` byl ověřen proti oficiálnímu ČSOB
+  repozitáři, velikost 451 bytes, SHA-256
+  `8BDFAF57189607C4E8FA63A39EA6B591A8903B249120159B2D70488C7B40C438`;
+- nový merchant signing key a production gateway verification key byly
+  nainstalovány do production secret store mimo Git/release jako
+  `/var/lib/fuapay/secrets/csob-private.pem` a
+  `/var/lib/fuapay/secrets/csob-gateway-public.pem`, oba `fuapay:fuapay`
+  mode `0600`;
+- fresh podepsaný GET i POST production `echo` proti
+  `https://api.platebnibrana.csob.cz/` vrátily `resultCode=0`,
+  `resultMessage=OK` a FUA Pay ověřil podpis obou odpovědí. Stejný gate prošel
+  nejprve z administrátorského PC a následně přímo z produkční VM pod účtem
+  `fuapay` s produkčními secret soubory.
+
+Produkční profil byl poté atomicky přepnut na:
+
+```text
+Payments__Provider=Csob
+Csob__Enabled=true
+Csob__ApiBaseUrl=https://api.platebnibrana.csob.cz/
+Csob__MerchantId=M1EPAY2213
+Csob__PrivateKeyPath=/var/lib/fuapay/secrets/csob-private.pem
+Csob__GatewayPublicKeyPath=/var/lib/fuapay/secrets/csob-gateway-public.pem
+Csob__ReturnUrl=https://fuapay.tul.cz/payments/csob/return
+```
+
+Po restartu pouze `fuapay.service` změnil proces PID, lokální i veřejný
+`/health/ready` zůstaly `Healthy` a
+`/health/workers/csob-reconciliation` přešel na `Healthy` bez failed cycle.
+Production CSP obsahuje pouze očekávané ČSOB payment originy
+`https://api.platebnibrana.csob.cz` a
+`https://platebnibrana.csob.cz`.
+
+Následný kontrolovaný skutečný production smoke použil jednu 10 Kč CardTopUp
+platbu skutečnou kartou. Před smoke měla Production 0 plateb, 0 karetních
+finančních dokumentů, 0 settlement returns a 0 ČSOB reconciliation řádků.
+Výsledek po úspěšné platbě:
+
+- právě 1 `Payment`, provider ČSOB, purpose `CreditTopUp`, částka 1000 minor
+  units, stav `Succeeded`;
+- právě 1 nový kreditní pohyb `Credit` +1000 minor units svázaný s payment ID;
+- právě 1 `CardWalletTopUp` finanční dokument
+  `FUA-2026-000001`, částka 1000 CZK minor units;
+- právě 1 reconciliation řádek ve stavu `Completed`, poslední podepsaný
+  gateway stav `7`, `resultCode=0`.
+
+Bezprostředně poté byla z Admin UI provedena právě jedna plná vratka původního
+dobití. FUA Pay použil podporovanou ČSOB `Reverse` větev; provider attempt je
+`Reverse / Confirmed`, `SettlementReturn` je `CardTopUp / Completed`,
+1000 minor units, a odpovídající `CreditReturnHold` je `Consumed`. Vznikl
+právě jeden kreditní pohyb `Debit` -1000 minor units, takže kreditní účet se
+vrátil přesně na předtestový zůstatek.
+
+Finální počty po smoke + reverse:
+
+```text
+Payments             1
+SettlementReturns    1
+Credit movements     4   # původní 2 + acceptance credit + acceptance debit
+FinancialDocuments   1
+CSOB reconciliation  1
+```
+
+Po closeoutu zůstává Production `/health/ready=Healthy` a ČSOB reconciliation
+worker `Healthy` s `lastFailedCycleAt=null`. Produkční ČSOB provider zůstává
+aktivní; není důvod vracet jej na fail-closed `None/false` baseline.
+
+### FUA Print boundary po ČSOB production acceptance
+
+ČSOB production acceptance nemění FUA Print activation gate. Během celé této
+aktivace zůstaly:
+
+```text
+PrintPayments__Enabled=false
+PrintCredentials__Enabled=false
+```
+
+Persistentní **Tiskový kód** a FUA Print Payments se smějí v Production zapnout
+společně až v samostatném řízeném FUA Print production cutoveru po jeho vlastním
+production gate. Dnešní staging PAID acceptance je relevantní vstup, ale není
+součástí tohoto ČSOB production acceptance a sama o sobě tyto production flagy
+neaktivuje.
