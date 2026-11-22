@@ -4,6 +4,12 @@ FUA Pay je malá interní webová aplikace Fakulty umění a architektury TUL pr
 správu uživatelů, pracovišť, zakázek, kreditu a plateb. Zachovává oddělený
 výrobní stav zakázky a finanční stav úhrady.
 
+## Aktuální stav a pravidla vývoje
+
+- [**AGENTS.md — závazná pravidla**](AGENTS.md): ochrana finančních invariantů, proces oprav, review, testování a produkční schválení.
+- [**Projektový stav a plán**](docs/PROJECT-STATE.md): kde jsme, co je další krok, odkazy na issues a dlouhodobé cíle. Začni zde při navazování po ztrátě konverzace.
+- [**Finanční audit #108**](https://github.com/rouhajan/fua-pay/issues/108): detailní ověřené nálezy a podklady; nenahrazuje projektový rozcestník.
+
 ## Co aplikace umí
 
 - tři aplikační role: `Administrator`, `Requester` a `Customer`;
