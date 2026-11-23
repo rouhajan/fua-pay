@@ -78,7 +78,10 @@ Institucionální názvy, loga a další prvky vizuální identity TUL/FUA nejso
 licencí poskytovány; podrobnosti jsou v [BRANDING.md](BRANDING.md). Licence
 třetích stran zůstávají zachované u příslušných komponent.
 
-Microsoft Entra přihlášení je na `fuapay.tul.cz` živě nasazené a používané.
-ČSOB integrační/produkční provoz naproti tomu stále vyžaduje skutečné merchant
-údaje, klíče a předepsané externí ověření; simulovaný staging provider není
-živá finanční integrace.
+Microsoft Entra přihlášení a skutečné karetní platby ČSOB jsou součástí
+provozu FUA Pay. Historické ČSOB staging a production-readiness dokumenty
+popisují stav **v době svého vzniku**, nikoli automaticky aktuální nasazení.
+Při auditu či zásahu vycházej z [projektového stavu](docs/PROJECT-STATE.md)
+a aktuálně ověřeného produkčního release, konfigurace a bankovních důkazů.
+Skutečné merchant údaje, klíče a bankovní ověření patří mimo Git a musí být
+samostatně schválené pro konkrétní prostředí.
