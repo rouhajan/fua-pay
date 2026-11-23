@@ -38,6 +38,7 @@
 
 - `rouhajan/fua-pay` je veřejný: nikdy nezapisovat produkční identifikátory zákazníků/plateb, emaily, orderNo/payId určené k dohledání konkrétních operací, bankovní klíče, bearer tokeny, podpisy, signed URLs, kompletní env, osobní údaje ani raw bankovní logy do issues, PR, commitů nebo test fixtures. Veřejně jen redigované syntetické důkazy; citlivé podklady chránit mimo repo.
 - FUA Pay je **jediná autorita kreditu**. FUA Print má vlastní produkční repozitář, historii a samostatný release proces. Bez výslovného scope neměnit tiskový klient, režim FREE/PAID, server ani CUPS; neplést vyčištěný source snapshot s živým vydáním.
+- **Produkční SSH/privilegované operace:** AI ani Codex standardně nedostává neomezené SSH, shell, sudo, přístup k databázi či tajným klíčům na živém VM. AI navrhne konkrétní minimální příkazy a bezpečně redigované kontroly; správce je před spuštěním posoudí a provede. Případný budoucí automatizovaný přístup musí být technicky omezený (samostatná identita, allowlist read-only operací, žádná tajemství, audit). Staging je oddělený a vyžaduje vlastní omezení přístupu. Samotný slovní pokyn „nic neměň“ není bezpečnostní hranice.
 - Zálohování/PITR/DR a přenositelnost na jiné fakulty jsou **samostatné projekty**. Jejich požadavky respektovat při návrhu změn, ale nepřimíchávat neodsouhlasený backup/HA/multitenant refaktor do platební opravy.
 - Pokud externí autorita (ČSOB, Entra, účetní schválení, infrastruktura) nebyla ověřena, uvést blokaci. Nepřidávat bypass jen pro úspěšný test.
 
