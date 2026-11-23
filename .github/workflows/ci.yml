@@ -43,6 +43,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate FUA Print staging operations script
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/enable-fuaprint-staging-backend.sh
+
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
