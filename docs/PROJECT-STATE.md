@@ -1,6 +1,6 @@
 # FUA Pay — projektový stav a plán (kanonický rozcestník)
 
-> **Aktualizováno 22. 11. 2026.** Tento dokument je stručný **živý handoff**, nikoli seznam všech důkazů ani automatické potvrzení dnešního živého provozu. Po každém významném kroku jej aktualizuj na schválené větvi/PR. **Závazná pravidla vývoje:** [`AGENTS.md`](../AGENTS.md). **Detailní finanční evidence:** [audit #108](https://github.com/rouhajan/fua-pay/issues/108).
+> **Aktualizováno 23. 11. 2026 (převzetí C7-B).** Tento dokument je stručný **živý handoff**, nikoli seznam všech důkazů ani automatické potvrzení dnešního živého provozu. Po každém významném kroku jej aktualizuj na schválené větvi/PR. **Závazná pravidla vývoje:** [`AGENTS.md`](../AGENTS.md). **Detailní finanční evidence:** [audit #108](https://github.com/rouhajan/fua-pay/issues/108).
 >
 > **Ztratil se chat?** Nejdřív přečti tento soubor, `AGENTS.md` a linked issues; ověř aktuální `main`, reálný release a lokální změny. **Žádné úpravy kódu ani produkce na základě samotného tohoto snapshotu.**
 
@@ -32,7 +32,7 @@
 
 - **#108** je hlavní auditní rozcestník s nezávislými zdrojovými revizemi a operátorskými checkpointy. Detailní závěry ponechat v issues, v tomto souboru jen aktuální navigaci.
 - **C7-A (Codex, read-only):** hotový zdrojový coverage report pro vznik platby, init/reconciliation/settlement. Nezávislé potvrzení dalšího pre-status race v #104. Neznamená, že jsou všechny varianty potvrzenou produkční chybou.
-- **C7-B (Codex, read-only):** úkol zaměřený na refund, kreditní ledger, FUA Print API. Správce má výsledek předat následující den; **zatím nepřevzat a nezkontrolován nezávisle**.
+- **C7-B (Codex, read-only): PŘEVZAT 23. 11. a podstatné nálezy nezávisle ověřeny proti skutečnému kódu.** Bez spuštění testů. Žádné nové P0, žádný důkaz přečerpání tiskového kreditu; nově potvrzena riziková cesta #111: přímý podepsaný refund `0/10` může po rollbacku lokálního settlementu skončit jen v obecné nejistotě bez trvale svázaného důkazu. Výskyt na produkci **UNKNOWN**. Viz [ověření v #111](https://github.com/rouhajan/fua-pay/issues/111#issuecomment-7096251923). Soubor s relevantní službou je blob-identický na auditní baseline i aktuálním `main`.
 - **C7-C:** závěrečné pokrytí účetnictví/exportů, bezpečnosti/oprávnění, provozní evidence a zbývajících průřezových hranic. ChatGPT již udělal **částečnou** samostatnou zdrojovou kontrolu exportů/antiforgery/PDF autorizace, bez nové P0/P1 v tomto rozsahu; **není to dokončení celého C7-C**.
 - **#104 C5/C6:** správce hlásí izolované **lokální** testovací a servisní commity `fcfc885fa26bd54eb21f3568f47d9edd625a0bce`, `42d9b78494600734b6023732b0233101b178cdb4` ve worktree `C:\Projects\fua-pay-audit-race-104`. Oprava C5 pro *jeden* race byla nezávisle zkontrolována, **nepushována, nenasazena, nepokrývá C7-A nový pre-status race**. Zachovat commity bez přepisování.
 - Codex/ChatGPT read-only zdrojové audity **neměnily** code, DB, bankovní operace ani produkci. Testovací PASS z jiného cyklu nezaměňovat za právě nově spuštěný test.
@@ -45,17 +45,17 @@
 | [#109](https://github.com/rouhajan/fua-pay/issues/109) | **Potvrzená riziková cesta v kódu:** při rollbacku lokálního settlementu není durable bankovní úspěch dostatečně zachycen; výskyt v produkci neprokázán | Recovery + settlement; nesmí se obejít atomicita |
 | [#105](https://github.com/rouhajan/fua-pay/issues/105) | **Skutečný nejasný pokus** inicializace 500 Kč bez `payId`; bankovní výsledek **UNKNOWN**, příčina HTTP odpojení nepotvrzena | Bankovní autorita zvlášť od případné kódové opravy |
 | [#110](https://github.com/rouhajan/fua-pay/issues/110) | Preventivní fail-closed kontrola *původu* původního CardTopUp kreditu před refundem; riziko při nekonzistentních historických datech | Kredit/return hold/Print dostupnost |
-| [#111](https://github.com/rouhajan/fua-pay/issues/111) | Nejasný refund PUT, operace-specifické potvrzení a recovery, bez slepého opakování; externí bankovní pravidla mohou blokovat úplný návrh | Nízká současná četnost, nepodceňovat |
+| [#111](https://github.com/rouhajan/fua-pay/issues/111) | Nejasný refund PUT; **nově zdrojově ověřená P1 ztráta vazby přímé podepsané refund odpovědi `0/10` při rollbacku lokálního potvrzení**. Bankovní/produkční výskyt neprokázán. | Společný návrh evidence s #109, ale jiná bankovní operace; bez opakování PUT |
 | [#92](https://github.com/rouhajan/fua-pay/issues/92) | Samostatné dlouhodobější riziko recyklovaného školního e-mailu při tiskovém credentialu; fail-closed správně brání záměně účtů | **Ne** příčina známých ČSOB incidentů |
 | [#106](https://github.com/rouhajan/fua-pay/issues/106) | Hromadné stažení již existujících neměnných dokladů | Samostatná funkce, ne finanční hotfix |
 | [#107](https://github.com/rouhajan/fua-pay/issues/107) | Finální měsíční účetní výkaz podle schválené **golden fixture** | Samostatná funkce; stávající diagnostický export nesčítat jako příjmy |
 
 ### Následující konkrétní kroky (přečíst v novém chatu)
 
-1. **Převzít C7-B report od správce**, ověřit jeho tvrzení proti aktuálnímu GitHub zdroji/testům a doplnit **existující** issues; nerozepisovat stejný nález dvakrát.
+1. **PR #112** (tyto dokumenty) je zatím `DRAFT`. Správce má zkontrolovat diff a výslovně schválit začlenění do `main`; bez schválení neprovádět merge. Pravidla pro Codex budou kanonická až v `main`. C7-B již nezávisle ověřeno, jeho skutečné zjištění je zapsané v #111.
 2. Dokončit **ohraničený** audit C7-C a nezávislou konsolidaci: tabulka `CONFIRMED / COVERAGE GAP / BANK-UNKNOWN / NOT-A-BUG`, závažnost, reprodukce, společné závislosti a nutné opravy. Teprve potom zmrazit scope implementačního balíku.
 3. Pro #104 doplnit RED testy pre-status mixed-read, pozdní signed 0/7–8 a případně expiry; prověřit ochranu C5, navrhnout společnou nejmenší bezpečnou opravu. Nesmí vzniknout dvě protichůdné opravy init/reconciliation.
-4. #109 uchování ověřené bankovní evidence napříč rollbackem/restartem; #105 rozdělit lokální prevenci client-abort a **nezávislé bankovní vyjasnění**; #110 doplnit provenance guard; #111 řešit jen bankovně a testově podloženou změnu. Nikde neobcházet validaci, zámky, audit či transakce.
+4. #109 a #111 společně navrhnout **nezávisle trvale uchovávanou, přesně přiřazenou bankovní evidenci** přes rollback/restart (ale nezaměnit úspěch platby `0/7,0/8` s konkrétním refundem `0/10`); #105 oddělit prevenci client-abort od nezjištěného bankovního stavu; #110 doplnit původní ledger provenance guard a opravit nekanonickou testovací fixture. Žádné auto-confirm z agregovaného refund statusu, opakovaný PUT, zásah do Print nebo neprokázaný bankovní debit.
 5. Každý jednotlivý patch: izolovaná větev/worktree → deterministické RED → minimální změna → GREEN plus negativní testy → **nezávislé skutečné diff review** → srozumitelná tabulka před/po → schválení správce.
 6. Teprve po schválení složit **jeden integrační kandidát**; provést kompletní CI/CodeQL, full regression, PostgreSQL **16.x parity** (vedle současného CI na 18.x), bankovní mock/error tests a Print Reserve/Capture/Release cross-feature testy.
 7. Přesně jeden build → **izolovaný staging před produkcí**; zvlášť ČSOB platební acceptance, zvlášť bezpečně izolované finanční API/FAKE/physical Print acceptance; správce vyzkouší UI, doklady, kredit, fyzický papír a přesně jeden debit tam, kde to testovací infrastruktura bezpečně dovolí. Žádné přesměrování živých studentů na staging.
