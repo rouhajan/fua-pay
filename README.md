@@ -4,6 +4,12 @@ FUA Pay je malá interní webová aplikace Fakulty umění a architektury TUL pr
 správu uživatelů, pracovišť, zakázek, kreditu a plateb. Zachovává oddělený
 výrobní stav zakázky a finanční stav úhrady.
 
+## Aktuální stav a pravidla vývoje
+
+- [**AGENTS.md — závazná pravidla**](AGENTS.md): ochrana finančních invariantů, proces oprav, review, testování a produkční schválení.
+- [**Projektový stav a plán**](docs/PROJECT-STATE.md): kde jsme, co je další krok, odkazy na issues a dlouhodobé cíle. Začni zde při navazování po ztrátě konverzace.
+- [**Finanční audit #108**](https://github.com/rouhajan/fua-pay/issues/108): detailní ověřené nálezy a podklady; nenahrazuje projektový rozcestník.
+
 ## Co aplikace umí
 
 - tři aplikační role: `Administrator`, `Requester` a `Customer`;
@@ -72,7 +78,10 @@ Institucionální názvy, loga a další prvky vizuální identity TUL/FUA nejso
 licencí poskytovány; podrobnosti jsou v [BRANDING.md](BRANDING.md). Licence
 třetích stran zůstávají zachované u příslušných komponent.
 
-Microsoft Entra přihlášení je na `fuapay.tul.cz` živě nasazené a používané.
-ČSOB integrační/produkční provoz naproti tomu stále vyžaduje skutečné merchant
-údaje, klíče a předepsané externí ověření; simulovaný staging provider není
-živá finanční integrace.
+Microsoft Entra přihlášení a skutečné karetní platby ČSOB jsou součástí
+provozu FUA Pay. Historické ČSOB staging a production-readiness dokumenty
+popisují stav **v době svého vzniku**, nikoli automaticky aktuální nasazení.
+Při auditu či zásahu vycházej z [projektového stavu](docs/PROJECT-STATE.md)
+a aktuálně ověřeného produkčního release, konfigurace a bankovních důkazů.
+Skutečné merchant údaje, klíče a bankovní ověření patří mimo Git a musí být
+samostatně schválené pro konkrétní prostředí.
