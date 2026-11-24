@@ -322,6 +322,12 @@ public sealed class SettlementReturnPersistenceTests :
                 .GetRequiredService<ISettlementReturnRepository>()
                 .AddAsync(CreateCardTopUp(payment));
 
+            var connection =
+                (NpgsqlConnection)dbContext.Database.GetDbConnection();
+            var expectedSqlState = connection.PostgreSqlVersion.Major >= 18
+                ? PostgresErrorCodes.RestrictViolation
+                : PostgresErrorCodes.ForeignKeyViolation;
+
             var exception = await Assert.ThrowsAsync<PostgresException>(
                 () => dbContext.Database.ExecuteSqlInterpolatedAsync(
                     $"""
@@ -329,9 +335,7 @@ public sealed class SettlementReturnPersistenceTests :
                     WHERE id = {payment.Id}
                     """));
 
-            Assert.Equal(
-                PostgresErrorCodes.RestrictViolation,
-                exception.SqlState);
+            Assert.Equal(expectedSqlState, exception.SqlState);
             Assert.Equal(
                 "fk_payments_settlement_returns_original_payment",
                 exception.ConstraintName);
