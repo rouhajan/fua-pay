@@ -72,7 +72,7 @@ public sealed class CsobPaymentReconciliationService :
                 PaymentProvider.Csob,
                 normalizedPayId);
 
-        if (payment.Provider != PaymentProvider.Csob)
+        if (payment.Id != paymentId || payment.Provider != PaymentProvider.Csob)
         {
             throw CreateProviderReferenceConflictException(
                 payment,
@@ -83,17 +83,14 @@ public sealed class CsobPaymentReconciliationService :
         {
             var initiation =
                 await _initiationRepository.FindByPaymentIdAsync(
-                    payment.Id,
+                    paymentId,
                     cancellationToken);
+            var currentPayment = await ResolveMixedInitializationReadAsync(
+                payment, initiation, paymentId, cancellationToken);
 
             if (
-                initiation is null ||
-                initiation.Provider != PaymentProvider.Csob ||
-                initiation.State != PaymentInitiationState.Uncertain ||
-                !string.Equals(
-                    initiation.ObservedProviderReference,
-                    normalizedPayId,
-                    StringComparison.Ordinal))
+                currentPayment is not { Status: PaymentStatus.Created or PaymentStatus.Pending } ||
+                !HasInitializationBinding(currentPayment, initiation, paymentId, normalizedPayId))
             {
                 throw CreateProviderReferenceConflictException(
                     payment,
@@ -151,6 +148,33 @@ public sealed class CsobPaymentReconciliationService :
                 "Podepsaná odpověď payment/status nevrátila úspěšný výsledek; lokální finanční stav zůstává beze změny.",
                 gatewayStatus.PaymentStatus,
                 gatewayStatus.ResultCode);
+        }
+
+        var isPaidStatus = gatewayStatus.PaymentStatus is 7 or 8;
+        if (
+            payment.Status == PaymentStatus.Created &&
+            (isPaidStatus || gatewayStatus.PaymentStatus is 2 or 3 or 4 or 6))
+        {
+            var currentPayment = await _paymentRepository.FindByIdAsync(
+                paymentId, cancellationToken);
+            var initiation = await _initiationRepository.FindByPaymentIdAsync(
+                paymentId, cancellationToken);
+            currentPayment = await ResolveMixedInitializationReadAsync(
+                currentPayment, initiation, paymentId, cancellationToken);
+
+            if (
+                currentPayment is null ||
+                (currentPayment.Status != PaymentStatus.Pending &&
+                    !(isPaidStatus && currentPayment.Status == PaymentStatus.Succeeded)) ||
+                !HasInitializationBinding(currentPayment, initiation, paymentId, normalizedPayId))
+            {
+                throw CreateInitializationConflictException(
+                    currentPayment ?? payment,
+                    gatewayStatus.PaymentStatus,
+                    gatewayStatus.ResultCode);
+            }
+
+            payment = currentPayment;
         }
 
         if (payment.Status == PaymentStatus.Created)
@@ -217,6 +241,53 @@ public sealed class CsobPaymentReconciliationService :
         };
     }
 
+    private async Task<Payment?> ResolveMixedInitializationReadAsync(
+        Payment? payment,
+        PaymentInitiation? initiation,
+        Guid paymentId,
+        CancellationToken cancellationToken)
+    {
+        if (
+            payment is { Status: PaymentStatus.Created, Provider: PaymentProvider.Csob } &&
+            payment.Id == paymentId &&
+            initiation is { State: PaymentInitiationState.Initialized, Provider: PaymentProvider.Csob } &&
+            initiation.PaymentId == paymentId)
+        {
+            // At READ COMMITTED the web commit can land between the two reads.
+            return await _paymentRepository.FindByIdAsync(paymentId, cancellationToken);
+        }
+
+        return payment;
+    }
+
+    private static bool HasInitializationBinding(
+        Payment payment,
+        PaymentInitiation? initiation,
+        Guid paymentId,
+        string payId)
+    {
+        if (
+            payment.Id != paymentId ||
+            payment.Provider != PaymentProvider.Csob ||
+            initiation is null ||
+            initiation.PaymentId != paymentId ||
+            initiation.Provider != PaymentProvider.Csob)
+        {
+            return false;
+        }
+
+        return payment.Status switch
+        {
+            PaymentStatus.Created =>
+                initiation.State == PaymentInitiationState.Uncertain &&
+                string.Equals(initiation.ObservedProviderReference, payId, StringComparison.Ordinal),
+            PaymentStatus.Pending or PaymentStatus.Succeeded or PaymentStatus.Expired =>
+                initiation.State == PaymentInitiationState.Initialized &&
+                string.Equals(payment.ProviderReference, payId, StringComparison.Ordinal),
+            _ => false
+        };
+    }
+
     private async Task<CsobPaymentReconciliationResult>
         RecoverInitializationAsync(
             Payment payment,
@@ -225,24 +296,6 @@ public sealed class CsobPaymentReconciliationService :
             int gatewayPaymentStatus,
             CancellationToken cancellationToken)
     {
-        var initiation = await _initiationRepository.FindByPaymentIdAsync(
-            payment.Id,
-            cancellationToken);
-
-        if (
-            initiation is null ||
-            initiation.Provider != PaymentProvider.Csob ||
-            initiation.State != PaymentInitiationState.Uncertain ||
-            !string.Equals(
-                initiation.ObservedProviderReference,
-                payId,
-                StringComparison.Ordinal))
-        {
-            throw CreateInitializationConflictException(
-                payment,
-                gatewayPaymentStatus);
-        }
-
         if (gatewayPaymentStatus != 1)
         {
             throw new CsobPaymentRequiresAttentionException(
@@ -255,6 +308,7 @@ public sealed class CsobPaymentReconciliationService :
 
         try
         {
+            // The web request may have completed initialization during payment/status.
             return await _transaction.ExecuteAsync(
                 async ct =>
                 {
@@ -273,14 +327,21 @@ public sealed class CsobPaymentReconciliationService :
                             currentPayment,
                             gatewayPaymentStatus);
 
+                    var resolvedPayment = await ResolveMixedInitializationReadAsync(
+                        currentPayment, currentInitiation, payment.Id, ct);
+
                     if (
-                        currentPayment.Status == PaymentStatus.Pending &&
-                        currentInitiation.State ==
-                            PaymentInitiationState.Initialized &&
-                        string.Equals(
-                            currentPayment.ProviderReference,
-                            payId,
-                            StringComparison.Ordinal))
+                        resolvedPayment is not { Status: PaymentStatus.Created or PaymentStatus.Pending } ||
+                        !HasInitializationBinding(resolvedPayment, currentInitiation, payment.Id, payId))
+                    {
+                        throw CreateInitializationConflictException(
+                            resolvedPayment ?? currentPayment,
+                            gatewayPaymentStatus,
+                            gatewayResultCode);
+                    }
+
+                    currentPayment = resolvedPayment;
+                    if (currentPayment.Status == PaymentStatus.Pending)
                     {
                         return new CsobPaymentReconciliationResult(
                             currentPayment.Id,
@@ -288,22 +349,6 @@ public sealed class CsobPaymentReconciliationService :
                             gatewayPaymentStatus,
                             gatewayResultCode,
                             StateChanged: false);
-                    }
-
-                    if (
-                        currentPayment.Provider != PaymentProvider.Csob ||
-                        currentPayment.Status != PaymentStatus.Created ||
-                        currentInitiation.Provider != PaymentProvider.Csob ||
-                        currentInitiation.State !=
-                            PaymentInitiationState.Uncertain ||
-                        !string.Equals(
-                            currentInitiation.ObservedProviderReference,
-                            payId,
-                            StringComparison.Ordinal))
-                    {
-                        throw CreateInitializationConflictException(
-                            currentPayment,
-                            gatewayPaymentStatus);
                     }
 
                     var verifiedAt = _timeProvider.GetUtcNow();
@@ -349,13 +394,8 @@ public sealed class CsobPaymentReconciliationService :
                     cancellationToken);
 
             if (
-                persistedPayment?.Status == PaymentStatus.Pending &&
-                persistedInitiation?.State ==
-                    PaymentInitiationState.Initialized &&
-                string.Equals(
-                    persistedPayment.ProviderReference,
-                    payId,
-                    StringComparison.Ordinal))
+                persistedPayment is { Status: PaymentStatus.Pending } &&
+                HasInitializationBinding(persistedPayment, persistedInitiation, payment.Id, payId))
             {
                 return new CsobPaymentReconciliationResult(
                     payment.Id,
@@ -377,25 +417,6 @@ public sealed class CsobPaymentReconciliationService :
             int gatewayPaymentStatus,
             CancellationToken cancellationToken)
     {
-        var initiation = await _initiationRepository.FindByPaymentIdAsync(
-            payment.Id,
-            cancellationToken);
-
-        if (
-            initiation is null ||
-            initiation.Provider != PaymentProvider.Csob ||
-            initiation.State != PaymentInitiationState.Uncertain ||
-            !string.Equals(
-                initiation.ObservedProviderReference,
-                payId,
-                StringComparison.Ordinal))
-        {
-            throw CreateInitializationConflictException(
-                payment,
-                gatewayPaymentStatus,
-                gatewayResultCode);
-        }
-
         try
         {
             return await _transaction.ExecuteAsync(
@@ -417,14 +438,21 @@ public sealed class CsobPaymentReconciliationService :
                             gatewayPaymentStatus,
                             gatewayResultCode);
 
+                    var resolvedPayment = await ResolveMixedInitializationReadAsync(
+                        currentPayment, currentInitiation, payment.Id, ct);
+
                     if (
-                        currentPayment.Status == PaymentStatus.Expired &&
-                        currentInitiation.State ==
-                            PaymentInitiationState.Initialized &&
-                        string.Equals(
-                            currentPayment.ProviderReference,
-                            payId,
-                            StringComparison.Ordinal))
+                        resolvedPayment is not { Status: PaymentStatus.Created or PaymentStatus.Pending or PaymentStatus.Expired } ||
+                        !HasInitializationBinding(resolvedPayment, currentInitiation, payment.Id, payId))
+                    {
+                        throw CreateInitializationConflictException(
+                            resolvedPayment ?? currentPayment,
+                            gatewayPaymentStatus,
+                            gatewayResultCode);
+                    }
+
+                    currentPayment = resolvedPayment;
+                    if (currentPayment.Status == PaymentStatus.Expired)
                     {
                         return new CsobPaymentReconciliationResult(
                             currentPayment.Id,
@@ -436,14 +464,7 @@ public sealed class CsobPaymentReconciliationService :
 
                     var expiredAt = _timeProvider.GetUtcNow();
 
-                    if (
-                        currentPayment.Status == PaymentStatus.Pending &&
-                        currentInitiation.State ==
-                            PaymentInitiationState.Initialized &&
-                        string.Equals(
-                            currentPayment.ProviderReference,
-                            payId,
-                            StringComparison.Ordinal))
+                    if (currentPayment.Status == PaymentStatus.Pending)
                     {
                         var changed = currentPayment.Expire(expiredAt);
 
@@ -465,23 +486,6 @@ public sealed class CsobPaymentReconciliationService :
                             gatewayPaymentStatus,
                             gatewayResultCode,
                             changed);
-                    }
-
-                    if (
-                        currentPayment.Provider != PaymentProvider.Csob ||
-                        currentPayment.Status != PaymentStatus.Created ||
-                        currentInitiation.Provider != PaymentProvider.Csob ||
-                        currentInitiation.State !=
-                            PaymentInitiationState.Uncertain ||
-                        !string.Equals(
-                            currentInitiation.ObservedProviderReference,
-                            payId,
-                            StringComparison.Ordinal))
-                    {
-                        throw CreateInitializationConflictException(
-                            currentPayment,
-                            gatewayPaymentStatus,
-                            gatewayResultCode);
                     }
 
                     currentPayment.MarkPending(payId, expiredAt);
@@ -534,13 +538,8 @@ public sealed class CsobPaymentReconciliationService :
                     cancellationToken);
 
             if (
-                persistedPayment?.Status == PaymentStatus.Expired &&
-                persistedInitiation?.State ==
-                    PaymentInitiationState.Initialized &&
-                string.Equals(
-                    persistedPayment.ProviderReference,
-                    payId,
-                    StringComparison.Ordinal))
+                persistedPayment is { Status: PaymentStatus.Expired } &&
+                HasInitializationBinding(persistedPayment, persistedInitiation, payment.Id, payId))
             {
                 return new CsobPaymentReconciliationResult(
                     payment.Id,
