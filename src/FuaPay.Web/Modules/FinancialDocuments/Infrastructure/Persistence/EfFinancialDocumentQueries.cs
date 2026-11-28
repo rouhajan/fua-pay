@@ -6,7 +6,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FuaPay.Web.Modules.FinancialDocuments.Infrastructure.Persistence;
 
-internal sealed class EfFinancialDocumentQueries : IFinancialDocumentQueries
+internal sealed class EfFinancialDocumentQueries :
+    IFinancialDocumentQueries, IFinancialDocumentArchiveQueries
 {
     private readonly FuaPayDbContext _dbContext;
 
@@ -90,6 +91,23 @@ internal sealed class EfFinancialDocumentQueries : IFinancialDocumentQueries
         return entity is null
             ? null
             : EfFinancialDocumentRepository.Restore(entity);
+    }
+
+    public async Task<IReadOnlyList<FinancialDocument>> ListIssuedAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtcExclusive,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var entities = await _dbContext.FinancialDocuments
+            .AsNoTracking()
+            .Where(item => item.IssuedAt >= fromUtc && item.IssuedAt < toUtcExclusive)
+            .OrderBy(item => item.IssuedAt)
+            .ThenBy(item => item.DocumentNumber)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        return entities.ConvertAll(EfFinancialDocumentRepository.Restore);
     }
 
     private static void ValidateId(Guid value, string parameterName)

@@ -26,7 +26,13 @@
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="PDFsharp" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
     <PackageReference Include="System.Security.Cryptography.Pkcs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Modules/Reporting/Infrastructure/Xlsx/AccountingWorkbookStyles.xml" />
+    <EmbeddedResource Include="Modules/Reporting/Infrastructure/Xlsx/AccountingWorkbookTheme.xml" />
   </ItemGroup>
 
 </Project>

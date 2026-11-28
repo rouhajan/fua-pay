@@ -14,6 +14,7 @@ public static class ReportingModule
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<AdministrationCsvExportService>();
+        services.AddScoped<AccountingWorkbookExportService>();
         services.AddScoped<
             IPaymentReconciliationExportQueries,
             EfPaymentReconciliationExportQueries>();
