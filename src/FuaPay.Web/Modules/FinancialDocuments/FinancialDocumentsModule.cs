@@ -18,6 +18,10 @@ public static class FinancialDocumentsModule
             IFinancialDocumentQueries,
             EfFinancialDocumentQueries>();
         services.AddScoped<
+            IFinancialDocumentArchiveQueries,
+            EfFinancialDocumentQueries>();
+        services.AddScoped<FinancialDocumentArchiveService>();
+        services.AddScoped<
             IFinancialDocumentNumberAllocator,
             EfFinancialDocumentNumberAllocator>();
         services.AddSingleton<

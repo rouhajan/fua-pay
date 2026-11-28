@@ -1,12 +1,31 @@
+using System.Data.Common;
+using System.Diagnostics;
+using System.IO.Compression;
+using System.Net;
+using System.Text.RegularExpressions;
+
 using FuaPay.Web.BuildingBlocks.Persistence;
+using FuaPay.Web.Modules.Access.Application;
+using FuaPay.Web.Modules.Access.Domain;
+using FuaPay.Web.Modules.Access.Web;
 using FuaPay.Web.Modules.FinancialDocuments.Application;
 using FuaPay.Web.Modules.FinancialDocuments.Domain;
 
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 using Npgsql;
+
+using PdfSharp.Pdf.IO;
+
+using Xunit.Abstractions;
 
 namespace FuaPay.DatabaseTests;
 
@@ -27,11 +46,13 @@ public sealed class FinancialDocumentPersistenceTests :
     private const int TaxConstraintYear = 2101;
 
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly ITestOutputHelper _output;
 
     public FinancialDocumentPersistenceTests(
-        WebApplicationFactory<Program> factory)
+        WebApplicationFactory<Program> factory, ITestOutputHelper output)
     {
         _factory = factory;
+        _output = output;
     }
 
     [Fact]
@@ -731,6 +752,195 @@ public sealed class FinancialDocumentPersistenceTests :
         var allocator = scope.ServiceProvider
             .GetRequiredService<IFinancialDocumentNumberAllocator>();
         return await allocator.AllocateAsync(issuedAt);
+    }
+
+    [Fact]
+    public async Task ArchiveUsesOnlyIssuedSnapshotsAndMakesNoDatabaseWrites()
+    {
+        const int year = 2110;
+        var customer = Guid.NewGuid();
+        var start = UtcInstant(year - 1, 12, 31, 23, 0);
+        var end = UtcInstant(year, 1, 31, 23, 0);
+        var manual = CreateCurrentManualDocument("FUA-2110-900002", Guid.NewGuid(), customer, start);
+        var wallet = CreateCurrentWalletDocument("FUA-2110-900001", Guid.NewGuid(), customer, start);
+        var job = CreateDirectJobPaymentDocument("FUA-2110-900003", Guid.NewGuid(), end.AddSeconds(-1));
+        var afterEnd = Enumerable.Range(1, 1000)
+            .Select(item => CreateCurrentManualDocument($"FUA-2110-{item:000000}", Guid.NewGuid(),
+                customer, end.AddMinutes(item - 1)));
+        var inside = Enumerable.Range(4, 497)
+            .Select(item => CreateCurrentManualDocument($"FUA-2110-{900000 + item:000000}",
+                Guid.NewGuid(), customer, start.AddMinutes(item)))
+            .ToArray();
+        var beforeStart = CreateCurrentManualDocument("FUA-2109-900001", Guid.NewGuid(), customer,
+            start.AddSeconds(-1));
+        FinancialDocument[] all = [beforeStart, manual, wallet, job, .. afterEnd, .. inside];
+        FinancialDocument[] issued = [wallet, manual, .. inside, job];
+        var ids = all.Select(item => item.SourceId).ToArray();
+        var capture = new ArchiveCommandCapture();
+        var session = new AccessSessionSnapshot(Guid.NewGuid(), "Archive test admin",
+            "archive@example.test", AccessUserStatus.Active, [AccessRole.Admin]);
+        using var app = _factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IAccessSessionQueries>();
+            services.AddSingleton<IAccessSessionQueries>(new ArchiveTestSession(session));
+            services.ConfigureDbContext<FuaPayDbContext>(options => options.AddInterceptors(capture));
+        }));
+
+        try
+        {
+            await using var scope = _factory.Services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<FuaPayDbContext>();
+            var repository = scope.ServiceProvider.GetRequiredService<IFinancialDocumentRepository>();
+            foreach (var document in all)
+            {
+                repository.Stage(document);
+            }
+
+            await context.SaveChangesAsync();
+            var queries = scope.ServiceProvider.GetRequiredService<IFinancialDocumentArchiveQueries>();
+            await VerifyArchiveSnapshotsAsync();
+            var counterQuery = context.Database.SqlQuery<int>($"""
+                SELECT count(*)::int AS "Value" FROM financial_documents.number_counters
+                WHERE business_year = {year}
+                """);
+            Assert.Equal(0, await counterQuery.SingleAsync());
+
+            await VerifyArchiveResponsesAsync(app, session, capture, issued);
+
+            Assert.Equal(2, capture.Commands.Count);
+            Assert.All(capture.Commands, command => Assert.StartsWith("SELECT ", command.Sql));
+            await ReportQueryPlanAsync(context, capture.Commands[0]);
+            Assert.Equal(0, await counterQuery.SingleAsync());
+            Assert.Equal(all.Length, await context.Database.SqlQuery<int>($"""
+                SELECT count(*)::int AS "Value" FROM financial_documents.documents WHERE source_id = ANY ({ids})
+                """).SingleAsync());
+            await VerifyArchiveSnapshotsAsync();
+
+            async Task VerifyArchiveSnapshotsAsync()
+            {
+                var rows = await queries.ListIssuedAsync(start, end, 501, CancellationToken.None);
+                Assert.Equal(500, rows.Count);
+                for (var index = 0; index < rows.Count; index++)
+                {
+                    AssertDocumentSnapshot(issued[index], rows[index]);
+                }
+            }
+        }
+        finally
+        {
+            await DeleteDocumentsBySourceAsync(ids);
+        }
+    }
+
+    private async Task VerifyArchiveResponsesAsync(
+        WebApplicationFactory<Program> app, AccessSessionSnapshot session,
+        ArchiveCommandCapture capture, FinancialDocument[] issued)
+    {
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"),
+            AllowAutoRedirect = false
+        });
+        const string scheme = CookieAuthenticationDefaults.AuthenticationScheme;
+        var cookie = app.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get(scheme);
+        var ticket = new AuthenticationTicket(AccessClaimsPrincipalFactory.Create(session, scheme), scheme);
+        client.DefaultRequestHeaders.Add("Cookie",
+            $"{cookie.Cookie.Name}={cookie.TicketDataFormat.Protect(ticket)}");
+        var html = await client.GetStringAsync("/Admin/Exports");
+        var token = Regex.Match(html,
+            "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+        Assert.NotEmpty(token);
+        capture.Commands.Clear();
+
+        var expectedNames = issued.Select(item => $"doklad-o-uhrade-{item.DocumentNumber}.pdf");
+        using var process = Process.GetCurrentProcess();
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            var allocated = GC.GetTotalAllocatedBytes(precise: true);
+            var timer = Stopwatch.StartNew();
+            using var form = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = token,
+                ["ArchiveMonth"] = "2110-01"
+            });
+            using var response = await client.PostAsync("/Admin/Exports?handler=FinancialDocuments", form);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("application/zip", response.Content.Headers.ContentType?.MediaType);
+            var data = await response.Content.ReadAsByteArrayAsync();
+            timer.Stop();
+            process.Refresh();
+            _output.WriteLine($"Synthetic ZIP {attempt}: docs=500, disk/archive bytes={data.Length}, HTTP ms={timer.ElapsedMilliseconds}, process managed allocated delta={GC.GetTotalAllocatedBytes(precise: true) - allocated}, process peak working set bytes={process.PeakWorkingSet64}");
+            using var archive = new ZipArchive(new MemoryStream(data));
+            Assert.Equal(expectedNames, archive.Entries.Select(item => item.FullName));
+            foreach (var entry in new[] { archive.Entries[0], archive.Entries[1], archive.Entries[^1] })
+            {
+                using var pdfBytes = new MemoryStream();
+                await using var pdfSource = entry.Open();
+                await pdfSource.CopyToAsync(pdfBytes);
+                pdfBytes.Position = 0;
+                using var pdf = PdfReader.Open(pdfBytes, PdfDocumentOpenMode.Import);
+                Assert.Equal(1, pdf.PageCount);
+                Assert.Contains(entry.Name["doklad-o-uhrade-".Length..^4], pdf.Info.Title, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    private async Task ReportQueryPlanAsync(
+        FuaPayDbContext context, (string Sql, (string Name, object Value)[] Parameters) sample)
+    {
+        await context.Database.OpenConnectionAsync();
+        await using var explain = new NpgsqlCommand("EXPLAIN (ANALYZE, BUFFERS) " + sample.Sql,
+            (NpgsqlConnection)context.Database.GetDbConnection());
+        foreach (var parameter in sample.Parameters)
+        {
+            explain.Parameters.AddWithValue(parameter.Name, parameter.Value);
+        }
+
+        await using var reader = await explain.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            _output.WriteLine(reader.GetString(0));
+        }
+    }
+
+    private sealed class ArchiveTestSession(AccessSessionSnapshot session) : IAccessSessionQueries
+    {
+        public Task<AccessSessionSnapshot?> FindAsync(
+            Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<AccessSessionSnapshot?>(userId == session.UserId ? session : null);
+    }
+
+    private sealed class ArchiveCommandCapture : DbCommandInterceptor
+    {
+        public List<(string Sql, (string Name, object Value)[] Parameters)> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Capture(command);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            Capture(command);
+            return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        public override ValueTask<InterceptionResult<object>> ScalarExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<object> result,
+            CancellationToken cancellationToken = default)
+        {
+            Capture(command);
+            return base.ScalarExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        private void Capture(DbCommand command) =>
+            Commands.Add((command.CommandText, command.Parameters.Cast<DbParameter>()
+                .Select(item => (item.ParameterName, item.Value!)).ToArray()));
     }
 
     private async Task PersistAsync(

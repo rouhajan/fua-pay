@@ -53,4 +53,56 @@
             <button type="submit" asp-page-handler="Reconciliation" class="secondary-button">Účetní ČSOB reconciliation</button>
         </div>
     </form>
+
+    <form method="post" asp-page-handler="FinancialDocuments" class="data-panel form-stack">
+        <div class="data-panel-header">
+            <h2>Doklady o úhradě (ZIP)</h2>
+        </div>
+        <p class="context-note">
+            Vyberte měsíc nebo vyplňte obě data. Doklady se vybírají podle data vystavení v časovém pásmu Europe/Prague.
+        </p>
+        <div class="filter-grid">
+            <label>
+                <span>Měsíc</span>
+                <input asp-for="ArchiveMonth" type="month" />
+            </label>
+            <label>
+                <span>Datum vystavení od (včetně)</span>
+                <input asp-for="ArchiveFrom" type="date" />
+            </label>
+            <label>
+                <span>Datum vystavení do (včetně)</span>
+                <input asp-for="ArchiveTo" type="date" />
+            </label>
+        </div>
+        @if (Model.ArchiveMessage is not null)
+        {
+            <p role="status">@Model.ArchiveMessage</p>
+        }
+        <div class="form-actions">
+            <button type="submit" class="secondary-button">Stáhnout doklady (ZIP)</button>
+        </div>
+    </form>
+
+    <form method="post" asp-page-handler="AccountingWorkbook" class="data-panel form-stack">
+        <div class="data-panel-header">
+            <h2>Účetní výkaz (XLSX)</h2>
+        </div>
+        <p class="context-note">
+            Zvolte měsíc. Pro vlastní rozsah vymažte měsíc a zadejte obě data včetně.
+            Období se vyhodnocuje v časovém pásmu Europe/Prague.
+        </p>
+        <div class="filter-grid">
+            <label><span>Měsíc</span><input asp-for="WorkbookMonth" type="month" /></label>
+            <label><span>Od data včetně</span><input asp-for="WorkbookFrom" type="date" /></label>
+            <label><span>Do data včetně</span><input asp-for="WorkbookTo" type="date" /></label>
+        </div>
+        @if (Model.WorkbookMessage is not null)
+        {
+            <p role="status">@Model.WorkbookMessage</p>
+        }
+        <div class="form-actions">
+            <button type="submit" class="secondary-button">Stáhnout účetní výkaz</button>
+        </div>
+    </form>
 </section>
